@@ -4,10 +4,16 @@
 //! Code generation for Varlink interfaces.
 
 use anyhow::{Context, Result};
+use std::{
+    fs,
+    path::Path,
+};
 use zlink::idl::Interface;
 
 mod codegen;
 pub use codegen::CodeGenerator;
+mod error;
+pub use self::error::Error;
 
 /// Generate Rust code from a Varlink interface.
 pub fn generate_interface(interface: &Interface<'_>) -> Result<String> {
@@ -68,4 +74,139 @@ pub fn format_code(code: &str) -> Result<String> {
     }
 
     String::from_utf8(output.stdout).context("Failed to parse rustfmt output")
+}
+
+/// Configuration options for Varlink code generation.
+///
+/// This struct provides fine-grained control over the code generation process,
+/// allowing customization of output formatting and other generation behaviors.
+///
+/// # Examples
+///
+/// ## Basic usage with default options
+/// ```
+/// use zlink_codegen::CodegenOptions;
+///
+/// let options = CodegenOptions::default();
+/// ```
+///
+/// ## Enable rustfmt formatting
+/// ```
+/// use zlink_codegen::CodegenOptions;
+///
+/// let options = CodegenOptions {
+///     rustfmt: true,
+///     ..Default::default()
+/// };
+/// ```
+#[derive(Default)]
+pub struct CodegenOptions {
+    /// Whether to format the generated Rust code using `rustfmt`.
+    ///
+    /// Default value: false
+    pub rustfmt: bool,
+    /// The output directory for the generated file.
+    pub output_directory: Option<String>,
+    // TODO: Add other options for controlling the generated code. For example, an option to
+    // specify the integer type (see https://github.com/zeenix/zlink/issues/109).
+}
+
+/// Generate a Rust source file from a Varlink interface file.
+///
+/// This function reads a Varlink interface definition file, parses it, generates
+/// corresponding Rust code, and writes the output to a `.rs` file in the same directory.
+/// It's designed to be used in `build.rs` scripts for compile-time code generation.
+///
+/// # Arguments
+///
+/// * `interface_file` - Path to the Varlink interface file (typically with `.varlink` extension).
+/// * `config` - Code generation options, including whether to format with rustfmt.
+///
+/// # Output File Naming
+///
+/// The output file is generated in the same directory as the input file with:
+/// - The same base name as the input file (without extension).
+/// - Dots replaced with underscores and converted to lowercase.
+///
+/// For example: `com.example.Service.varlink` → `com_example_service.rs`
+///
+/// # Returns
+///
+/// Returns `Ok(true)` on successful code generation and file writing.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - `Error::InvalidArgument` - The input path is invalid or cannot be processed.
+/// - `Error::CodegenFailed` - Code generation encounters an error.
+/// - `Error::FormatFailed` - rustfmt formatting fails (when `config.rustfmt` is true).
+/// - `Error::Io` - File I/O operations fail (reading input or writing output).
+/// - `Error::Parse` - The Varlink interface definition is malformed or invalid.
+///
+/// # Examples
+///
+/// ```no_run
+/// extern crate zlink_codegen;
+///
+/// fn main() {
+///     zlink_codegen::generate_file(
+///         "src/io.systemd.UserDatabase.varlink",
+///         &zlink_codegen::CodegenOptions {
+///             rustfmt: true,
+///             ..Default::default()
+///         },
+///     );
+/// }
+/// ```
+pub fn generate_file<P>(interface_file: &P, config: &CodegenOptions) -> Result<bool, Error>
+where
+    P: AsRef<Path> + ?Sized,
+{
+    let input_path = interface_file.as_ref();
+    let input_path_no_ext = input_path.with_extension("");
+    let output_filename = input_path_no_ext
+        .file_name()
+        .ok_or(Error::InvalidArgument)?
+        .to_str()
+        .ok_or(Error::InvalidArgument)?
+        .replace('.', "_")
+        .to_lowercase();
+    // If no output directory is specified use the source directory.
+    let output_dir: &Path = match &config.output_directory {
+        Some(o) => o.as_ref(),
+        None => input_path.parent().ok_or(Error::InvalidArgument)?,
+    };
+    let output_path = output_dir.join(Path::new(&output_filename).with_extension("rs"));
+
+    // Read from input file
+    let content = fs::read_to_string(input_path)?;
+
+    // Parse and generate the interface
+    let interface = Interface::try_from(content.as_str())?;
+    let mut output = match generate_interface(&interface) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!(
+                "Failed to generate code for interface {}: {e}",
+                interface.name()
+            );
+            return Err(Error::CodegenFailed)
+        },
+    };
+
+    // Format the code
+    if config.rustfmt {
+        output = match format_code(&output) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("Failed to format code: {e}");
+                return Err(Error::FormatFailed)
+            },
+        }
+    }
+
+    // Write output to file.
+    fs::write(&output_path, output)?;
+
+    Ok(true)
 }
