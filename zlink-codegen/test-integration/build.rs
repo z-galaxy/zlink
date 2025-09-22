@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, path::PathBuf};
 
 fn main() {
     // Get the manifest directory.
@@ -7,40 +7,28 @@ fn main() {
     // Process all IDL files.
     let idl_files = ["test.idl", "calc.idl", "storage.idl", "camelcase.idl"];
 
-    // Read all IDL file contents first (they need to stay alive for Interface lifetimes).
-    let mut contents = Vec::new();
-    for idl_file in &idl_files {
-        let idl_path = PathBuf::from(&manifest_dir).join(idl_file);
+    // Build paths to IDL files and output file
+    let idl_paths: Vec<PathBuf> = idl_files.iter()
+        .map(|idl_file| PathBuf::from(&manifest_dir).join(idl_file))
+        .collect();
 
-        // Tell cargo to rerun if the IDL file changes.
+    // Tell cargo to rerun if any IDL file changes.
+    for idl_path in &idl_paths {
         println!("cargo:rerun-if-changed={}", idl_path.display());
-
-        let content = fs::read_to_string(&idl_path)
-            .unwrap_or_else(|_| panic!("Failed to read IDL file: {}", idl_path.display()));
-
-        contents.push(content);
     }
-
-    // Parse all interfaces.
-    let mut interfaces = Vec::new();
-    for content in &contents {
-        let interface: zlink::idl::Interface = content
-            .as_str()
-            .try_into()
-            .expect("Failed to parse IDL file");
-
-        interfaces.push(interface);
-    }
-
-    // Generate code for all interfaces.
-    let generated_code =
-        zlink_codegen::generate_interfaces(&interfaces).expect("Failed to generate code");
-
-    // Format the generated code if rustfmt is available.
-    let formatted_code = zlink_codegen::format_code(&generated_code).unwrap_or(generated_code);
 
     // Write generated code to OUT_DIR.
     let out_dir = env::var("OUT_DIR").unwrap();
-    let out_path = PathBuf::from(&out_dir).join("generated.rs");
-    fs::write(&out_path, formatted_code).expect("Failed to write generated code");
+    let output_file = PathBuf::from(out_dir).join("generated.rs");
+
+    // Generate all files at once
+    let idl_path_refs: Vec<&PathBuf> = idl_paths.iter().collect();
+    zlink_codegen::generate_files(
+        &idl_path_refs,
+        &output_file,
+        &zlink_codegen::CodegenOptions {
+            rustfmt: true,
+            ..Default::default()
+        },
+    ).expect("Failed to generate code");
 }
