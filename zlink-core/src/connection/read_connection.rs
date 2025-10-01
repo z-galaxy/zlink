@@ -136,7 +136,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     }
 
     // Reads at least one full message from the socket and return a single message bytes.
-    pub(super) async fn read_message_bytes(&mut self) -> Result<&'_ [u8]> {
+    async fn read_message_bytes(&mut self) -> Result<&'_ [u8]> {
         self.read_from_socket().await?;
 
         // Unwrap is safe because `read_from_socket` call above ensures at least one null byte in
