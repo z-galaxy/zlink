@@ -86,15 +86,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<mayheap::Error> for Error {
-    fn from(e: mayheap::Error) -> Self {
-        match e {
-            mayheap::Error::BufferOverflow => Error::BufferOverflow,
-            mayheap::Error::Utf8Error(e) => Error::InvalidUtf8(e),
-        }
-    }
-}
-
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {

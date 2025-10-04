@@ -41,7 +41,6 @@ clap = { version = "4.0", features = ["derive"] }
 colored = "3.0"
 tempfile = "3.8"
 serde_json = "1.0"
-mayheap = { git = "https://github.com/zeenix/mayheap", version = "0.2.0" }
 tracing-subscriber = "0.3.19"
 
 [[example]]

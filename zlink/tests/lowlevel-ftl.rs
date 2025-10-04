@@ -276,10 +276,7 @@ impl Service for Ftl {
                 MethodReply::Single(Some(Reply::Ftl(FtlReply::Coordinates(coords))))
             }
             Method::VarlinkSrv(VarlinkSrvMethod::GetInfo) => {
-                let mut interfaces = mayheap::Vec::new();
-                for interface in INTERFACES {
-                    interfaces.push(interface).unwrap();
-                }
+                let interfaces = Vec::from_iter(INTERFACES.iter().cloned());
                 let info = Info::new(VENDOR, PRODUCT, VERSION, URL, interfaces);
 
                 MethodReply::Single(Some(Reply::VarlinkSrv(VarlinkSrvReply::Info(info))))

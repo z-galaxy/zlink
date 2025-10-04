@@ -579,15 +579,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mayheap"
-version = "0.2.0"
-source = "git+https://github.com/zeenix/mayheap#cc19d195121018d25ce43f9be08fb328551d247f"
-dependencies = [
- "heapless",
- "serde",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1382,7 +1373,6 @@ dependencies = [
  "clap",
  "colored",
  "futures-util",
- "mayheap",
  "serde",
  "serde-prefix-all",
  "serde_json",
@@ -1415,7 +1405,6 @@ dependencies = [
  "defmt",
  "futures-util",
  "indexmap",
- "mayheap",
  "memchr",
  "pin-project-lite",
  "serde",

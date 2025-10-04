@@ -124,7 +124,7 @@ mod tests {
         let variants = [&var1, &var2, &var3];
 
         let custom_enum = CustomEnum::new("Status", &variants, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
         assert_eq!(
             displayed,
@@ -139,7 +139,7 @@ mod tests {
         let var2 = EnumVariant::new_owned("inactive", vec![]);
         let custom_enum = CustomEnum::new_owned("Status", vec![var1, var2], vec![]);
 
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
         assert_eq!(
             displayed,
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(custom_enum.comments().count(), 1);
 
         // Test display output includes both enum and variant comments
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
 
         // Should contain enum comment
@@ -191,7 +191,7 @@ mod tests {
         let variants_no_comments = [&var1, &var2, &var3];
 
         let enum_no_comments = CustomEnum::new("Color", &variants_no_comments, &[]);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", enum_no_comments).unwrap();
         assert_eq!(displayed, "type Color (red, green, blue)");
 
@@ -208,7 +208,7 @@ mod tests {
         ];
 
         let enum_with_comments = CustomEnum::new("Color", &variants_with_comments, &[]);
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", enum_with_comments).unwrap();
         assert_eq!(
             displayed,

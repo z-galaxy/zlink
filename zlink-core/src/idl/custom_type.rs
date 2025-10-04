@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(custom_obj.fields().count(), 2);
 
         // Check the fields individually - order and values.
-        let fields = custom_obj.fields().collect::<mayheap::Vec<_, 8>>();
+        let fields = custom_obj.fields().collect::<Vec<_>>();
         assert_eq!(fields[0].name(), "x");
         assert_eq!(fields[0].ty(), &idl::Type::Float);
         assert_eq!(fields[1].name(), "y");
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(custom_enum.variants().count(), 3);
 
         // Check the variants individually - order and values.
-        let variants = custom_enum.variants().collect::<mayheap::Vec<_, 8>>();
+        let variants = custom_enum.variants().collect::<Vec<_>>();
         assert_eq!(variants[0].name(), "red");
         assert_eq!(variants[1].name(), "green");
         assert_eq!(variants[2].name(), "blue");
@@ -159,7 +159,7 @@ mod tests {
         let custom_obj = CustomObject::new("Point", &fields, &[]);
         let custom_type = idl::CustomType::from(custom_obj);
         use core::fmt::Write;
-        let mut buf = mayheap::String::<64>::new();
+        let mut buf = String::new();
         write!(buf, "{}", custom_type).unwrap();
         assert_eq!(buf.as_str(), "type Point (x: int, y: int)");
     }
@@ -176,7 +176,7 @@ mod tests {
         let custom_enum = CustomEnum::new("Direction", DIRECTION_VARIANTS, &[]);
         let custom_type = idl::CustomType::from(custom_enum);
         use core::fmt::Write;
-        let mut buf = mayheap::String::<128>::new();
+        let mut buf = String::new();
         write!(buf, "{}", custom_type).unwrap();
         assert_eq!(buf.as_str(), "type Direction (north, south, east, west)");
     }
@@ -191,7 +191,7 @@ mod tests {
         let custom_obj = CustomObject::new_owned("Person", fields, vec![]);
         assert_eq!(custom_obj.name(), "Person");
         use core::fmt::Write;
-        let mut buf = mayheap::String::<64>::new();
+        let mut buf = String::new();
         write!(buf, "{}", custom_obj).unwrap();
         assert_eq!(buf.as_str(), "type Person (name: string, age: int)");
 
@@ -206,7 +206,7 @@ mod tests {
             vec![],
         );
         assert_eq!(custom_enum.name(), "Size");
-        let mut buf = mayheap::String::<64>::new();
+        let mut buf = String::new();
         write!(buf, "{}", custom_enum).unwrap();
         assert_eq!(buf.as_str(), "type Size (small, medium, large)");
     }

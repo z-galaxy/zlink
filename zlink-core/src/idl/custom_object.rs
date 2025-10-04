@@ -102,7 +102,7 @@ mod tests {
         let fields = [&name_field, &age_field];
 
         let custom_object = CustomObject::new("User", &fields, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_object).unwrap();
         assert_eq!(
             displayed,

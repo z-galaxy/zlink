@@ -23,9 +23,6 @@ serde_json = { version = "1.0.139", default-features = false, features = ["std" 
 serde-json-core = { version = "0.6.0", default-features = false, features = [
     "heapless",
 ], optional = true }
-mayheap = { git = "https://github.com/zeenix/mayheap", version = "0.2.0", features = [
-    "serde", "alloc",
-], default-features = false }
 memchr = { version = "2.7.4", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",

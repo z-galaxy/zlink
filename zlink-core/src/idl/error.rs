@@ -104,7 +104,7 @@ mod tests {
         assert!(!error.has_no_fields());
 
         // Check the fields individually - order and values.
-        let fields_vec: mayheap::Vec<_, 8> = error.fields().collect();
+        let fields_vec: Vec<_> = error.fields().collect();
         assert_eq!(fields_vec[0].name(), "message");
         assert_eq!(fields_vec[0].ty(), &Type::String);
         assert_eq!(fields_vec[1].name(), "code");
@@ -132,7 +132,7 @@ mod tests {
         let fields = [&message_field, &code_field];
 
         let error = Error::new("AuthError", &fields, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", error).unwrap();
         assert_eq!(
             displayed,

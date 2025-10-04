@@ -54,7 +54,7 @@ mod tests {
     fn comment_display() {
         let comment = Comment::new("A enum field allowing to gracefully get metadata");
         use core::fmt::Write;
-        let mut buf = mayheap::String::<128>::new();
+        let mut buf = String::new();
         write!(buf, "{}", comment).unwrap();
         assert_eq!(
             buf.as_str(),

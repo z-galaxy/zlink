@@ -82,12 +82,6 @@ impl<'a, T> From<Vec<T>> for List<'a, T> {
     }
 }
 
-impl<'a, T, const N: usize> From<mayheap::Vec<T, N>> for List<'a, T> {
-    fn from(vec: mayheap::Vec<T, N>) -> Self {
-        List::Owned(vec.into())
-    }
-}
-
 impl<'a, T> From<&'a [&'a T]> for List<'a, T> {
     fn from(slice: &'a [&'a T]) -> Self {
         List::Borrowed(slice)
@@ -128,9 +122,9 @@ mod tests {
         assert!(!list.is_empty());
 
         let expected = ["one", "two", "three"];
-        let mut actual = mayheap::Vec::<&str, 8>::new();
+        let mut actual = Vec::<&str>::new();
         for item in list.iter() {
-            actual.push(*item).unwrap();
+            actual.push(*item);
         }
         assert_eq!(actual.as_slice(), &expected);
     }

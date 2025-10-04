@@ -4,9 +4,9 @@
 
 use std::borrow::Cow;
 
-use mayheap::Vec;
 use serde::{Deserialize, Serialize};
 use serde_prefix_all::prefix_all;
+use std::vec::Vec;
 use zlink::{
     idl::{self, Comment, Interface, Parameter},
     introspect::{self, CustomType, ReplyError as _, Type},
@@ -52,7 +52,7 @@ pub enum MachineMethod<'a> {
         #[serde(rename = "rootDirectory")]
         root_directory: Option<&'a str>,
         #[serde(rename = "ifIndices")]
-        if_indices: Option<Vec<u64, 32>>,
+        if_indices: Option<Vec<u64>>,
         #[serde(rename = "vSockCid")]
         v_sock_cid: Option<u64>,
         #[serde(rename = "sshAddress")]
@@ -100,8 +100,8 @@ pub enum MachineMethod<'a> {
         mode: MachineOpenMode,
         user: Option<&'a str>,
         path: Option<&'a str>,
-        args: Option<Vec<&'a str, 32>>,
-        environment: Option<Vec<&'a str, 32>>,
+        args: Option<Vec<&'a str>>,
+        environment: Option<Vec<&'a str>>,
     },
 }
 
@@ -140,9 +140,9 @@ pub struct ListReply<'a> {
     pub ssh_address: Option<&'a str>,
     #[serde(rename = "sshPrivateKeyPath")]
     pub ssh_private_key_path: Option<&'a str>,
-    pub addresses: Option<Vec<Address, 32>>,
+    pub addresses: Option<Vec<Address>>,
     #[serde(rename = "OSRelease")]
-    pub os_release: Option<Vec<&'a str, 32>>,
+    pub os_release: Option<Vec<&'a str>>,
     #[serde(rename = "UIDShift")]
     pub uid_shift: Option<u64>,
 }
@@ -193,7 +193,7 @@ pub struct Timestamp {
 pub struct Address {
     pub ifindex: Option<u64>,
     pub family: i64,
-    pub address: Vec<u64, 32>,
+    pub address: Vec<u64>,
 }
 
 impl Service for MockMachinedService {
@@ -218,7 +218,7 @@ impl Service for MockMachinedService {
                     "org.varlink.service",
                 ];
                 for interface in interface_list {
-                    interfaces.push(interface).unwrap();
+                    interfaces.push(interface);
                 }
 
                 let info = Info::new(

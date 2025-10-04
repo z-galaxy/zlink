@@ -99,7 +99,7 @@ mod tests {
         let comments = [&comment1, &comment2];
 
         let field = Field::new("email", &Type::String, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", field).unwrap();
         assert_eq!(
             displayed,

@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(variant.name(), "active");
         assert!(!variant.has_comments());
 
-        let mut displayed = mayheap::String::<32>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "active");
     }
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(variant.name(), "active");
         assert!(variant.has_comments());
 
-        let mut displayed = mayheap::String::<64>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# The active state\nactive");
     }
@@ -104,7 +104,7 @@ mod tests {
         assert!(variant.has_comments());
         assert_eq!(variant.comments().count(), 2);
 
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# First comment\n# Second comment\ncomplex");
     }
@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(variant.name(), "owned");
         assert!(variant.has_comments());
 
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# Owned comment 1\n# Owned comment 2\nowned");
     }

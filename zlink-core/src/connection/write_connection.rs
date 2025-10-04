@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use mayheap::Vec;
+use alloc::vec::Vec;
 use serde::Serialize;
 
 use super::{socket::WriteHalf, Call, Reply, BUFFER_SIZE};
@@ -18,7 +18,7 @@ use super::{socket::WriteHalf, Call, Reply, BUFFER_SIZE};
 #[derive(Debug)]
 pub struct WriteConnection<Write: WriteHalf> {
     socket: Write,
-    buffer: Vec<u8, BUFFER_SIZE>,
+    buffer: Vec<u8>,
     pos: usize,
     id: usize,
 }
@@ -29,7 +29,7 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         Self {
             socket,
             id,
-            buffer: Vec::from_slice(&[0; BUFFER_SIZE]).unwrap(),
+            buffer: Vec::new(),
             pos: 0,
         }
     }
@@ -162,7 +162,7 @@ impl<Write: WriteHalf> WriteConnection<Write> {
             return Err(crate::Error::BufferOverflow);
         }
 
-        self.buffer.extend_from_slice(&[0; BUFFER_SIZE])?;
+        self.buffer.extend_from_slice(&[0; BUFFER_SIZE]);
 
         Ok(())
     }
@@ -205,7 +205,7 @@ mod tests {
             1;
         let mut write_conn = WriteConnection::new(TestWriteHalf::new(WRITE_LEN), 1);
         // An item that serializes into `> BUFFER_SIZE * 2` bytes.
-        let item: Vec<u8, BUFFER_SIZE> = Vec::from_slice(&[0u8; BUFFER_SIZE]).unwrap();
+        let item: Vec<u8> = vec![0u8; BUFFER_SIZE];
         write_conn.write(&item).await.unwrap();
         assert_eq!(write_conn.buffer.len(), BUFFER_SIZE * 3);
         assert_eq!(write_conn.pos, 0); // Reset after flush.
@@ -245,7 +245,7 @@ mod tests {
         let initial_len = write_conn.buffer.len();
 
         // Fill up the buffer.
-        let large_item: Vec<u8, BUFFER_SIZE> = Vec::from_slice(&[0u8; BUFFER_SIZE]).unwrap();
+        let large_item: Vec<u8> = vec![0u8; BUFFER_SIZE];
         write_conn.enqueue(&large_item).unwrap();
 
         assert!(write_conn.buffer.len() > initial_len);

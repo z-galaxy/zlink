@@ -9,7 +9,7 @@ use super::{
     socket::ReadHalf,
     Call, BUFFER_SIZE, MAX_BUFFER_SIZE,
 };
-use mayheap::Vec;
+use alloc::vec::Vec;
 use memchr::memchr;
 use serde::Deserialize;
 
@@ -24,7 +24,7 @@ pub struct ReadConnection<Read: ReadHalf> {
     socket: Read,
     read_pos: usize,
     msg_pos: usize,
-    buffer: Vec<u8, BUFFER_SIZE>,
+    buffer: Vec<u8>,
     id: usize,
 }
 
@@ -36,7 +36,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             read_pos: 0,
             msg_pos: 0,
             id,
-            buffer: Vec::from_slice(&[0; BUFFER_SIZE]).unwrap(),
+            buffer: alloc::vec![0; BUFFER_SIZE],
         }
     }
 

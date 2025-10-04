@@ -1,6 +1,6 @@
 #[cfg(feature = "introspection")]
 use crate::introspect::Type;
-use mayheap::Vec;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Information about a Varlink service implementation.
@@ -19,7 +19,7 @@ pub struct Info<'a> {
     /// The URL associated with the service.
     pub url: &'a str,
     /// List of interfaces provided by the service.
-    pub interfaces: Vec<&'a str, 8>,
+    pub interfaces: Vec<&'a str>,
 }
 
 impl<'a> Info<'a> {
@@ -29,7 +29,7 @@ impl<'a> Info<'a> {
         product: &'a str,
         version: &'a str,
         url: &'a str,
-        interfaces: Vec<&'a str, 8>,
+        interfaces: Vec<&'a str>,
     ) -> Self {
         Self {
             vendor,
@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn serialization() {
         let mut interfaces = Vec::new();
-        interfaces.push("com.example.test").unwrap();
+        interfaces.push("com.example.test");
 
         let info = Info::new(
             "Test Vendor",
@@ -88,8 +88,8 @@ mod tests {
     #[test]
     fn round_trip_serialization() {
         let mut interfaces = Vec::new();
-        interfaces.push("com.example.test").unwrap();
-        interfaces.push("com.example.other").unwrap();
+        interfaces.push("com.example.test");
+        interfaces.push("com.example.other");
 
         let original = Info::new(
             "Test Vendor",

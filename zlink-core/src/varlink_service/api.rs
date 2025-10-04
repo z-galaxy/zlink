@@ -1,4 +1,4 @@
-use mayheap::string::String;
+use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "introspection")]
@@ -50,22 +50,22 @@ pub enum Error {
     /// The requested interface was not found.
     InterfaceNotFound {
         /// The interface that was not found.
-        interface: String<MAX_INTERFACE_NAME_LENGTH>,
+        interface: String,
     },
     /// The requested method was not found.
     MethodNotFound {
         /// The method that was not found.
-        method: String<MAX_METHOD_NAME_LENGTH>,
+        method: String,
     },
     /// The interface defines the requested method, but the service does not implement it.
     MethodNotImplemented {
         /// The method that is not implemented.
-        method: String<MAX_METHOD_NAME_LENGTH>,
+        method: String,
     },
     /// One of the passed parameters is invalid.
     InvalidParameter {
         /// The parameter that is invalid.
-        parameter: String<MAX_PARAMETER_NAME_LENGTH>,
+        parameter: String,
     },
     /// Client is denied access.
     PermissionDenied,
@@ -106,10 +106,6 @@ impl core::fmt::Display for Error {
 
 /// Result type for Varlink service methods.
 pub type Result<T> = core::result::Result<T, Error>;
-
-const MAX_INTERFACE_NAME_LENGTH: usize = 64;
-const MAX_METHOD_NAME_LENGTH: usize = 64;
-const MAX_PARAMETER_NAME_LENGTH: usize = 24;
 
 #[cfg(test)]
 mod tests {
@@ -201,8 +197,8 @@ mod tests {
     }
 
     // Helper function to serialize Error to JSON string, abstracting std vs nostd differences
-    fn serialize_error(err: &Error) -> mayheap::string::String<256> {
-        mayheap::string::String::from_str(&serde_json::to_string(err).unwrap()).unwrap()
+    fn serialize_error(err: &Error) -> String {
+        serde_json::to_string(err).unwrap()
     }
 
     // Helper function to deserialize JSON string to Error, abstracting std vs nostd differences
