@@ -94,7 +94,7 @@ jobs:
       - name: Build and Test
         run: |
           cargo test --release --all-features
-          cargo test -p zlink-core --release --no-default-features --features serde-json-core,idl-parse,proxy,defmt
+          cargo test -p zlink-core --release --no-default-features --features idl-parse,proxy,defmt
 
   doc_build:
     runs-on: ubuntu-latest
