@@ -3,7 +3,6 @@
 use super::Call;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "std")]
 mod std {
     use serde_json::Value;
 
@@ -312,7 +311,7 @@ mod std {
     #[test]
     fn comprehensive_service_methods() {
         // Demonstrates a complete service with multiple method types
-        let methods = vec![
+        let methods = alloc::vec![
             TestServiceMethods::Simple,
             TestServiceMethods::Method {
                 name: "complete",
@@ -412,110 +411,5 @@ mod std {
         let json2 = serde_json::to_string(&deserialized).unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json2).unwrap();
         assert_eq!(parsed, parsed2);
-    }
-}
-
-#[cfg(not(feature = "std"))]
-mod embedded {
-    use super::*;
-    use serde_json_core;
-
-    // Embedded service methods using structs (serde-json-core doesn't support enums).
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    struct SimpleMethod<'a> {
-        method: &'a str,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    struct ComplexMethod<'a> {
-        method: &'a str,
-        parameters: MethodParams<'a>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    struct GetInfoMethod<'a> {
-        method: &'a str,
-        parameters: GetInfoParams,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    struct MethodParams<'a> {
-        name: &'a str,
-        value: i32,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    struct GetInfoParams {
-        id: u32,
-    }
-
-    #[test]
-    fn serialize_call_embedded() {
-        let method = SimpleMethod {
-            method: "org.example.test.Simple",
-        };
-        let call = Call::new(method).set_oneway(true);
-
-        let mut buf = [0u8; 256];
-        let json_len = serde_json_core::to_slice(&call, &mut buf).unwrap();
-        let json_str = core::str::from_utf8(&buf[..json_len]).unwrap();
-
-        // Verify the JSON contains expected parts.
-        assert!(json_str.contains(r#""method":"org.example.test.Simple""#));
-        assert!(json_str.contains(r#""oneway":true"#));
-    }
-
-    #[test]
-    fn deserialize_call_embedded() {
-        // Test roundtrip serialization/deserialization
-        let original_method = GetInfoMethod {
-            method: "org.example.test.GetInfo",
-            parameters: GetInfoParams { id: 123 },
-        };
-        let original_call = Call::new(original_method).set_more(true);
-
-        let mut buf = [0u8; 256];
-        let json_len = serde_json_core::to_slice(&original_call, &mut buf).unwrap();
-        let deserialized: Call<GetInfoMethod<'_>> =
-            serde_json_core::from_slice(&buf[..json_len]).unwrap().0;
-
-        assert_eq!(deserialized.method().method, original_call.method().method);
-        assert_eq!(
-            deserialized.method().parameters.id,
-            original_call.method().parameters.id
-        );
-        assert_eq!(deserialized.oneway(), false);
-        assert_eq!(deserialized.more(), true);
-        assert_eq!(deserialized.upgrade(), false);
-    }
-
-    #[test]
-    fn roundtrip_serialization_embedded() {
-        let method = ComplexMethod {
-            method: "org.example.test.Method",
-            parameters: MethodParams {
-                name: "embedded",
-                value: 99,
-            },
-        };
-        let original = Call::new(method).set_upgrade(true);
-
-        let mut buf = [0u8; 256];
-        let json_len = serde_json_core::to_slice(&original, &mut buf).unwrap();
-        let deserialized: Call<ComplexMethod<'_>> =
-            serde_json_core::from_slice(&buf[..json_len]).unwrap().0;
-
-        assert_eq!(original.method().method, deserialized.method().method);
-        assert_eq!(
-            original.method().parameters.name,
-            deserialized.method().parameters.name
-        );
-        assert_eq!(
-            original.method().parameters.value,
-            deserialized.method().parameters.value
-        );
-        assert_eq!(original.oneway(), deserialized.oneway());
-        assert_eq!(original.more(), deserialized.more());
-        assert_eq!(original.upgrade(), deserialized.upgrade());
     }
 }

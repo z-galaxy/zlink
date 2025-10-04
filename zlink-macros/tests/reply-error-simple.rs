@@ -41,20 +41,8 @@ mod tests {
 
     // Helper function for round-trip serialization test, abstracting std vs nostd differences
     fn round_trip_serialize(original: &SimpleError) {
-        #[cfg(feature = "std")]
-        {
-            let json = serde_json::to_string(original).unwrap();
-            let deserialized: SimpleError = serde_json::from_str(&json).unwrap();
-            assert_eq!(*original, deserialized);
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let mut buffer = [0u8; 256];
-            let len = serde_json_core::to_slice(original, &mut buffer).unwrap();
-            let json_bytes = &buffer[..len];
-            let (deserialized, _): (SimpleError, usize) =
-                serde_json_core::from_slice(json_bytes).unwrap();
-            assert_eq!(*original, deserialized);
-        }
+        let json = serde_json::to_string(original).unwrap();
+        let deserialized: SimpleError = serde_json::from_str(&json).unwrap();
+        assert_eq!(*original, deserialized);
     }
 }

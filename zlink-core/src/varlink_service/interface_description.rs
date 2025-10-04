@@ -4,6 +4,8 @@ use crate::idl::Interface;
 #[cfg(feature = "introspection")]
 use crate::introspect::Type;
 #[cfg(feature = "idl-parse")]
+use alloc::string::String;
+#[cfg(feature = "idl-parse")]
 use serde::Deserialize;
 use serde::Serialize;
 

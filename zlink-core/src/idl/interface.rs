@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 #[cfg(feature = "idl-parse")]
 use crate::Error;
 
@@ -41,7 +43,6 @@ impl<'a> Interface<'a> {
     }
 
     /// Creates a new interface with the given name, owned collections, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         methods: Vec<super::Method<'a>>,
@@ -258,6 +259,8 @@ error ExpectedMore ()
     #[cfg(feature = "idl-parse")]
     #[test]
     fn systemd_resolved_interface_parsing() {
+        use alloc::vec::Vec;
+
         use crate::idl::{parse, CustomObject, CustomType, TypeRef};
 
         // Manually construct the systemd-resolved interface for comparison.

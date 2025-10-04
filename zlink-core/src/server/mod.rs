@@ -114,8 +114,6 @@ where
                             let reader = readers.remove(idx);
                             let writer = writers.remove(idx);
 
-                            #[cfg(not(feature = "std"))]
-                            drop(reply_stream_futures);
                             if let Some(stream) = stream.map(|s| ReplyStream::new(s, reader, writer)) {
                                 reply_streams
                                     .push(stream)
@@ -125,8 +123,6 @@ where
                 }
                 // 3. Read replies from the reply streams and send them off.
                 reply = reply_stream_select_all.fuse() => {
-                    #[cfg(not(feature = "std"))]
-                    drop(reply_stream_futures);
                     let (idx, reply) = reply;
                     last_reply_stream_winner = Some(idx);
                     let id = reply_streams.get(idx).unwrap().conn.id();

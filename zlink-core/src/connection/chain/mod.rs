@@ -260,7 +260,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "serde_json")]
     #[tokio::test]
     async fn heterogeneous_calls() -> crate::Result<()> {
         // Types for heterogeneous calls test

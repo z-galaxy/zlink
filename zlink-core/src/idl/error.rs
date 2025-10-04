@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{Comment, Field, List};
 
 /// An error definition in Varlink IDL.
@@ -31,7 +33,6 @@ impl<'a> Error<'a> {
 
     /// Creates a new error with the given name, owned fields, and comments.
     /// Same as `new` but takes `fields` by value.
-    #[cfg(feature = "std")]
     pub fn new_owned(name: &'a str, fields: Vec<Field<'a>>, comments: Vec<Comment<'a>>) -> Self {
         Self {
             name,

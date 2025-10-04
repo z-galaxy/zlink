@@ -76,6 +76,8 @@ impl<'a> fmt::Display for CustomType<'a> {
 #[cfg(test)]
 #[cfg(feature = "introspection")]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::{
         idl::{self, EnumVariant, Field},
@@ -100,7 +102,6 @@ mod tests {
         assert_eq!(fields[1].ty(), &idl::Type::Float);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn enum_creation() {
         let red = EnumVariant::new_owned("red", vec![]);
@@ -134,7 +135,6 @@ mod tests {
         assert!(custom_type.as_enum().is_none());
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn type_from_enum() {
         let red = EnumVariant::new_owned("red", vec![]);
@@ -181,7 +181,6 @@ mod tests {
         assert_eq!(buf.as_str(), "type Direction (north, south, east, west)");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn owned_types() {
         // Test owned object

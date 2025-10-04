@@ -12,10 +12,6 @@ proxy = ["zlink-core/proxy"]
 idl = ["zlink-core/idl"]
 idl-parse = ["zlink-core/idl-parse"]
 introspection = ["zlink-core/introspection"]
-io-buffer-2kb = ["zlink-core/io-buffer-2kb"]
-io-buffer-4kb = ["zlink-core/io-buffer-4kb"]
-io-buffer-16kb = ["zlink-core/io-buffer-16kb"]
-io-buffer-1mb = ["zlink-core/io-buffer-1mb"]
 
 [dependencies]
 zlink-core = { path = "../zlink-core", version = "=0.1.1" }

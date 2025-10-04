@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{EnumVariant, List};
 
 /// An enum type definition in Varlink IDL (enum-like with named variants).
@@ -30,7 +32,6 @@ impl<'a> CustomEnum<'a> {
     }
 
     /// Creates a new enum type with the given name, owned variants, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         variants: Vec<EnumVariant<'a>>,
@@ -105,6 +106,8 @@ impl<'a> PartialEq for CustomEnum<'a> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::idl::{Comment, EnumVariant};
     use core::fmt::Write;
@@ -129,7 +132,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn display_with_variant_comments() {
         let var_comment = Comment::new("The active state");
@@ -145,7 +147,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
     #[test_log::test]
     fn comprehensive_enum_with_per_variant_comments() {
         // Test enum-level comments plus per-variant comments

@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{Comment, List, Parameter};
 
 /// A method definition in Varlink IDL.
@@ -34,7 +36,6 @@ impl<'a> Method<'a> {
     }
 
     /// Creates a new method with the given name, owned parameters, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         inputs: Vec<Parameter<'a>>,

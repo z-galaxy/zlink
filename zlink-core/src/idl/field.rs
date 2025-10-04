@@ -30,8 +30,7 @@ impl<'a> Field<'a> {
 
     /// Same as `new` but takes `ty` by value.
     /// Creates a new field with the given name, owned type, and comments.
-    #[cfg(feature = "std")]
-    pub fn new_owned(name: &'a str, ty: Type<'a>, comments: Vec<Comment<'a>>) -> Self {
+    pub fn new_owned(name: &'a str, ty: Type<'a>, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
         Self {
             name,
             ty: TypeRef::new_owned(ty),

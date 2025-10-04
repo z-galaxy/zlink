@@ -312,24 +312,7 @@ where
     }
 }
 
-#[cfg(feature = "io-buffer-1mb")]
-pub(crate) const BUFFER_SIZE: usize = 1024 * 1024;
-#[cfg(all(not(feature = "io-buffer-1mb"), feature = "io-buffer-16kb"))]
-pub(crate) const BUFFER_SIZE: usize = 16 * 1024;
-#[cfg(all(
-    not(feature = "io-buffer-1mb"),
-    not(feature = "io-buffer-16kb"),
-    feature = "io-buffer-4kb"
-))]
-pub(crate) const BUFFER_SIZE: usize = 4 * 1024;
-#[cfg(all(
-    not(feature = "io-buffer-1mb"),
-    not(feature = "io-buffer-16kb"),
-    not(feature = "io-buffer-4kb"),
-))]
-pub(crate) const BUFFER_SIZE: usize = 4 * 1024;
-
-#[cfg(feature = "std")]
+pub(crate) const BUFFER_SIZE: usize = 1024;
 const MAX_BUFFER_SIZE: usize = 100 * 1024 * 1024; // Don't allow buffers over 100MB.
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);

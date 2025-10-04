@@ -16,8 +16,7 @@ use super::{
     Method, Parameter, Type, TypeRef,
 };
 
-#[cfg(feature = "std")]
-use std::vec::Vec;
+use alloc::{format, vec::Vec};
 
 /// Parse whitespace and comments according to Varlink grammar.
 /// The `_` production in Varlink grammar: whitespace / comment / eol_r
@@ -538,6 +537,8 @@ fn parse_from_str<'a, T>(
     input: &'a str,
     parser: impl Fn(&mut &'a [u8]) -> ModalResult<T, InputError<&'a [u8]>>,
 ) -> Result<T, crate::Error> {
+    use alloc::string::ToString;
+
     let input_bytes = input.trim().as_bytes();
     if input_bytes.is_empty() {
         return Err(crate::Error::IdlParse("Input is empty".to_string()));

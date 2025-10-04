@@ -23,8 +23,7 @@ impl<'a> EnumVariant<'a> {
     }
 
     /// Creates a new enum variant with the given name and owned comments.
-    #[cfg(feature = "std")]
-    pub fn new_owned(name: &'a str, comments: Vec<Comment<'a>>) -> Self {
+    pub fn new_owned(name: &'a str, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
         Self {
             name,
             comments: List::from(comments),
@@ -110,10 +109,9 @@ mod tests {
         assert_eq!(displayed, "# First comment\n# Second comment\ncomplex");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn owned_variant_with_comments() {
-        let comments = vec![
+        let comments = alloc::vec![
             Comment::new("Owned comment 1"),
             Comment::new("Owned comment 2"),
         ];

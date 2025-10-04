@@ -1,17 +1,14 @@
 #[cfg(feature = "introspection")]
 use crate::introspect::Type;
 use mayheap::Vec;
-#[cfg(feature = "std")]
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Information about a Varlink service implementation.
 ///
 /// This is the return type for the `GetInfo` method of the `org.varlink.service` interface.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "introspection", derive(Type))]
 #[cfg_attr(feature = "introspection", zlink(crate = "crate"))]
-#[cfg_attr(feature = "std", derive(Deserialize))]
 pub struct Info<'a> {
     /// The vendor of the service.
     pub vendor: &'a str,
@@ -61,22 +58,12 @@ mod tests {
             interfaces,
         );
 
-        #[cfg(feature = "std")]
         let json = serde_json::to_string(&info).unwrap();
-        #[cfg(not(feature = "std"))]
-        let json = {
-            use mayheap::string::String;
-            let mut buffer = [0u8; 256];
-            let len = serde_json_core::to_slice(&info, &mut buffer).unwrap();
-            let vec = mayheap::Vec::<_, 256>::from_slice(&buffer[..len]).unwrap();
-            String::<256>::from_utf8(vec).unwrap()
-        };
 
         assert!(json.contains("Test Vendor"));
         assert!(json.contains("com.example.test"));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn deserialization() {
         let json = r#"{
@@ -98,7 +85,6 @@ mod tests {
         assert_eq!(info.interfaces[1], "com.example.other");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn round_trip_serialization() {
         let mut interfaces = Vec::new();

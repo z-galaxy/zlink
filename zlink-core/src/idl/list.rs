@@ -1,7 +1,6 @@
 //! List type for holding either borrowed or owned collections.
 
-#[cfg(feature = "std")]
-use std::vec::Vec;
+use alloc::vec::Vec;
 
 /// A list that can be either borrowed or owned.
 ///
@@ -12,7 +11,6 @@ pub enum List<'a, T> {
     /// Borrowed slice of references, useful for const contexts.
     Borrowed(&'a [&'a T]),
     /// Owned vector, used for deserialization.
-    #[cfg(feature = "std")]
     Owned(Vec<T>),
 }
 
@@ -21,7 +19,6 @@ impl<'a, T> List<'a, T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         match self {
             List::Borrowed(slice) => ListIter::Borrowed(slice.iter()),
-            #[cfg(feature = "std")]
             List::Owned(vec) => ListIter::Owned(vec.iter()),
         }
     }
@@ -30,7 +27,6 @@ impl<'a, T> List<'a, T> {
     pub fn len(&self) -> usize {
         match self {
             List::Borrowed(slice) => slice.len(),
-            #[cfg(feature = "std")]
             List::Owned(vec) => vec.len(),
         }
     }
@@ -44,13 +40,11 @@ impl<'a, T> List<'a, T> {
     pub const fn as_borrowed(&self) -> Option<&[&T]> {
         match self {
             List::Borrowed(slice) => Some(slice),
-            #[cfg(feature = "std")]
             List::Owned(_) => None,
         }
     }
 
     /// The owned vector of values if this list is owned.
-    #[cfg(feature = "std")]
     pub fn as_owned(&self) -> Option<&Vec<T>> {
         match self {
             List::Borrowed(_) => None,
@@ -62,7 +56,6 @@ impl<'a, T> List<'a, T> {
 /// Iterator over list items.
 enum ListIter<'a, T> {
     Borrowed(core::slice::Iter<'a, &'a T>),
-    #[cfg(feature = "std")]
     Owned(core::slice::Iter<'a, T>),
 }
 
@@ -72,7 +65,6 @@ impl<'a, T> Iterator for ListIter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             ListIter::Borrowed(iter) => iter.next().copied(),
-            #[cfg(feature = "std")]
             ListIter::Owned(iter) => iter.next(),
         }
     }
@@ -84,14 +76,12 @@ impl<'a, T> Default for List<'a, T> {
     }
 }
 
-#[cfg(feature = "std")]
 impl<'a, T> From<Vec<T>> for List<'a, T> {
     fn from(vec: Vec<T>) -> Self {
         List::Owned(vec)
     }
 }
 
-#[cfg(feature = "std")]
 impl<'a, T, const N: usize> From<mayheap::Vec<T, N>> for List<'a, T> {
     fn from(vec: mayheap::Vec<T, N>) -> Self {
         List::Owned(vec.into())
@@ -119,6 +109,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
 
     #[test]
@@ -140,7 +135,6 @@ mod tests {
         assert_eq!(actual.as_slice(), &expected);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn list_owned() {
         let vec = vec!["one".to_string(), "two".to_string(), "three".to_string()];
@@ -162,22 +156,16 @@ mod tests {
         static REFS: [&'static &str; 3] = [&ITEM_ONE, &ITEM_TWO, &ITEM_THREE];
         let borrowed_list: List<'_, &str> = List::Borrowed(&REFS);
 
-        #[cfg(feature = "std")]
-        {
-            let owned_list: List<'_, &str> = List::Owned(vec!["one", "two", "three"]);
-            assert_eq!(borrowed_list, owned_list);
-            assert_eq!(owned_list, borrowed_list);
-        }
+        let owned_list: List<'_, &str> = List::Owned(vec!["one", "two", "three"]);
+        assert_eq!(borrowed_list, owned_list);
+        assert_eq!(owned_list, borrowed_list);
 
         // Test that lists with different content are not equal
         static OTHER_REFS: [&'static &str; 2] = [&ITEM_ONE, &ITEM_TWO];
         let different_borrowed: List<'_, &str> = List::Borrowed(&OTHER_REFS);
         assert_ne!(borrowed_list, different_borrowed);
 
-        #[cfg(feature = "std")]
-        {
-            let different_owned: List<'_, &str> = List::Owned(vec!["one", "two"]);
-            assert_ne!(borrowed_list, different_owned);
-        }
+        let different_owned: List<'_, &str> = List::Owned(vec!["one", "two"]);
+        assert_ne!(borrowed_list, different_owned);
     }
 }

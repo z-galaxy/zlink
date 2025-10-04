@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{Field, List};
 
 /// An object type definition in Varlink IDL (struct-like with named fields).
@@ -30,7 +32,6 @@ impl<'a> CustomObject<'a> {
     }
 
     /// Creates a new object type with the given name, owned fields, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         fields: Vec<Field<'a>>,

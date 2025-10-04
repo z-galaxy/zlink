@@ -9,10 +9,7 @@ fn primitive_type() {
     assert_eq!(*i32::TYPE, idl::Type::Int);
     assert_eq!(*f64::TYPE, idl::Type::Float);
     assert_eq!(*<&str>::TYPE, idl::Type::String);
-    #[cfg(feature = "std")]
-    {
-        assert_eq!(*String::TYPE, idl::Type::String);
-    }
+    assert_eq!(*String::TYPE, idl::Type::String);
 }
 
 #[test]
@@ -23,7 +20,6 @@ fn optional_type() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn array_type() {
     use std::vec::Vec;
@@ -33,7 +29,6 @@ fn array_type() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn complex_type() {
     use std::vec::Vec;
@@ -47,7 +42,6 @@ fn complex_type() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn map_types() {
     use std::collections::{BTreeMap, HashMap};
@@ -64,7 +58,6 @@ fn map_types() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn set_types() {
     use std::collections::{BTreeSet, HashSet};
@@ -81,7 +74,6 @@ fn set_types() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn smart_pointer_types() {
     use std::{boxed::Box, rc::Rc, sync::Arc};
@@ -95,7 +87,6 @@ fn smart_pointer_types() {
     assert_eq!(*<Rc<i32>>::TYPE, idl::Type::Int);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn cell_types() {
     use std::cell::{Cell, RefCell};
@@ -131,7 +122,6 @@ fn core_time_types() {
     assert_eq!(*<core::time::Duration>::TYPE, idl::Type::Float);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn std_time_types() {
     use std::time::{Instant, SystemTime};
@@ -140,7 +130,6 @@ fn std_time_types() {
     assert_eq!(*<SystemTime>::TYPE, idl::Type::Float);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn path_types() {
     use std::path::{Path, PathBuf};
@@ -149,7 +138,6 @@ fn path_types() {
     assert_eq!(*<Path>::TYPE, idl::Type::String);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn osstring_types() {
     use std::ffi::{OsStr, OsString};

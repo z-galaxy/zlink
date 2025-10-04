@@ -27,7 +27,7 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 
 - **Async-first design**: Built on async/await for efficient concurrent operations.
 - **Type safety**: Leverage Rust's type system with derive macros and code generation.
-- **No-std support**: Run on embedded systems without heap allocation.
+- **No-std support**: Run on embedded systems.
 - **Multiple transports**: Unix domain sockets and (upcoming) USB support.
 - **Code generation**: Generate Rust code from Varlink IDL files.
 
@@ -37,7 +37,7 @@ The zlink project consists of several subcrates:
 
 - **[`zlink`]**: The main unified API crate that re-exports functionality based on enabled features.
   This is the only crate you will want to use directly in your application and services.
-- **[`zlink-core`]**: Core no-std/no-alloc foundation providing essential Varlink types and traits.
+- **[`zlink-core`]**: Core no-std foundation providing essential Varlink types and traits.
 - **[`zlink-macros`]**: Contains the attribute and derive macros.
 - **[`zlink-tokio`]**: `Tokio`-based transport implementations and runtime integration.
 - **[`zlink-codegen`]**: Code generation tool for creating Rust bindings from Varlink IDL files.

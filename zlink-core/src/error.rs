@@ -13,20 +13,22 @@ pub enum Error {
     /// Invalid UTF-8 data.
     InvalidUtf8(Utf8Error),
     /// Error serializing or deserializing to/from JSON.
-    #[cfg(feature = "std")]
+    #[cfg(feature = "serde_json")]
     Json(serde_json::Error),
     /// Error serialization to JSON.
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(feature = "serde_json"))]
     JsonSerialize(serde_json_core::ser::Error),
     /// Error deserialization from JSON.
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(feature = "serde_json"))]
     JsonDeserialize(serde_json_core::de::Error),
     /// An I/O error.
     #[cfg(feature = "std")]
     Io(std::io::Error),
+    /// Unexpected end of file/stream.
+    UnexpectedEof,
     /// An error occurred while parsing IDL.
     #[cfg(feature = "idl-parse")]
-    IdlParse(String),
+    IdlParse(alloc::string::String),
     /// Missing required parameters.
     MissingParameters,
     /// A general service error.
@@ -39,11 +41,11 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl core::error::Error for Error {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            #[cfg(feature = "std")]
+            #[cfg(feature = "serde_json")]
             Error::Json(e) => Some(e),
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonSerialize(e) => Some(e),
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonDeserialize(e) => Some(e),
             #[cfg(feature = "std")]
             Error::Io(e) => Some(e),
@@ -56,21 +58,21 @@ impl core::error::Error for Error {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "serde_json")]
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Json(e)
     }
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(not(feature = "serde_json"))]
 impl From<serde_json_core::ser::Error> for Error {
     fn from(e: serde_json_core::ser::Error) -> Self {
         Error::JsonSerialize(e)
     }
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(not(feature = "serde_json"))]
 impl From<serde_json_core::de::Error> for Error {
     fn from(e: serde_json_core::de::Error) -> Self {
         Error::JsonDeserialize(e)
@@ -100,14 +102,15 @@ impl core::fmt::Display for Error {
             Error::SocketWrite => write!(f, "An error occurred while writing to the socket"),
             Error::BufferOverflow => write!(f, "Buffer overflow"),
             Error::InvalidUtf8(e) => write!(f, "Invalid UTF-8 data: {e}"),
-            #[cfg(feature = "std")]
+            #[cfg(feature = "serde_json")]
             Error::Json(e) => write!(f, "Error serializing or deserializing to/from JSON: {e}"),
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonSerialize(e) => write!(f, "Error serializing to JSON: {e}"),
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonDeserialize(e) => write!(f, "Error deserializing from JSON: {e}"),
             #[cfg(feature = "std")]
             Error::Io(e) => write!(f, "I/O error: {e}"),
+            Error::UnexpectedEof => write!(f, "Unexpected end of file/stream"),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(e) => write!(f, "IDL parse error: {e}"),
             Error::MissingParameters => write!(f, "Missing required parameters"),
@@ -128,16 +131,17 @@ impl defmt::Format for Error {
             }
             Error::BufferOverflow => defmt::write!(fmt, "Buffer overflow"),
             Error::InvalidUtf8(_) => defmt::write!(fmt, "Invalid UTF-8 data"),
-            #[cfg(feature = "std")]
+            #[cfg(feature = "serde_json")]
             Error::Json(_) => {
                 defmt::write!(fmt, "Error serializing or deserializing to/from JSON")
             }
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonSerialize(_) => defmt::write!(fmt, "Error serializing to JSON"),
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "serde_json"))]
             Error::JsonDeserialize(_) => defmt::write!(fmt, "Error deserializing from JSON"),
             #[cfg(feature = "std")]
             Error::Io(_) => defmt::write!(fmt, "I/O error"),
+            Error::UnexpectedEof => defmt::write!(fmt, "I/O error"),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(_) => defmt::write!(fmt, "IDL parse error"),
             Error::MissingParameters => defmt::write!(fmt, "Missing required parameters"),

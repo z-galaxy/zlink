@@ -1,7 +1,6 @@
 use super::Type;
+use alloc::boxed::Box;
 use core::{fmt, ops::Deref};
-#[cfg(feature = "std")]
-use std::boxed::Box;
 
 /// A type reference that can be either borrowed or owned.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +13,6 @@ impl<'a> TypeRef<'a> {
     }
 
     /// Creates a new type reference with an owned type.
-    #[cfg(feature = "std")]
     pub fn new_owned(inner: Type<'a>) -> Self {
         Self(TypeRefInner::Owned(Box::new(inner)))
     }
@@ -48,7 +46,6 @@ impl<'a> PartialEq<Type<'a>> for TypeRef<'a> {
 #[derive(Debug, Clone, Eq)]
 enum TypeRefInner<'a> {
     Borrowed(&'a Type<'a>),
-    #[cfg(feature = "std")]
     Owned(Box<Type<'a>>),
 }
 
@@ -57,7 +54,6 @@ impl<'a> TypeRefInner<'a> {
     const fn ty(&self) -> &Type<'a> {
         match self {
             TypeRefInner::Borrowed(inner) => inner,
-            #[cfg(feature = "std")]
             TypeRefInner::Owned(inner) => inner,
         }
     }
