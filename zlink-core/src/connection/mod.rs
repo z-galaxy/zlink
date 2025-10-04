@@ -312,7 +312,7 @@ where
     }
 }
 
-pub(crate) const BUFFER_SIZE: usize = 1024;
+pub(crate) const BUFFER_SIZE: usize = 256;
 const MAX_BUFFER_SIZE: usize = 100 * 1024 * 1024; // Don't allow buffers over 100MB.
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
