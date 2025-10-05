@@ -86,7 +86,7 @@ where
                 res = self.get_next_call(
                     // SAFETY: `readers` is not invalidated or dropped until the output of this
                     // future is dropped.
-                    unsafe { &mut *(&mut readers as *mut _) },
+                    unsafe { &mut *(&mut readers as *mut Vec<_>) },
                     last_method_call_winner.map(|idx| idx + 1),
                 ).fuse() => {
                         let (idx, call) = res?;
@@ -156,9 +156,9 @@ where
     /// * A Result, containing a method call if reading was successful.
     async fn get_next_call<'r>(
         &mut self,
-        readers: &'r mut Vec<
-            ReadConnection<<<Listener as crate::Listener>::Socket as Socket>::ReadHalf>,
-        >,
+        readers: &'r mut [ReadConnection<
+            <<Listener as crate::Listener>::Socket as Socket>::ReadHalf,
+        >],
         start_index: Option<usize>,
     ) -> crate::Result<(usize, crate::Result<Call<Service::MethodCall<'r>>>)> {
         let mut read_futures: Vec<_> = readers.iter_mut().map(|r| r.receive_call()).collect();
