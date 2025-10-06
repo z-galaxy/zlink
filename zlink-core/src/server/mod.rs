@@ -107,8 +107,8 @@ where
                             let reader = readers.remove(idx);
                             let writer = writers.remove(idx);
 
-                            if let Some(stream) = stream.map(|s| ReplyStream::new(s, reader, writer)) {
-                                reply_streams.push(stream);
+                            if let Some(stream) = stream {
+                                reply_streams.push(ReplyStream::new(stream, reader, writer));
                             }
                         }
                 }
@@ -116,13 +116,11 @@ where
                 reply = reply_stream_select_all.fuse() => {
                     let (idx, reply) = reply;
                     last_reply_stream_winner = Some(idx);
-                    let id = reply_streams.get(idx).unwrap().conn.id();
+                    let id = reply_streams[idx].conn.id();
 
                     match reply {
                         Some(reply) => {
-                            if let Err(e) = reply_streams
-                                .get_mut(idx)
-                                .unwrap()
+                            if let Err(e) = reply_streams[idx]
                                 .conn
                                 .write_mut()
                                 .send_reply(&reply)
