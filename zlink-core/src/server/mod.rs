@@ -8,7 +8,7 @@ use select_all::SelectAll;
 use service::MethodReply;
 
 use crate::{
-    connection::{ReadConnection, Socket, WriteConnection},
+    connection::{Socket, WriteConnection},
     Call, Connection, Reply,
 };
 
@@ -59,8 +59,7 @@ where
     /// [`tokio::select!`]: https://docs.rs/tokio/latest/tokio/macro.select.html
     pub async fn run(mut self) -> crate::Result<()> {
         let mut listener = self.listener.take().unwrap();
-        let mut readers = Vec::new();
-        let mut writers = Vec::new();
+        let mut connections = Vec::new();
         let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
@@ -77,16 +76,13 @@ where
             futures_util::select_biased! {
                 // 1. Accept a new connection.
                 conn = listener.accept().fuse() => {
-                    let conn = conn?;
-                    let (read, write) = conn.split();
-                    readers.push(read);
-                    writers.push(write);
+                    connections.push(conn?);
                 }
                 // 2. Read method calls from the existing connections and handle them.
                 res = self.get_next_call(
-                    // SAFETY: `readers` is not invalidated or dropped until the output of this
-                    // future is dropped.
-                    unsafe { &mut *(&mut readers as *mut Vec<_>) },
+                    // SAFETY: `connections` is not invalidated or dropped until the output of
+                    // this future is dropped.
+                    unsafe { &mut *(&mut connections as *mut Vec<_>) },
                     last_method_call_winner.map(|idx| idx + 1),
                 ).fuse() => {
                         let (idx, call) = res?;
@@ -95,20 +91,21 @@ where
                         let mut stream = None;
                         let mut remove = true;
                         match call {
-                            Ok(call) => match self.handle_call(call, &mut writers[idx]).await {
-                                Ok(None) => remove = false,
-                                Ok(Some(s)) => stream = Some(s),
-                                Err(e) => warn!("Error writing to connection: {:?}", e),
-                            },
+                            Ok(call) => {
+                                match self.handle_call(call, connections[idx].write_mut()).await {
+                                    Ok(None) => remove = false,
+                                    Ok(Some(s)) => stream = Some(s),
+                                    Err(e) => warn!("Error writing to connection: {:?}", e),
+                                }
+                            }
                             Err(e) => warn!("Error reading from socket: {:?}", e),
                         }
 
                         if stream.is_some() || remove {
-                            let reader = readers.swap_remove(idx);
-                            let writer = writers.swap_remove(idx);
+                            let conn = connections.swap_remove(idx);
 
                             if let Some(stream) = stream {
-                                reply_streams.push(ReplyStream::new(stream, reader, writer));
+                                reply_streams.push(ReplyStream::new(stream, conn));
                             }
                         }
                 }
@@ -133,10 +130,7 @@ where
                         None => {
                             trace!("Stream closed for client {}", id);
                             let stream = reply_streams.swap_remove(idx);
-
-                            let (read, write) = stream.conn.split();
-                            readers.push(read);
-                            writers.push(write);
+                            connections.push(stream.conn);
                         }
                     }
                 }
@@ -150,16 +144,17 @@ where
     ///
     /// On success, this method returns a tuple containing:
     ///
-    /// * The index of the reader that yielded a call.
+    /// * The index of the connection that yielded a call.
     /// * A Result, containing a method call if reading was successful.
     async fn get_next_call<'r>(
         &mut self,
-        readers: &'r mut [ReadConnection<
-            <<Listener as crate::Listener>::Socket as Socket>::ReadHalf,
-        >],
+        connections: &'r mut [Connection<Listener::Socket>],
         start_index: Option<usize>,
     ) -> crate::Result<(usize, crate::Result<Call<Service::MethodCall<'r>>>)> {
-        let mut read_futures: Vec<_> = readers.iter_mut().map(|r| r.receive_call()).collect();
+        let mut read_futures: Vec<_> = connections
+            .iter_mut()
+            .map(|c| c.read_mut().receive_call())
+            .collect();
         let mut select_all = SelectAll::new(start_index);
         for future in &mut read_futures {
             // Safety: `future` is in fact `Unpin` but the compiler doesn't know that.
@@ -204,14 +199,7 @@ impl<St, Sock> ReplyStream<St, Sock>
 where
     Sock: Socket,
 {
-    fn new(
-        stream: St,
-        read_conn: ReadConnection<Sock::ReadHalf>,
-        write_conn: WriteConnection<Sock::WriteHalf>,
-    ) -> Self {
-        Self {
-            stream,
-            conn: Connection::join(read_conn, write_conn),
-        }
+    fn new(stream: St, conn: Connection<Sock>) -> Self {
+        Self { stream, conn }
     }
 }
