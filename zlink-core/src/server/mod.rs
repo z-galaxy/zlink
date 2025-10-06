@@ -104,8 +104,8 @@ where
                         }
 
                         if stream.is_some() || remove {
-                            let reader = readers.remove(idx);
-                            let writer = writers.remove(idx);
+                            let reader = readers.swap_remove(idx);
+                            let writer = writers.swap_remove(idx);
 
                             if let Some(stream) = stream {
                                 reply_streams.push(ReplyStream::new(stream, reader, writer));
@@ -127,12 +127,12 @@ where
                                 .await
                             {
                                 warn!("Error writing to client {}: {:?}", id, e);
-                                reply_streams.remove(idx);
+                                reply_streams.swap_remove(idx);
                             }
                         }
                         None => {
                             trace!("Stream closed for client {}", id);
-                            let stream = reply_streams.remove(idx);
+                            let stream = reply_streams.swap_remove(idx);
 
                             let (read, write) = stream.conn.split();
                             readers.push(read);
