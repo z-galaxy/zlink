@@ -210,3 +210,74 @@ where
 
     Ok(true)
 }
+
+/// Generate a Rust source file from multiple Varlink interface files.
+///
+/// This function reads multiple Varlink interface definition files, parses them,
+/// generates corresponding Rust code using `generate_interfaces()`, and writes
+/// the combined output to a single `.rs` file.
+///
+/// # Arguments
+///
+/// * `interface_files` - Vector of paths to Varlink interface files.
+/// * `output_file` - Path where the generated Rust code will be written.
+/// * `config` - Code generation options, including whether to format with rustfmt.
+///
+/// # Returns
+///
+/// Returns `Ok(true)` on successful code generation and file writing.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - `Error::InvalidArgument` - Any input path is invalid or cannot be processed.
+/// - `Error::CodegenFailed` - Code generation encounters an error.
+/// - `Error::FormatFailed` - rustfmt formatting fails (when `config.rustfmt` is true).
+/// - `Error::Io` - File I/O operations fail (reading input or writing output).
+/// - `Error::Parse` - Any Varlink interface definition is malformed or invalid.
+pub fn generate_files<P>(
+    interface_files: &[&P],
+    output_file: &P,
+    config: &CodegenOptions,
+) -> Result<bool, Error>
+where
+    P: AsRef<Path> + ?Sized,
+{
+    // Read and parse all interface files
+    let mut file_contents = Vec::new();
+    for interface_file in interface_files {
+        let content = fs::read_to_string(interface_file.as_ref())?;
+        file_contents.push(content);
+    }
+
+    let mut interfaces = Vec::new();
+    for content in &file_contents {
+        let interface = Interface::try_from(content.as_str())?;
+        interfaces.push(interface);
+    }
+
+    // Generate code for all interfaces
+    let mut output = match generate_interfaces(&interfaces) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Failed to generate code for interfaces: {e}");
+            return Err(Error::CodegenFailed);
+        }
+    };
+
+    // Format the code if requested
+    if config.rustfmt {
+        output = match format_code(&output) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("Failed to format code: {e}");
+                return Err(Error::FormatFailed);
+            }
+        };
+    }
+
+    // Write output to file
+    fs::write(output_file.as_ref(), output)?;
+
+    Ok(true)
+}
