@@ -52,8 +52,7 @@ mod tests {
             .to_string(),
             // Test Unknown error (no fields).
             json!({
-                "error": "test.Example.Unknown",
-                "parameters": {}
+                "error": "test.Example.Unknown"
             })
             .to_string(),
         ];

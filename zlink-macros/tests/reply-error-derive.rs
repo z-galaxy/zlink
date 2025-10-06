@@ -138,24 +138,23 @@ mod tests {
     }
 
     #[test]
-    fn field_order_requirements_with_lifetimes() {
-        // For enums with lifetimes, we require error before parameters
+    fn field_order_agnostic_with_lifetimes() {
+        // With alloc available, we no longer require a specific field order
+
+        // Parameters-first JSON should now work
         let json_parameters_first = r#"{"parameters":{"field":"test","reason":"fail"},"error":"com.example.Test.InvalidInput"}"#;
-
-        // Parameters-first JSON should fail to deserialize
         let result: Result<TestError, _> = serde_json::from_str(json_parameters_first);
-        match result {
-            Err(e) if e.is_data() => {
-                // Expected - our custom deserializer error becomes a "data" error in serde_json
-                // This confirms the field order validation is working
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            TestError::InvalidInput {
+                field: "test",
+                reason: "fail"
             }
-            Err(_) => panic!("Expected a data error for field order violation"),
-            Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
-        }
+        );
 
-        // But error before parameters works fine
+        // Error-first JSON also works
         let json_error_first = r#"{"error":"com.example.Test.InvalidInput","parameters":{"field":"test","reason":"fail"}}"#;
-
         let result: Result<TestError, _> = serde_json::from_str(json_error_first);
         assert!(result.is_ok());
         assert_eq!(
@@ -175,24 +174,23 @@ mod tests {
     }
 
     #[test]
-    fn field_order_requirements_without_lifetimes() {
-        // For enums without lifetimes, we now also require error field first for simplicity
+    fn field_order_agnostic_without_lifetimes() {
+        // With alloc available, we no longer require a specific field order
+
+        // Parameters-first JSON should now work
         let json_parameters_first = r#"{"parameters":{"field":"test","reason":"fail"},"error":"com.example.Owned.InvalidInput"}"#;
-
-        // Parameters-first JSON should fail to deserialize
         let result: Result<OwnedError, _> = serde_json::from_str(json_parameters_first);
-        match result {
-            Err(e) if e.is_data() => {
-                // Expected - our custom deserializer error becomes a "data" error in serde_json
-                // This confirms the field order validation is working
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            OwnedError::InvalidInput {
+                field: "test".to_string(),
+                reason: "fail".to_string()
             }
-            Err(_) => panic!("Expected a data error for field order violation"),
-            Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
-        }
+        );
 
-        // But error before parameters works fine
+        // Error-first JSON also works
         let json_error_first = r#"{"error":"com.example.Owned.InvalidInput","parameters":{"field":"test","reason":"fail"}}"#;
-
         let result: Result<OwnedError, _> = serde_json::from_str(json_error_first);
         assert!(result.is_ok());
         assert_eq!(
