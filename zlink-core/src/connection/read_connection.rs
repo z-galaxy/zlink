@@ -78,36 +78,24 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         ReplyParams: Deserialize<'r> + Debug,
         ReplyError: Deserialize<'r> + Debug,
     {
-        let id = self.id;
-        let buffer = self.read_message_bytes().await?;
-
-        // First, check if the message has an "error" field to determine how to deserialize.
-        // FIXME: This will mean the document will be parsed twice. We should instead try to
-        // quickly check if `error` field is present and then parse to the appropriate type based on
-        // that information. Perhaps a simple parser using `winnow`?
-        let error_name = extract_error_name(buffer);
-        if error_name.is_some() {
-            // SAFETY: If an error name was successfully extracted, it is safe to assume that the
-            // buffer contains valid UTF-8 data.
-            unsafe { log_message(buffer, id) };
+        #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum ReplyMsg<ReplyParams, ReplyError> {
+            Varlink(varlink_service::Error),
+            Error(ReplyError),
+            Reply(Reply<ReplyParams>),
         }
-        match error_name {
-            Some(error_name) if error_name.starts_with(varlink_service::INTERFACE_NAME) => {
-                // Varlink service interface error need to be returned as the top-level error.
-                Err(crate::Error::VarlinkService(from_slice::<
-                    varlink_service::Error,
-                >(buffer)?))
-            }
-            Some(_) => from_slice::<ReplyError>(buffer).map(Err),
-            None => {
-                // It's a success response.
-                let ret = from_slice::<Reply<ReplyParams>>(buffer).map(Ok);
-                // SAFETY: Since the parsing from JSON already succeeded, we can be sure that the
-                // buffer contains a valid UTF-8 string.
-                unsafe { log_message(buffer, id) };
-                debug!("connection {}: received reply: {:?}", id, ret);
 
-                ret
+        match self
+            .read_message::<ReplyMsg<ReplyParams, ReplyError>>()
+            .await?
+        {
+            // Varlink service interface error need to be returned as the top-level error.
+            ReplyMsg::Varlink(e) => Err(crate::Error::VarlinkService(e)),
+            ReplyMsg::Error(e) => Ok(Err(e)),
+            ReplyMsg::Reply(reply) => {
+                // It's a success response.
+                Ok(Ok(reply))
             }
         }
     }
@@ -123,20 +111,14 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     where
         Method: Deserialize<'m> + Debug,
     {
-        let id = self.id;
-        let buffer = self.read_message_bytes().await?;
-
-        let call = from_slice::<Call<Method>>(buffer)?;
-        // SAFETY: Since the parsing from JSON already succeeded, we can be sure that the
-        // buffer contains a valid UTF-8 string.
-        unsafe { log_message(buffer, id) };
-        debug!("connection {}: received a call: {:?}", id, call);
-
-        Ok(call)
+        self.read_message::<Call<Method>>().await
     }
 
     // Reads at least one full message from the socket and return a single message bytes.
-    async fn read_message_bytes(&mut self) -> Result<&'_ [u8]> {
+    async fn read_message<'m, M>(&'m mut self) -> Result<M>
+    where
+        M: Deserialize<'m> + Debug,
+    {
         self.read_from_socket().await?;
 
         // Unwrap is safe because `read_from_socket` call above ensures at least one null byte in
@@ -151,7 +133,17 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             self.msg_pos = null_index + 1;
         }
 
-        Ok(buffer)
+        match from_slice::<M>(buffer) {
+            Ok(msg) => {
+                // SAFETY: Since the parsing from JSON already succeeded, we can be sure that the
+                // buffer contains a valid UTF-8 string.
+                trace!("connection {}: received a message: {}", self.id, unsafe {
+                    from_utf8_unchecked(buffer)
+                });
+                Ok(msg)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // Reads at least one full message from the socket.
@@ -201,29 +193,4 @@ where
     T: Deserialize<'a>,
 {
     serde_json::from_slice::<T>(buffer).map_err(Into::into)
-}
-
-/// If the buffer contains a JSON object with an "error" field, this function will fetch it.
-fn extract_error_name(buffer: &[u8]) -> Option<&str> {
-    #[derive(Deserialize)]
-    struct Error<'a> {
-        error: &'a str,
-    }
-    from_slice::<Error<'_>>(buffer)
-        .ok()
-        .map(|error| error.error)
-}
-
-/// Logs a message received by the connection.
-///
-/// # Safety
-///
-/// The buffer must be a valid UTF-8 string.
-#[inline(always)]
-unsafe fn log_message(buffer: &[u8], connection_id: usize) {
-    trace!(
-        "connection {}: received a message: {}",
-        connection_id,
-        unsafe { from_utf8_unchecked(buffer) },
-    );
 }
