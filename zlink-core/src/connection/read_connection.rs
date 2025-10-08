@@ -200,17 +200,7 @@ fn from_slice<'a, T>(buffer: &'a [u8]) -> Result<T>
 where
     T: Deserialize<'a>,
 {
-    #[cfg(feature = "serde_json")]
-    {
-        serde_json::from_slice::<T>(buffer).map_err(Into::into)
-    }
-
-    #[cfg(not(feature = "serde_json"))]
-    {
-        serde_json_core::from_slice::<T>(buffer)
-            .map_err(Into::into)
-            .map(|(e, _)| e)
-    }
+    serde_json::from_slice::<T>(buffer).map_err(Into::into)
 }
 
 /// If the buffer contains a JSON object with an "error" field, this function will fetch it.

@@ -14,9 +14,6 @@
 #[cfg(not(any(feature = "tracing", feature = "defmt")))]
 compile_error!("Either 'tracing' or 'defmt' feature must be enabled.");
 
-#[cfg(not(any(feature = "serde_json", feature = "serde-json-core")))]
-compile_error!("Either 'serde_json' or 'serde-json-core' feature must be enabled.");
-
 extern crate alloc;
 
 #[macro_use]

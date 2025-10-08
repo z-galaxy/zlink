@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["std", "serde_json", "proxy", "tracing"]
+default = ["std", "proxy", "tracing"]
 std = []
 proxy = ["zlink-macros/proxy"]
 # IDL and introspection support
@@ -19,7 +19,7 @@ introspection = ["std", "idl", "zlink-macros/introspection"]
 [dependencies]
 serde = { version = "1.0.218", default-features = false, features = ["derive", "alloc"] }
 zlink-macros = { path = "../zlink-macros", version = "=0.1.1" }
-serde_json = { version = "1.0.139", default-features = false, features = ["std" ], optional = true }
+serde_json = { version = "1.0.139", default-features = false, features = ["alloc"] }
 serde-json-core = { version = "0.6.0", default-features = false, features = [
     "heapless",
 ], optional = true }

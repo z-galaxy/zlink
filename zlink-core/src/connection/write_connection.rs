@@ -138,12 +138,18 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         T: Serialize + ?Sized + Debug,
     {
         let len = loop {
-            match to_slice_at_pos(value, &mut self.buffer, self.pos) {
+            match crate::json_ser::to_slice(value, &mut self.buffer[self.pos..]) {
                 Ok(len) => break len,
-                Err(_) => {
-                    // This can only happens if `serde-json` failed to write all bytes and that
-                    // means we're running out of space or already are out of space.
+                Err(crate::json_ser::Error::BufferTooSmall) => {
+                    // Buffer too small, grow it and retry
                     self.grow_buffer()?;
+                }
+                Err(crate::json_ser::Error::KeyMustBeAString) => {
+                    // Actual serialization error
+                    // Convert to serde_json::Error for public API
+                    return Err(crate::Error::Json(serde::ser::Error::custom(
+                        "key must be a string",
+                    )));
                 }
             }
         };
@@ -165,24 +171,6 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         self.buffer.extend_from_slice(&[0; BUFFER_SIZE]);
 
         Ok(())
-    }
-}
-
-fn to_slice_at_pos<T>(value: &T, buf: &mut [u8], pos: usize) -> crate::Result<usize>
-where
-    T: Serialize + ?Sized,
-{
-    #[cfg(feature = "serde_json")]
-    {
-        let mut cursor = std::io::Cursor::new(&mut buf[pos..]);
-        serde_json::to_writer(&mut cursor, value)?;
-
-        Ok(cursor.position() as usize)
-    }
-
-    #[cfg(not(feature = "serde_json"))]
-    {
-        serde_json_core::to_slice(value, &mut buf[pos..]).map_err(Into::into)
     }
 }
 
