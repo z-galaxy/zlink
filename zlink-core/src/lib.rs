@@ -23,6 +23,8 @@ extern crate alloc;
 #[doc(hidden)]
 pub mod log;
 
+mod json_ser;
+
 pub mod connection;
 pub use connection::Connection;
 mod error;
