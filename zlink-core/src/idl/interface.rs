@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 #[cfg(feature = "idl-parse")]
 use crate::Error;
 
@@ -41,7 +43,6 @@ impl<'a> Interface<'a> {
     }
 
     /// Creates a new interface with the given name, owned collections, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         methods: Vec<super::Method<'a>>,
@@ -131,6 +132,7 @@ impl PartialEq for Interface<'_> {
 mod tests {
     use super::*;
     use crate::idl::{Error, Field, Method, Parameter, Type};
+    use alloc::string::String;
 
     #[test]
     fn org_varlink_service_interface() {
@@ -196,7 +198,7 @@ mod tests {
 
         // Test Display output
         use core::fmt::Write;
-        let mut idl = mayheap::String::<2048>::new();
+        let mut idl = String::new();
         write!(idl, "{}", interface).unwrap();
         assert!(idl.as_str().starts_with("interface org.varlink.service"));
         assert!(idl.as_str().contains("method GetInfo()"));
@@ -258,6 +260,8 @@ error ExpectedMore ()
     #[cfg(feature = "idl-parse")]
     #[test]
     fn systemd_resolved_interface_parsing() {
+        use alloc::vec::Vec;
+
         use crate::idl::{parse, CustomObject, CustomType, TypeRef};
 
         // Manually construct the systemd-resolved interface for comparison.
@@ -603,7 +607,7 @@ error DNSError(
 
         let interface = Interface::new("org.example.test", &methods, &[], &[], &interface_comments);
 
-        let mut output = mayheap::String::<256>::new();
+        let mut output = String::new();
         write!(&mut output, "{}", interface).unwrap();
 
         let expected = "# Interface documentation\n# Version 1.0\ninterface org.example.test\n\n# Test method\nmethod Test() -> ()";
@@ -661,7 +665,7 @@ error DNSError(
             &interface_comments,
         );
 
-        let mut output = mayheap::String::<512>::new();
+        let mut output = String::new();
         write!(&mut output, "{}", interface).unwrap();
 
         let expected = "# Comprehensive test interface\ninterface org.example.comprehensive\n\n# User data structure\ntype User (# Full name\nname: string, age: int)\n\n# Get user by ID\nmethod GetUser(# User ID\nid: int) -> (user: User)\n\n# User not found error\nerror UserNotFound (message: string)";
@@ -691,7 +695,7 @@ id: int) -> (user: User)
 error UserNotFound (id: int)"#;
 
         let parsed = Interface::try_from(input).unwrap();
-        let mut output = mayheap::String::<512>::new();
+        let mut output = String::new();
         write!(&mut output, "{}", parsed).unwrap();
 
         // The output should exactly match the input (normalized whitespace)

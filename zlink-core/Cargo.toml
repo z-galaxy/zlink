@@ -8,37 +8,20 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["std", "io-buffer-2kb", "proxy"]
-std = [
-    "dep:serde_json",
-    "memchr/std",
-    "mayheap/alloc",
-    "serde/std",
-    "tracing",
-    "zlink-macros/std",
-]
-embedded = ["dep:serde-json-core", "mayheap/heapless", "defmt"]
+default = ["std", "proxy", "tracing"]
+std = []
 proxy = ["zlink-macros/proxy"]
-# I/O buffer sizes: 2kb (default), 4kb, 16kb, 64kb, 1mb (highest selected if multiple enabled).
-io-buffer-2kb = []
-io-buffer-4kb = []
-io-buffer-16kb = []
-io-buffer-1mb = []
 # IDL and introspection support
 idl = []
-idl-parse = ["idl", "dep:winnow", "std", "zlink-macros/idl-parse"]
-introspection = ["idl", "zlink-macros/introspection"]
+idl-parse = ["idl", "dep:winnow", "zlink-macros/idl-parse"]
+introspection = ["std", "idl", "zlink-macros/introspection"]
 
 [dependencies]
-serde = { version = "1.0.218", default-features = false, features = ["derive"] }
+serde = { version = "1.0.218", default-features = false, features = ["derive", "alloc"] }
 zlink-macros = { path = "../zlink-macros", version = "=0.1.1" }
-serde_json = { version = "1.0.139", optional = true }
-serde-json-core = { version = "0.6.0", default-features = false, features = [
-    "heapless",
-], optional = true }
-mayheap = { git = "https://github.com/zeenix/mayheap", version = "0.2.0", features = [
-    "serde",
-], default-features = false }
+serde_json = { version = "1.0.139", default-features = false, features = ["alloc"] }
+itoa = { version = "1.0", default-features = false }
+ryu = { version = "1.0", default-features = false }
 memchr = { version = "2.7.4", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
@@ -61,6 +44,7 @@ indexmap = { version = "2.2", optional = true }
 
 [dev-dependencies]
 serde = { version = "1.0.218", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.139" }
 serde-prefix-all = "0.1.0"
 test-log = { version = "0.2.17", default-features = false, features = [
     "trace",

@@ -1,7 +1,5 @@
-use mayheap::string::String;
-#[cfg(feature = "std")]
-use serde::Deserialize;
-use serde::Serialize;
+use alloc::string::String;
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "introspection")]
 use crate::introspect;
@@ -13,8 +11,7 @@ use super::Info;
 use super::InterfaceDescription;
 
 /// `org.varlink.service` interface methods.
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "std", derive(Deserialize))]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method", content = "parameters")]
 pub enum Method<'a> {
     /// Get information about the Varlink service.
@@ -53,22 +50,22 @@ pub enum Error {
     /// The requested interface was not found.
     InterfaceNotFound {
         /// The interface that was not found.
-        interface: String<MAX_INTERFACE_NAME_LENGTH>,
+        interface: String,
     },
     /// The requested method was not found.
     MethodNotFound {
         /// The method that was not found.
-        method: String<MAX_METHOD_NAME_LENGTH>,
+        method: String,
     },
     /// The interface defines the requested method, but the service does not implement it.
     MethodNotImplemented {
         /// The method that is not implemented.
-        method: String<MAX_METHOD_NAME_LENGTH>,
+        method: String,
     },
     /// One of the passed parameters is invalid.
     InvalidParameter {
         /// The parameter that is invalid.
-        parameter: String<MAX_PARAMETER_NAME_LENGTH>,
+        parameter: String,
     },
     /// Client is denied access.
     PermissionDenied,
@@ -109,10 +106,6 @@ impl core::fmt::Display for Error {
 
 /// Result type for Varlink service methods.
 pub type Result<T> = core::result::Result<T, Error>;
-
-const MAX_INTERFACE_NAME_LENGTH: usize = 64;
-const MAX_METHOD_NAME_LENGTH: usize = 64;
-const MAX_PARAMETER_NAME_LENGTH: usize = 24;
 
 #[cfg(test)]
 mod tests {
@@ -204,50 +197,19 @@ mod tests {
     }
 
     // Helper function to serialize Error to JSON string, abstracting std vs nostd differences
-    fn serialize_error(err: &Error) -> mayheap::string::String<256> {
-        #[cfg(feature = "std")]
-        {
-            mayheap::string::String::from_str(&serde_json::to_string(err).unwrap()).unwrap()
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            use mayheap::string::String;
-            let mut buffer = [0u8; 256];
-            let len = serde_json_core::to_slice(err, &mut buffer).unwrap();
-            let vec = mayheap::Vec::<_, 256>::from_slice(&buffer[..len]).unwrap();
-            String::<256>::from_utf8(vec).unwrap()
-        }
+    fn serialize_error(err: &Error) -> String {
+        serde_json::to_string(err).unwrap()
     }
 
     // Helper function to deserialize JSON string to Error, abstracting std vs nostd differences
     fn deserialize_error(json: &str) -> Error {
-        #[cfg(feature = "std")]
-        {
-            serde_json::from_str(json).unwrap()
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let (err, _): (Error, usize) = serde_json_core::from_str(json).unwrap();
-            err
-        }
+        serde_json::from_str(json).unwrap()
     }
 
     // Helper function for round-trip serialization test, abstracting std vs nostd differences
     fn test_round_trip_serialize(original: &Error) {
-        #[cfg(feature = "std")]
-        {
-            let json = serde_json::to_string(original).unwrap();
-            let deserialized: Error = serde_json::from_str(&json).unwrap();
-            assert_eq!(*original, deserialized);
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let mut buffer = [0u8; 256];
-            let len = serde_json_core::to_slice(original, &mut buffer).unwrap();
-            let json_bytes = &buffer[..len];
-            let (deserialized, _): (Error, usize) =
-                serde_json_core::from_slice(json_bytes).unwrap();
-            assert_eq!(*original, deserialized);
-        }
+        let json = serde_json::to_string(original).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
+        assert_eq!(*original, deserialized);
     }
 }

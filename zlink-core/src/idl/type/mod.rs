@@ -150,13 +150,15 @@ impl<'a> PartialEq<TypeRef<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use super::*;
     use crate::idl::{Comment, EnumVariant};
 
     #[test]
     fn type_names() {
         use core::fmt::Write;
-        let mut buf = mayheap::String::<32>::new();
+        let mut buf = String::new();
 
         buf.clear();
         write!(buf, "{}", Type::Bool).unwrap();
@@ -187,7 +189,7 @@ mod tests {
         const BOOL_TYPE: Type<'static> = Type::Bool;
 
         use core::fmt::Write;
-        let mut buf = mayheap::String::<64>::new();
+        let mut buf = String::new();
 
         buf.clear();
         write!(buf, "{}", Type::Optional(TypeRef::new(&INT_TYPE))).unwrap();
@@ -202,38 +204,35 @@ mod tests {
         assert_eq!(buf, "[string]bool");
 
         // Test with owned variants
-        #[cfg(feature = "std")]
-        {
-            assert_eq!(
-                Type::Optional(TypeRef::new_owned(Type::Int)).to_string(),
-                "?int"
-            );
-            assert_eq!(
-                Type::Array(TypeRef::new_owned(Type::String)).to_string(),
-                "[]string"
-            );
+        assert_eq!(
+            Type::Optional(TypeRef::new_owned(Type::Int)).to_string(),
+            "?int"
+        );
+        assert_eq!(
+            Type::Array(TypeRef::new_owned(Type::String)).to_string(),
+            "[]string"
+        );
 
-            // Test complex nested types
-            let nested_type = Type::Array(TypeRef::new_owned(Type::Optional(TypeRef::new_owned(
-                Type::String,
-            ))));
-            assert_eq!(nested_type.to_string(), "[]?string");
+        // Test complex nested types
+        let nested_type = Type::Array(TypeRef::new_owned(Type::Optional(TypeRef::new_owned(
+            Type::String,
+        ))));
+        assert_eq!(nested_type.to_string(), "[]?string");
 
-            // Test inline enum
-            let enum_type = Type::Enum(List::from(vec![
-                EnumVariant::new("one", &[]),
-                EnumVariant::new("two", &[]),
-                EnumVariant::new("three", &[]),
-            ]));
-            assert_eq!(enum_type.to_string(), "(one, two, three)");
+        // Test inline enum
+        let enum_type = Type::Enum(List::from(vec![
+            EnumVariant::new("one", &[]),
+            EnumVariant::new("two", &[]),
+            EnumVariant::new("three", &[]),
+        ]));
+        assert_eq!(enum_type.to_string(), "(one, two, three)");
 
-            // Test inline struct
-            let struct_type = Type::Object(List::from(vec![
-                Field::new("first", &Type::Int, &[]),
-                Field::new("second", &Type::String, &[]),
-            ]));
-            assert_eq!(struct_type.to_string(), "(first: int, second: string)");
-        }
+        // Test inline struct
+        let struct_type = Type::Object(List::from(vec![
+            Field::new("first", &Type::Int, &[]),
+            Field::new("second", &Type::String, &[]),
+        ]));
+        assert_eq!(struct_type.to_string(), "(first: int, second: string)");
     }
 
     #[test]
@@ -247,7 +246,7 @@ mod tests {
         let variants_no_comments = [&var1, &var2, &var3];
         let enum_no_comments = Type::Enum(List::from(&variants_no_comments[..]));
 
-        let mut buf = mayheap::String::<64>::new();
+        let mut buf = String::new();
         write!(buf, "{}", enum_no_comments).unwrap();
         assert_eq!(buf, "(red, green, blue)");
 
@@ -263,7 +262,7 @@ mod tests {
         ];
         let enum_with_comments = Type::Enum(List::from(&variants_with_comments[..]));
 
-        let mut buf = mayheap::String::<256>::new();
+        let mut buf = String::new();
         write!(buf, "{}", enum_with_comments).unwrap();
         assert_eq!(buf, "(\n\t# Primary color\n\tred\n\tgreen\n\tblue\n)");
     }

@@ -29,5 +29,4 @@ impl_type!(f32, f64 => idl::Type::Float);
 impl_type!(&str, str => idl::Type::String);
 impl_type!(char => idl::Type::String);
 
-#[cfg(feature = "std")]
 impl_type!(String => idl::Type::String);

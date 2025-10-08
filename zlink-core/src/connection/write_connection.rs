@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use mayheap::Vec;
+use alloc::vec::Vec;
 use serde::Serialize;
 
 use super::{socket::WriteHalf, Call, Reply, BUFFER_SIZE};
@@ -18,7 +18,7 @@ use super::{socket::WriteHalf, Call, Reply, BUFFER_SIZE};
 #[derive(Debug)]
 pub struct WriteConnection<Write: WriteHalf> {
     socket: Write,
-    buffer: Vec<u8, BUFFER_SIZE>,
+    buffer: Vec<u8>,
     pos: usize,
     id: usize,
 }
@@ -29,7 +29,7 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         Self {
             socket,
             id,
-            buffer: Vec::from_slice(&[0; BUFFER_SIZE]).unwrap(),
+            buffer: Vec::new(),
             pos: 0,
         }
     }
@@ -138,61 +138,39 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         T: Serialize + ?Sized + Debug,
     {
         let len = loop {
-            match to_slice_at_pos(value, &mut self.buffer, self.pos) {
+            match crate::json_ser::to_slice(value, &mut self.buffer[self.pos..]) {
                 Ok(len) => break len,
-                #[cfg(feature = "std")]
-                Err(crate::Error::Json(e)) if e.is_io() => {
-                    // This can only happens if `serde-json` failed to write all bytes and that
-                    // means we're running out of space or already are out of space.
+                Err(crate::json_ser::Error::BufferTooSmall) => {
+                    // Buffer too small, grow it and retry
                     self.grow_buffer()?;
                 }
-                Err(e) => return Err(e),
+                Err(crate::json_ser::Error::KeyMustBeAString) => {
+                    // Actual serialization error
+                    // Convert to serde_json::Error for public API
+                    return Err(crate::Error::Json(serde::ser::Error::custom(
+                        "key must be a string",
+                    )));
+                }
             }
         };
 
         // Add null terminator after this message.
         if self.pos + len == self.buffer.len() {
-            #[cfg(feature = "std")]
-            {
-                self.grow_buffer()?;
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                return Err(crate::Error::BufferOverflow);
-            }
+            self.grow_buffer()?;
         }
         self.buffer[self.pos + len] = b'\0';
         self.pos += len + 1;
         Ok(())
     }
 
-    #[cfg(feature = "std")]
     fn grow_buffer(&mut self) -> crate::Result<()> {
         if self.buffer.len() >= super::MAX_BUFFER_SIZE {
             return Err(crate::Error::BufferOverflow);
         }
 
-        self.buffer.extend_from_slice(&[0; BUFFER_SIZE])?;
+        self.buffer.extend_from_slice(&[0; BUFFER_SIZE]);
 
         Ok(())
-    }
-}
-
-fn to_slice_at_pos<T>(value: &T, buf: &mut [u8], pos: usize) -> crate::Result<usize>
-where
-    T: Serialize + ?Sized,
-{
-    #[cfg(feature = "std")]
-    {
-        let mut cursor = std::io::Cursor::new(&mut buf[pos..]);
-        serde_json::to_writer(&mut cursor, value)?;
-
-        Ok(cursor.position() as usize)
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        serde_json_core::to_slice(value, &mut buf[pos..]).map_err(Into::into)
     }
 }
 
@@ -215,24 +193,10 @@ mod tests {
             1;
         let mut write_conn = WriteConnection::new(TestWriteHalf::new(WRITE_LEN), 1);
         // An item that serializes into `> BUFFER_SIZE * 2` bytes.
-        let item: Vec<u8, BUFFER_SIZE> = Vec::from_slice(&[0u8; BUFFER_SIZE]).unwrap();
-        let res = write_conn.write(&item).await;
-        #[cfg(feature = "std")]
-        {
-            res.unwrap();
-            assert_eq!(write_conn.buffer.len(), BUFFER_SIZE * 3);
-            assert_eq!(write_conn.pos, 0); // Reset after flush.
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            assert!(matches!(
-                res,
-                Err(crate::Error::JsonSerialize(
-                    serde_json_core::ser::Error::BufferFull
-                ))
-            ));
-            assert_eq!(write_conn.buffer.len(), BUFFER_SIZE);
-        }
+        let item: Vec<u8> = vec![0u8; BUFFER_SIZE];
+        write_conn.write(&item).await.unwrap();
+        assert_eq!(write_conn.buffer.len(), BUFFER_SIZE * 3);
+        assert_eq!(write_conn.pos, 0); // Reset after flush.
     }
 
     #[tokio::test]
@@ -262,7 +226,6 @@ mod tests {
         write_conn.flush().await.unwrap();
     }
 
-    #[cfg(feature = "std")]
     #[tokio::test]
     async fn enqueue_buffer_extension() {
         // Test buffer extension when enqueuing large items.
@@ -270,28 +233,10 @@ mod tests {
         let initial_len = write_conn.buffer.len();
 
         // Fill up the buffer.
-        let large_item: Vec<u8, BUFFER_SIZE> = Vec::from_slice(&[0u8; BUFFER_SIZE]).unwrap();
+        let large_item: Vec<u8> = vec![0u8; BUFFER_SIZE];
         write_conn.enqueue(&large_item).unwrap();
 
         assert!(write_conn.buffer.len() > initial_len);
-    }
-
-    #[cfg(not(feature = "std"))]
-    #[tokio::test]
-    async fn enqueue_buffer_overflow() {
-        // Test buffer overflow error without std feature.
-        let mut write_conn = WriteConnection::new(TestWriteHalf::new(0), 1);
-
-        // Try to enqueue an item that doesn't fit.
-        let large_item: Vec<u8, BUFFER_SIZE> = Vec::from_slice(&[0u8; BUFFER_SIZE]).unwrap();
-        let res = write_conn.enqueue(&large_item);
-
-        assert!(matches!(
-            res,
-            Err(crate::Error::JsonSerialize(
-                serde_json_core::ser::Error::BufferFull
-            ))
-        ));
     }
 
     #[tokio::test]

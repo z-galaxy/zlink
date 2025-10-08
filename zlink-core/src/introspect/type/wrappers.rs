@@ -18,17 +18,14 @@ impl<T: Type> Type for Option<T> {
 // Smart pointer types - transparent wrappers
 // ============================================================================
 
-#[cfg(feature = "std")]
 impl<T: Type + ?Sized> Type for Box<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
-#[cfg(feature = "std")]
 impl<T: Type + ?Sized> Type for std::rc::Rc<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
-#[cfg(feature = "std")]
 impl<T: Type + ?Sized> Type for std::sync::Arc<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
@@ -37,12 +34,10 @@ impl<T: Type + ?Sized> Type for std::sync::Arc<T> {
 // Cell types - transparent wrappers
 // ============================================================================
 
-#[cfg(feature = "std")]
 impl<T: Type + ?Sized> Type for std::cell::Cell<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
-#[cfg(feature = "std")]
 impl<T: Type + ?Sized> Type for std::cell::RefCell<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
@@ -51,7 +46,6 @@ impl<T: Type + ?Sized> Type for std::cell::RefCell<T> {
 // Cow type - transparent wrapper
 // ============================================================================
 
-#[cfg(feature = "std")]
 impl<T: Type + ToOwned + ?Sized> Type for std::borrow::Cow<'_, T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }

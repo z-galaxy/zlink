@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{Comment, Field, List};
 
 /// An error definition in Varlink IDL.
@@ -31,7 +33,6 @@ impl<'a> Error<'a> {
 
     /// Creates a new error with the given name, owned fields, and comments.
     /// Same as `new` but takes `fields` by value.
-    #[cfg(feature = "std")]
     pub fn new_owned(name: &'a str, fields: Vec<Field<'a>>, comments: Vec<Comment<'a>>) -> Self {
         Self {
             name,
@@ -103,7 +104,7 @@ mod tests {
         assert!(!error.has_no_fields());
 
         // Check the fields individually - order and values.
-        let fields_vec: mayheap::Vec<_, 8> = error.fields().collect();
+        let fields_vec: Vec<_> = error.fields().collect();
         assert_eq!(fields_vec[0].name(), "message");
         assert_eq!(fields_vec[0].ty(), &Type::String);
         assert_eq!(fields_vec[1].name(), "code");
@@ -131,7 +132,7 @@ mod tests {
         let fields = [&message_field, &code_field];
 
         let error = Error::new("AuthError", &fields, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", error).unwrap();
         assert_eq!(
             displayed,

@@ -14,10 +14,6 @@ proxy = ["zlink-tokio/proxy"]
 idl = ["zlink-tokio/idl"]
 idl-parse = ["zlink-tokio/idl-parse"]
 introspection = ["zlink-tokio/introspection"]
-io-buffer-2kb = ["zlink-tokio/io-buffer-2kb"]
-io-buffer-4kb = ["zlink-tokio/io-buffer-4kb"]
-io-buffer-16kb = ["zlink-tokio/io-buffer-16kb"]
-io-buffer-1mb = ["zlink-tokio/io-buffer-1mb"]
 
 [dependencies]
 zlink-tokio = { path = "../zlink-tokio", version = "=0.1.1", default-features = false, optional = true }
@@ -45,7 +41,6 @@ clap = { version = "4.0", features = ["derive"] }
 colored = "3.0"
 tempfile = "3.8"
 serde_json = "1.0"
-mayheap = { git = "https://github.com/zeenix/mayheap", version = "0.2.0" }
 tracing-subscriber = "0.3.19"
 
 [[example]]

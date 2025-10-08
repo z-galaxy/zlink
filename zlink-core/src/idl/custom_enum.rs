@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{EnumVariant, List};
 
 /// An enum type definition in Varlink IDL (enum-like with named variants).
@@ -30,7 +32,6 @@ impl<'a> CustomEnum<'a> {
     }
 
     /// Creates a new enum type with the given name, owned variants, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         variants: Vec<EnumVariant<'a>>,
@@ -105,6 +106,8 @@ impl<'a> PartialEq for CustomEnum<'a> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::idl::{Comment, EnumVariant};
     use core::fmt::Write;
@@ -121,7 +124,7 @@ mod tests {
         let variants = [&var1, &var2, &var3];
 
         let custom_enum = CustomEnum::new("Status", &variants, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
         assert_eq!(
             displayed,
@@ -129,7 +132,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn display_with_variant_comments() {
         let var_comment = Comment::new("The active state");
@@ -137,7 +139,7 @@ mod tests {
         let var2 = EnumVariant::new_owned("inactive", vec![]);
         let custom_enum = CustomEnum::new_owned("Status", vec![var1, var2], vec![]);
 
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
         assert_eq!(
             displayed,
@@ -145,7 +147,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
     #[test_log::test]
     fn comprehensive_enum_with_per_variant_comments() {
         // Test enum-level comments plus per-variant comments
@@ -168,7 +169,7 @@ mod tests {
         assert_eq!(custom_enum.comments().count(), 1);
 
         // Test display output includes both enum and variant comments
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", custom_enum).unwrap();
 
         // Should contain enum comment
@@ -190,7 +191,7 @@ mod tests {
         let variants_no_comments = [&var1, &var2, &var3];
 
         let enum_no_comments = CustomEnum::new("Color", &variants_no_comments, &[]);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", enum_no_comments).unwrap();
         assert_eq!(displayed, "type Color (red, green, blue)");
 
@@ -207,7 +208,7 @@ mod tests {
         ];
 
         let enum_with_comments = CustomEnum::new("Color", &variants_with_comments, &[]);
-        let mut displayed = mayheap::String::<256>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", enum_with_comments).unwrap();
         assert_eq!(
             displayed,

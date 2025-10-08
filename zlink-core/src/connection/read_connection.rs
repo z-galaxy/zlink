@@ -4,14 +4,12 @@ use core::{fmt::Debug, str::from_utf8_unchecked};
 
 use crate::{varlink_service, Result};
 
-#[cfg(feature = "std")]
-use super::MAX_BUFFER_SIZE;
 use super::{
     reply::{self, Reply},
     socket::ReadHalf,
-    Call, BUFFER_SIZE,
+    Call, BUFFER_SIZE, MAX_BUFFER_SIZE,
 };
-use mayheap::Vec;
+use alloc::vec::Vec;
 use memchr::memchr;
 use serde::Deserialize;
 
@@ -26,7 +24,7 @@ pub struct ReadConnection<Read: ReadHalf> {
     socket: Read,
     read_pos: usize,
     msg_pos: usize,
-    buffer: Vec<u8, BUFFER_SIZE>,
+    buffer: Vec<u8>,
     id: usize,
 }
 
@@ -38,7 +36,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             read_pos: 0,
             msg_pos: 0,
             id,
-            buffer: Vec::from_slice(&[0; BUFFER_SIZE]).unwrap(),
+            buffer: alloc::vec![0; BUFFER_SIZE],
         }
     }
 
@@ -166,17 +164,10 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         loop {
             let bytes_read = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
             if bytes_read == 0 {
-                #[cfg(not(feature = "std"))]
-                return Err(crate::Error::SocketRead);
-                #[cfg(feature = "std")]
-                return Err(crate::Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "unexpected EOF",
-                )));
+                return Err(crate::Error::UnexpectedEof);
             }
             self.read_pos += bytes_read;
 
-            #[cfg(feature = "std")]
             if self.read_pos == self.buffer.len() {
                 if self.read_pos >= MAX_BUFFER_SIZE {
                     return Err(crate::Error::BufferOverflow);
@@ -209,17 +200,7 @@ fn from_slice<'a, T>(buffer: &'a [u8]) -> Result<T>
 where
     T: Deserialize<'a>,
 {
-    #[cfg(feature = "std")]
-    {
-        serde_json::from_slice::<T>(buffer).map_err(Into::into)
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        serde_json_core::from_slice::<T>(buffer)
-            .map_err(Into::into)
-            .map(|(e, _)| e)
-    }
+    serde_json::from_slice::<T>(buffer).map_err(Into::into)
 }
 
 /// If the buffer contains a JSON object with an "error" field, this function will fetch it.

@@ -248,7 +248,7 @@ mod tests {
 
         // Use Stream's collect method to gather all results
         pin_mut!(replies);
-        let results: mayheap::Vec<_, 16> = replies.collect().await;
+        let results: Vec<_> = replies.collect().await;
         assert_eq!(results.len(), 3);
 
         // Verify all results are successful
@@ -260,7 +260,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "std")]
     #[tokio::test]
     async fn heterogeneous_calls() -> crate::Result<()> {
         // Types for heterogeneous calls test
@@ -288,7 +287,7 @@ mod tests {
         #[derive(Debug, Serialize, Deserialize)]
         struct Post {
             id: u32,
-            title: mayheap::String<32>,
+            title: String,
         }
 
         #[derive(Debug, Serialize, Deserialize)]
@@ -301,12 +300,12 @@ mod tests {
 
         #[derive(Debug, Serialize, Deserialize)]
         struct DeleteError {
-            reason: mayheap::String<64>,
+            reason: String,
         }
 
         #[derive(Debug, Serialize, Deserialize)]
         struct PostError {
-            message: mayheap::String<64>,
+            message: String,
         }
 
         let responses = [

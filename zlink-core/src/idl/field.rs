@@ -30,8 +30,7 @@ impl<'a> Field<'a> {
 
     /// Same as `new` but takes `ty` by value.
     /// Creates a new field with the given name, owned type, and comments.
-    #[cfg(feature = "std")]
-    pub fn new_owned(name: &'a str, ty: Type<'a>, comments: Vec<Comment<'a>>) -> Self {
+    pub fn new_owned(name: &'a str, ty: Type<'a>, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
         Self {
             name,
             ty: TypeRef::new_owned(ty),
@@ -100,7 +99,7 @@ mod tests {
         let comments = [&comment1, &comment2];
 
         let field = Field::new("email", &Type::String, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", field).unwrap();
         assert_eq!(
             displayed,

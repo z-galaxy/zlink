@@ -1,17 +1,16 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed};
+use syn::{parse_quote, Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed};
 
 use crate::utils::*;
 
 /// Main entry point for the ReplyError derive macro that generates serde implementations.
 ///
 /// This macro:
-/// 1. Generates manual `serde::Serialize` and `serde::Deserialize` implementations
-/// 2. Uses allocation-free deserialization for both std and no-std environments
-/// 3. Requires "error" field to appear before "parameters" field for efficient parsing
-/// 4. Requires `#[zlink(interface = "...")]` to automatically generate qualified error names
-/// 5. Handles unit variants with or without empty parameters (serde issue #2045)
+/// 1. Generates manual `serde::Serialize` implementation for qualified error names
+/// 2. Generates `serde::Deserialize` via helper enum with adjacently tagged format
+/// 3. Requires `#[zlink(interface = "...")]` to automatically generate qualified error names
+/// 4. Handles unit variants without `parameters` field and named variants with `parameters`
 pub(crate) fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = syn::parse_macro_input!(input as DeriveInput);
 
@@ -27,17 +26,19 @@ fn derive_reply_error_impl(input: &DeriveInput) -> Result<TokenStream2, Error> {
     let name = &input.ident;
     let generics = &input.generics;
 
-    // Parse the interface from zlink attributes (mandatory)
+    // Parse the interface from zlink attributes (mandatory).
     let interface = parse_interface_from_attrs(&input.attrs)?;
 
     let data_enum = extract_enum_data(&input.data)?;
 
-    // Validate that enum variants are supported
+    // Validate that enum variants are supported.
     validate_enum_variants(data_enum)?;
 
-    // Generate manual Serialize and Deserialize implementations
+    // Generate manual Serialize implementation (still custom for variant naming).
     let serialize_impl = generate_serialize_impl(name, data_enum, generics, &interface)?;
-    let deserialize_impl = generate_deserialize_impl(name, data_enum, generics, &interface)?;
+
+    // For Deserialize, generate a helper enum with serde derives and convert to original.
+    let deserialize_impl = generate_deserialize_with_derive(input, data_enum, &interface)?;
 
     Ok(quote! {
         #serialize_impl
@@ -59,7 +60,7 @@ fn parse_interface_from_attrs(attrs: &[syn::Attribute]) -> Result<String, Error>
                 let lit_str: syn::LitStr = value.parse()?;
                 interface_result = Some(lit_str.value());
             } else {
-                // Skip unknown attributes by consuming their values
+                // Skip unknown attributes by consuming their values.
                 let _ = meta.value()?;
                 let _: syn::Expr = meta.input.parse()?;
             }
@@ -81,7 +82,7 @@ fn validate_enum_variants(data_enum: &DataEnum) -> Result<(), Error> {
     for variant in &data_enum.variants {
         match &variant.fields {
             Fields::Unit | Fields::Named(_) => {
-                // Unit variants and named field variants are fine
+                // Unit variants and named field variants are fine.
             }
             Fields::Unnamed(_) => {
                 return Err(Error::new_spanned(
@@ -118,14 +119,14 @@ fn generate_serialize_impl(
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
 
-    // Generate match arms for each variant (empty for empty enums)
+    // Generate match arms for each variant (empty for empty enums).
     let variant_arms = data_enum
         .variants
         .iter()
         .map(|variant| generate_serialize_variant_arm(variant, interface, has_lifetimes))
         .collect::<Result<Vec<_>, _>>()?;
 
-    // For empty enums, we need to dereference self to match the uninhabited type
+    // For empty enums, we need to dereference self to match the uninhabited type.
     let match_expr = if data_enum.variants.is_empty() {
         quote! { *self }
     } else {
@@ -155,7 +156,7 @@ fn generate_serialize_variant_arm(
     let qualified_name = format!("{interface}.{variant_name}");
 
     match &variant.fields {
-        // Unit variant - serialize as tagged enum with just error field
+        // Unit variant - serialize as tagged enum with just error field.
         Fields::Unit => Ok(quote! {
             Self::#variant_name => {
                 use serde::ser::SerializeMap;
@@ -165,7 +166,7 @@ fn generate_serialize_variant_arm(
             }
         }),
         Fields::Named(fields) => {
-            // Named fields - serialize as tagged enum with parameters
+            // Named fields - serialize as tagged enum with parameters.
             let field_info = FieldInfo::extract(fields);
             let field_count = field_info.names.len();
             let field_names = &field_info.names;
@@ -173,7 +174,7 @@ fn generate_serialize_variant_arm(
             let field_name_strs = &field_info.name_strings;
 
             // Convert field types to use synthetic lifetime for ParametersSerializer
-            // only if enum has lifetimes
+            // only if enum has lifetimes.
             let serializer_field_types: Vec<syn::Type> = if has_lifetimes {
                 field_types
                     .iter()
@@ -190,7 +191,7 @@ fn generate_serialize_variant_arm(
                     let mut map = serializer.serialize_map(Some(2))?;
                     map.serialize_entry("error", #qualified_name)?;
 
-                    // Create a nested "parameters" object
+                    // Create a nested "parameters" object.
                     map.serialize_entry("parameters", &{
                         use serde::ser::SerializeMap;
                         struct ParametersSerializer<'__param> {
@@ -226,19 +227,57 @@ fn generate_serialize_variant_arm(
     }
 }
 
-fn generate_deserialize_impl(
-    name: &syn::Ident,
+/// Generate Deserialize implementation using a helper enum with serde derives.
+fn generate_deserialize_with_derive(
+    input: &DeriveInput,
     data_enum: &DataEnum,
-    generics: &syn::Generics,
     interface: &str,
 ) -> Result<TokenStream2, Error> {
-    let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
+    let name = &input.ident;
+    let generics = &input.generics;
 
-    // Create impl generics with proper lifetime bounds
+    // First extract field info for all variants from the original enum.
+    let variant_field_info: Vec<_> = data_enum
+        .variants
+        .iter()
+        .map(|variant| {
+            if let Fields::Named(fields) = &variant.fields {
+                Some(FieldInfo::extract(fields))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Clone and modify the enum to add serde attributes.
+    let mut modified_enum = data_enum.clone();
+
+    // Now modify the variants.
+    for (i, variant) in modified_enum.variants.iter_mut().enumerate() {
+        let field_info = &variant_field_info[i];
+        let variant_name = &variant.ident;
+        let qualified_name = format!("{interface}.{variant_name}");
+
+        // Add rename attribute for the variant.
+        variant
+            .attrs
+            .push(parse_quote!(#[serde(rename = #qualified_name)]));
+
+        // Add serde rename attributes to fields based on their serialized names.
+        if let (Fields::Named(fields), Some(field_info)) = (&mut variant.fields, field_info) {
+            for (field, name_str) in fields.named.iter_mut().zip(&field_info.name_strings) {
+                // Remove zlink attributes and add serde rename with the serialized name.
+                field.attrs.retain(|attr| !attr.path().is_ident("zlink"));
+                field.attrs.push(parse_quote!(#[serde(rename = #name_str)]));
+            }
+        }
+    }
+
+    // Add 'de lifetime for Deserialize.
     let mut impl_generics = generics.clone();
     impl_generics.params.insert(0, syn::parse_quote!('de));
 
-    // Add lifetime bounds for serde pattern: 'de must outlive all enum lifetimes
+    let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
     if has_lifetimes {
         let enum_lifetimes: Vec<_> = generics.lifetimes().collect();
         for lifetime in &enum_lifetimes {
@@ -250,299 +289,63 @@ fn generate_deserialize_impl(
         }
     }
 
-    let (impl_generics_tokens, _, where_clause) = impl_generics.split_for_impl();
-    let (_, ty_generics, _) = generics.split_for_impl();
+    let (impl_generics_tokens, _, impl_where_clause) = impl_generics.split_for_impl();
+    let (orig_impl_generics, ty_generics, orig_where_clause) = generics.split_for_impl();
 
-    // Handle empty enums specially
-    if data_enum.variants.is_empty() {
-        return Ok(quote! {
-            impl #impl_generics_tokens serde::Deserialize<'de> for #name #ty_generics #where_clause {
-                fn deserialize<D>(_deserializer: D) -> core::result::Result<Self, D::Error>
-                where
-                    D: serde::Deserializer<'de>,
-                {
-                    use serde::de;
-                    Err(de::Error::custom("cannot deserialize empty enum"))
-                }
-            }
-        });
-    }
+    let variants = &modified_enum.variants;
 
-    // For visitor Value type, convert enum lifetimes to 'de
-    let visitor_ty_generics = generate_visitor_ty_generics(generics, has_lifetimes);
-
-    // Generate match arms for each variant
-    let variant_arms = generate_variant_match_arms(name, data_enum, interface, has_lifetimes)?;
-
-    // Generate the variant names for error reporting
-    let variant_names: Vec<String> = data_enum
+    // Generate conversion match arms from helper to original enum.
+    let conversion_arms: Vec<_> = data_enum
         .variants
         .iter()
-        .map(|v| format!("{}.{}", interface, v.ident))
-        .collect();
-
-    // Generate visitor struct name
-    let visitor_name = quote::format_ident!("{}Visitor", name);
-
-    Ok(quote! {
-        impl #impl_generics_tokens serde::Deserialize<'de> for #name #ty_generics #where_clause {
-            fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                struct #visitor_name;
-
-                impl<'de> serde::de::Visitor<'de> for #visitor_name {
-                    type Value = #name #visitor_ty_generics;
-
-                    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                        formatter.write_str(concat!("a ", stringify!(#name), " error"))
-                    }
-
-                    fn visit_map<M>(self, mut map: M) -> core::result::Result<Self::Value, M::Error>
-                    where
-                        M: serde::de::MapAccess<'de>,
-                    {
-                        use serde::de;
-
-                        // Allocation-free approach: require "error" field to be first.
-                        let key = map.next_key::<&str>()?;
-                        if key != Some("error") {
-                            return Err(de::Error::custom("expected 'error' field first"));
-                        }
-                        let error_type: &str = map.next_value()?;
-
-                        // Match on the error type and deserialize parameters if present
-                        match error_type {
-                            #variant_arms
-                            _ => Err(de::Error::unknown_variant(
-                                error_type,
-                                &[#(#variant_names),*],
-                            ))
-                        }
+        .map(|variant| {
+            let variant_name = &variant.ident;
+            match &variant.fields {
+                Fields::Unit => quote! {
+                    __ZlinkDeserHelper::#variant_name => #name::#variant_name
+                },
+                Fields::Named(fields) => {
+                    let field_names: Vec<_> = fields
+                        .named
+                        .iter()
+                        .filter_map(|f| f.ident.as_ref())
+                        .collect();
+                    quote! {
+                        __ZlinkDeserHelper::#variant_name { #(#field_names),* } =>
+                            #name::#variant_name { #(#field_names),* }
                     }
                 }
-
-                deserializer.deserialize_map(#visitor_name)
-            }
-        }
-    })
-}
-
-fn generate_visitor_ty_generics(generics: &syn::Generics, has_lifetimes: bool) -> TokenStream2 {
-    if !has_lifetimes {
-        let (_, orig_ty_generics, _) = generics.split_for_impl();
-        return quote! { #orig_ty_generics };
-    }
-
-    // Generate token stream with lifetimes converted to 'de
-    let converted_params: Vec<_> = generics
-        .params
-        .iter()
-        .map(|param| match param {
-            syn::GenericParam::Lifetime(_) => quote! { 'de },
-            syn::GenericParam::Type(type_param) => {
-                let ident = &type_param.ident;
-                quote! { #ident }
-            }
-            syn::GenericParam::Const(const_param) => {
-                let ident = &const_param.ident;
-                quote! { #ident }
+                Fields::Unnamed(_) => {
+                    // Already validated that tuple variants are not supported.
+                    unreachable!()
+                }
             }
         })
         .collect();
 
-    if converted_params.is_empty() {
-        quote! {}
-    } else {
-        quote! { <#(#converted_params),*> }
-    }
-}
-
-/// Generate variant match arms for deserialization using allocation-free approach.
-fn generate_variant_match_arms(
-    enum_name: &syn::Ident,
-    data_enum: &DataEnum,
-    interface: &str,
-    has_lifetimes: bool,
-) -> Result<TokenStream2, Error> {
-    let mut arms = Vec::new();
-
-    for variant in &data_enum.variants {
-        let variant_name = &variant.ident;
-        let qualified_name = format!("{interface}.{variant_name}");
-
-        let arm = match &variant.fields {
-            Fields::Unit => {
-                // Unit variant - skip remaining fields, including optional "parameters" field
-                quote! {
-                    #qualified_name => {
-                        // Skip remaining fields, including optional "parameters" field
-                        while map.next_key::<&str>()?.is_some() {
-                            let _: de::IgnoredAny = map.next_value()?;
-                        }
-                        Ok(#enum_name::#variant_name)
-                    }
-                }
-            }
-            Fields::Named(fields) => {
-                // Named fields - deserialize from parameters object
-                let field_info = FieldInfo::extract(fields);
-                let visitor_code = generate_parameters_visitor(&field_info, has_lifetimes);
-                let field_names = &field_info.names;
-
-                quote! {
-                    #qualified_name => {
-                        // We need the parameters field next
-                        let key = map.next_key::<&str>()?;
-                        if key != Some("parameters") {
-                            // No parameters field, which means this is a unit variant
-                            // We should not reach here for named variants
-                            // since they should have parameters
-                            return Err(de::Error::custom("named field variant requires parameters field"));
-                        }
-
-                        // Use a custom visitor to deserialize parameters directly
-                        #visitor_code
-
-                        let (#(#field_names,)*) = map.next_value_seed(ParametersVisitor)?;
-
-                        // Skip any remaining fields
-                        while map.next_key::<&str>()?.is_some() {
-                            let _: de::IgnoredAny = map.next_value()?;
-                        }
-
-                        Ok(#enum_name::#variant_name { #(#field_names,)* })
-                    }
-                }
-            }
-            Fields::Unnamed(_) => {
-                return Err(Error::new_spanned(
-                    variant,
-                    "ReplyError derive macro does not support tuple variants",
-                ));
-            }
-        };
-        arms.push(arm);
-    }
-
-    Ok(quote! { #(#arms)* })
-}
-
-/// Generate visitor pattern code for deserializing named field parameters.
-fn generate_parameters_visitor(field_info: &FieldInfo<'_>, has_lifetimes: bool) -> TokenStream2 {
-    let field_names = &field_info.names;
-    let field_types = &field_info.types;
-    let field_name_strs = &field_info.name_strings;
-
-    // Convert field types to use 'de lifetime for visitor
-    let visitor_field_types: Vec<syn::Type> = if has_lifetimes {
-        field_types
-            .iter()
-            .map(|ty| convert_type_lifetimes(ty, "'de"))
-            .collect()
-    } else {
-        field_types.iter().map(|&ty| ty.clone()).collect()
-    };
-
-    // Generate field declarations based on whether they're optional
-    let field_declarations = field_names
-        .iter()
-        .zip(&visitor_field_types)
-        .zip(field_types.iter())
-        .map(|((name, ty), orig_ty)| {
-            if is_option_type(orig_ty) {
-                // Optional fields already have Option<T> type, initialize to None
-                quote! { let mut #name: #ty = None; }
-            } else {
-                // Required fields need Option wrapper to track if they've been seen
-                quote! { let mut #name: Option<#ty> = None; }
-            }
-        });
-
-    let field_assignments = field_name_strs
-        .iter()
-        .zip(field_names.iter())
-        .zip(field_types.iter())
-        .map(|((name_str, name), ty)| {
-            if is_option_type(ty) {
-                // Optional fields: deserialize directly as Option<T> to handle null values
-                quote! {
-                    #name_str => {
-                        #name = map.next_value()?;
-                    }
-                }
-            } else {
-                // Required fields need duplicate detection
-                quote! {
-                    #name_str => {
-                        if #name.is_some() {
-                            return Err(de::Error::duplicate_field(#name_str));
-                        }
-                        #name = Some(map.next_value()?);
-                    }
-                }
-            }
-        });
-
-    let field_extractions = field_names
-        .iter()
-        .zip(field_name_strs.iter())
-        .zip(field_types.iter())
-        .map(|((name, name_str), ty)| {
-            if is_option_type(ty) {
-                // Optional fields use their value directly (None if not present)
-                quote! { #name }
-            } else {
-                // Required fields must be present, error if missing
-                quote! { #name.ok_or_else(|| de::Error::missing_field(#name_str))? }
-            }
-        });
-
-    quote! {
-        struct ParametersVisitor;
-
-        impl<'de> de::DeserializeSeed<'de> for ParametersVisitor {
-            type Value = (#(#visitor_field_types,)*);
-
-            fn deserialize<D>(self, deserializer: D) -> core::result::Result<Self::Value, D::Error>
+    Ok(quote! {
+        // Implement Deserialize using a modified version of the enum with serde attributes.
+        #[allow(unreachable_code)]
+        impl #impl_generics_tokens serde::Deserialize<'de> for #name #ty_generics #impl_where_clause {
+            fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
-                struct FieldVisitor;
-
-                impl<'de> de::Visitor<'de> for FieldVisitor {
-                    type Value = (#(#visitor_field_types,)*);
-
-                    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                        formatter.write_str("parameters object")
-                    }
-
-                    fn visit_map<M>(self, mut map: M) -> core::result::Result<Self::Value, M::Error>
-                    where
-                        M: de::MapAccess<'de>,
-                    {
-                        #(#field_declarations)*
-
-                        while let Some(key) = map.next_key::<&str>()? {
-                            match key {
-                                #(#field_assignments)*
-                                _ => {
-                                    let _: de::IgnoredAny = map.next_value()?;
-                                }
-                            }
-                        }
-
-                        Ok((
-                            #(#field_extractions,)*
-                        ))
-                    }
+                #[derive(serde::Deserialize)]
+                #[serde(tag = "error", content = "parameters")]
+                enum __ZlinkDeserHelper #orig_impl_generics #orig_where_clause {
+                    #variants
                 }
 
-                deserializer.deserialize_map(FieldVisitor)
+                let helper = __ZlinkDeserHelper::deserialize(deserializer)?;
+
+                // Convert from helper to original enum.
+                Ok(match helper {
+                    #(#conversion_arms),*
+                })
             }
         }
-    }
+    })
 }
 
 /// Field information extracted from named fields for reuse across

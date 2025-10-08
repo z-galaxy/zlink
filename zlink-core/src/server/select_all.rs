@@ -1,16 +1,16 @@
+use alloc::vec::Vec;
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use mayheap::Vec;
 
 /// A future that reads from multiple futures and returns the first one that is ready.
 ///
-/// This is very similar to [`futures_util::future::SelectAll`] but much simpler and doesn't
-/// (necessarily) allocate.
+/// This is very similar to [`futures_util::future::SelectAll`] but much simpler and reduces
+/// allocations.
 pub(super) struct SelectAll<'f, Fut> {
-    futures: Vec<Pin<&'f mut Fut>, { super::MAX_CONNECTIONS }>,
+    futures: Vec<Pin<&'f mut Fut>>,
     start_index: Option<usize>,
 }
 
@@ -33,10 +33,8 @@ where
     /// The caller must ensure that the future is not moved/invalidated while it is in the
     /// `SelectAll`. The use case here is the Future impls created for `async fn` methods that are
     /// in reality `Unpin` but the compiler assumes they're `!Unpin`.
-    pub(super) unsafe fn push_unchecked(&mut self, fut: &'f mut Fut) -> crate::Result<()> {
-        self.futures
-            .push(Pin::new_unchecked(fut))
-            .map_err(|_| crate::Error::BufferOverflow)
+    pub(super) unsafe fn push_unchecked(&mut self, fut: &'f mut Fut) {
+        self.futures.push(Pin::new_unchecked(fut))
     }
 }
 
@@ -45,10 +43,8 @@ where
     Fut: Future + Unpin,
 {
     /// Add a future to the `SelectAll`.
-    pub(super) fn push(&mut self, fut: &'f mut Fut) -> crate::Result<()> {
-        self.futures
-            .push(Pin::new(fut))
-            .map_err(|_| crate::Error::BufferOverflow)
+    pub(super) fn push(&mut self, fut: &'f mut Fut) {
+        self.futures.push(Pin::new(fut));
     }
 }
 
@@ -98,9 +94,9 @@ mod tests {
 
         // Test starting from index 0.
         let mut select_all = SelectAll::new(Some(0));
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
-        select_all.push(&mut future2).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
+        select_all.push(&mut future2);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);
@@ -128,9 +124,9 @@ mod tests {
 
         // Test starting from index 1.
         let mut select_all = SelectAll::new(Some(1));
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
-        select_all.push(&mut future2).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
+        select_all.push(&mut future2);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);
@@ -156,8 +152,8 @@ mod tests {
 
         // Test starting from index 1, should wrap to 0.
         let mut select_all = SelectAll::new(Some(1));
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);
@@ -183,8 +179,8 @@ mod tests {
 
         // Test start index larger than number of futures.
         let mut select_all = SelectAll::new(Some(5)); // 5 % 2 = 1
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);
@@ -212,9 +208,9 @@ mod tests {
 
         // Test with None start index.
         let mut select_all = SelectAll::new(None);
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
-        select_all.push(&mut future2).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
+        select_all.push(&mut future2);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);
@@ -245,8 +241,8 @@ mod tests {
         let mut future1 = ControlledFuture::new(1);
 
         let mut select_all = SelectAll::new(Some(1));
-        select_all.push(&mut future0).unwrap();
-        select_all.push(&mut future1).unwrap();
+        select_all.push(&mut future0);
+        select_all.push(&mut future1);
 
         let waker = dummy_waker();
         let mut cx = Context::from_waker(&waker);

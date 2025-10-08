@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use alloc::vec::Vec;
+
 use super::{Comment, List, Parameter};
 
 /// A method definition in Varlink IDL.
@@ -34,7 +36,6 @@ impl<'a> Method<'a> {
     }
 
     /// Creates a new method with the given name, owned parameters, and comments.
-    #[cfg(feature = "std")]
     pub fn new_owned(
         name: &'a str,
         inputs: Vec<Parameter<'a>>,
@@ -138,11 +139,11 @@ mod tests {
         assert!(!method.has_no_outputs());
 
         // Check the parameters individually - order and values.
-        let inputs_vec: mayheap::Vec<_, 8> = method.inputs().collect();
+        let inputs_vec: Vec<_> = method.inputs().collect();
         assert_eq!(inputs_vec[0].name(), "id");
         assert_eq!(inputs_vec[0].ty(), &Type::Int);
 
-        let outputs_vec: mayheap::Vec<_, 8> = method.outputs().collect();
+        let outputs_vec: Vec<_> = method.outputs().collect();
         assert_eq!(outputs_vec[0].name(), "name");
         assert_eq!(outputs_vec[0].ty(), &Type::String);
     }
@@ -160,7 +161,7 @@ mod tests {
         use core::fmt::Write;
 
         let method = Method::new("Ping", &[], &[], &[]);
-        let mut displayed = mayheap::String::<64>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "method Ping() -> ()");
 
@@ -168,7 +169,7 @@ mod tests {
         let id_param = Parameter::new("id", &Type::String, &[]);
         let params = [&name_param, &id_param];
         let method = Method::new("Register", &params, &[], &[]);
-        let mut displayed = mayheap::String::<64>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "method Register(name: string, id: string) -> ()");
     }
@@ -188,7 +189,7 @@ mod tests {
         let outputs = [&output];
 
         let method = Method::new("GetUser", &inputs, &outputs, &comments);
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "# Get user information\n# Returns user details by ID\nmethod GetUser(id: int) -> (user: User)");
     }

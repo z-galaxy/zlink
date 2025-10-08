@@ -2,13 +2,13 @@ pub(crate) mod listener;
 mod select_all;
 pub mod service;
 
+use alloc::vec::Vec;
 use futures_util::{FutureExt, StreamExt};
-use mayheap::Vec;
 use select_all::SelectAll;
 use service::MethodReply;
 
 use crate::{
-    connection::{ReadConnection, Socket, WriteConnection},
+    connection::{Socket, WriteConnection},
     Call, Connection, Reply,
 };
 
@@ -59,41 +59,30 @@ where
     /// [`tokio::select!`]: https://docs.rs/tokio/latest/tokio/macro.select.html
     pub async fn run(mut self) -> crate::Result<()> {
         let mut listener = self.listener.take().unwrap();
-        let mut readers = Vec::<_, MAX_CONNECTIONS>::new();
-        let mut writers = Vec::<_, MAX_CONNECTIONS>::new();
-        let mut reply_streams =
-            Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>, MAX_CONNECTIONS>::new();
+        let mut connections = Vec::new();
+        let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
 
         loop {
-            let mut reply_stream_futures: Vec<_, MAX_CONNECTIONS> =
+            let mut reply_stream_futures: Vec<_> =
                 reply_streams.iter_mut().map(|s| s.stream.next()).collect();
             let start_index = last_reply_stream_winner.map(|idx| idx + 1);
             let mut reply_stream_select_all = SelectAll::new(start_index);
             for future in reply_stream_futures.iter_mut() {
-                reply_stream_select_all
-                    .push(future)
-                    .map_err(|_| crate::Error::BufferOverflow)?;
+                reply_stream_select_all.push(future);
             }
 
             futures_util::select_biased! {
                 // 1. Accept a new connection.
                 conn = listener.accept().fuse() => {
-                    let conn = conn?;
-                    let (read, write) = conn.split();
-                    readers
-                        .push(read)
-                        .map_err(|_| crate::Error::BufferOverflow)?;
-                    writers
-                        .push(write)
-                        .map_err(|_| crate::Error::BufferOverflow)?;
+                    connections.push(conn?);
                 }
                 // 2. Read method calls from the existing connections and handle them.
                 res = self.get_next_call(
-                    // SAFETY: `readers` is not invalidated or dropped until the output of this
-                    // future is dropped.
-                    unsafe { &mut *(&mut readers as *mut _) },
+                    // SAFETY: `connections` is not invalidated or dropped until the output of
+                    // this future is dropped.
+                    unsafe { &mut *(&mut connections as *mut Vec<_>) },
                     last_method_call_winner.map(|idx| idx + 1),
                 ).fuse() => {
                         let (idx, call) = res?;
@@ -102,60 +91,46 @@ where
                         let mut stream = None;
                         let mut remove = true;
                         match call {
-                            Ok(call) => match self.handle_call(call, &mut writers[idx]).await {
-                                Ok(None) => remove = false,
-                                Ok(Some(s)) => stream = Some(s),
-                                Err(e) => warn!("Error writing to connection: {:?}", e),
-                            },
+                            Ok(call) => {
+                                match self.handle_call(call, connections[idx].write_mut()).await {
+                                    Ok(None) => remove = false,
+                                    Ok(Some(s)) => stream = Some(s),
+                                    Err(e) => warn!("Error writing to connection: {:?}", e),
+                                }
+                            }
                             Err(e) => warn!("Error reading from socket: {:?}", e),
                         }
 
                         if stream.is_some() || remove {
-                            let reader = readers.remove(idx);
-                            let writer = writers.remove(idx);
+                            let conn = connections.swap_remove(idx);
 
-                            #[cfg(not(feature = "std"))]
-                            drop(reply_stream_futures);
-                            if let Some(stream) = stream.map(|s| ReplyStream::new(s, reader, writer)) {
-                                reply_streams
-                                    .push(stream)
-                                    .map_err(|_| crate::Error::BufferOverflow)?;
+                            if let Some(stream) = stream {
+                                reply_streams.push(ReplyStream::new(stream, conn));
                             }
                         }
                 }
                 // 3. Read replies from the reply streams and send them off.
                 reply = reply_stream_select_all.fuse() => {
-                    #[cfg(not(feature = "std"))]
-                    drop(reply_stream_futures);
                     let (idx, reply) = reply;
                     last_reply_stream_winner = Some(idx);
-                    let id = reply_streams.get(idx).unwrap().conn.id();
+                    let id = reply_streams[idx].conn.id();
 
                     match reply {
                         Some(reply) => {
-                            if let Err(e) = reply_streams
-                                .get_mut(idx)
-                                .unwrap()
+                            if let Err(e) = reply_streams[idx]
                                 .conn
                                 .write_mut()
                                 .send_reply(&reply)
                                 .await
                             {
                                 warn!("Error writing to client {}: {:?}", id, e);
-                                reply_streams.remove(idx);
+                                reply_streams.swap_remove(idx);
                             }
                         }
                         None => {
                             trace!("Stream closed for client {}", id);
-                            let stream = reply_streams.remove(idx);
-
-                            let (read, write) = stream.conn.split();
-                            readers
-                                .push(read)
-                                .map_err(|_| crate::Error::BufferOverflow)?;
-                            writers
-                                .push(write)
-                                .map_err(|_| crate::Error::BufferOverflow)?;
+                            let stream = reply_streams.swap_remove(idx);
+                            connections.push(stream.conn);
                         }
                     }
                 }
@@ -169,24 +144,22 @@ where
     ///
     /// On success, this method returns a tuple containing:
     ///
-    /// * The index of the reader that yielded a call.
+    /// * The index of the connection that yielded a call.
     /// * A Result, containing a method call if reading was successful.
     async fn get_next_call<'r>(
         &mut self,
-        readers: &'r mut Vec<
-            ReadConnection<<<Listener as crate::Listener>::Socket as Socket>::ReadHalf>,
-            16,
-        >,
+        connections: &'r mut [Connection<Listener::Socket>],
         start_index: Option<usize>,
     ) -> crate::Result<(usize, crate::Result<Call<Service::MethodCall<'r>>>)> {
-        let mut read_futures: Vec<_, 16> = readers.iter_mut().map(|r| r.receive_call()).collect();
+        let mut read_futures: Vec<_> = connections
+            .iter_mut()
+            .map(|c| c.read_mut().receive_call())
+            .collect();
         let mut select_all = SelectAll::new(start_index);
         for future in &mut read_futures {
             // Safety: `future` is in fact `Unpin` but the compiler doesn't know that.
             unsafe {
-                select_all
-                    .push_unchecked(future)
-                    .map_err(|_| crate::Error::BufferOverflow)?;
+                select_all.push_unchecked(future);
             }
         }
 
@@ -215,8 +188,6 @@ where
     }
 }
 
-const MAX_CONNECTIONS: usize = 16;
-
 /// Method reply stream and connection pair.
 #[derive(Debug)]
 struct ReplyStream<St, Sock: Socket> {
@@ -228,14 +199,7 @@ impl<St, Sock> ReplyStream<St, Sock>
 where
     Sock: Socket,
 {
-    fn new(
-        stream: St,
-        read_conn: ReadConnection<Sock::ReadHalf>,
-        write_conn: WriteConnection<Sock::WriteHalf>,
-    ) -> Self {
-        Self {
-            stream,
-            conn: Connection::join(read_conn, write_conn),
-        }
+    fn new(stream: St, conn: Connection<Sock>) -> Self {
+        Self { stream, conn }
     }
 }

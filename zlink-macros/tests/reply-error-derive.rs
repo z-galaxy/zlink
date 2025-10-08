@@ -138,63 +138,32 @@ mod tests {
     }
 
     #[test]
-    fn field_order_requirements_with_lifetimes() {
-        // For enums with lifetimes, we require error before parameters
+    fn field_order_agnostic_with_lifetimes() {
+        // With alloc available, we no longer require a specific field order
+
+        // Parameters-first JSON should now work
         let json_parameters_first = r#"{"parameters":{"field":"test","reason":"fail"},"error":"com.example.Test.InvalidInput"}"#;
-
-        // Parameters-first JSON should fail to deserialize
-        #[cfg(feature = "std")]
-        {
-            let result: Result<TestError, _> = serde_json::from_str(json_parameters_first);
-            match result {
-                Err(e) if e.is_data() => {
-                    // Expected - our custom deserializer error becomes a "data" error in serde_json
-                    // This confirms the field order validation is working
-                }
-                Err(_) => panic!("Expected a data error for field order violation"),
-                Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
+        let result: Result<TestError, _> = serde_json::from_str(json_parameters_first);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            TestError::InvalidInput {
+                field: "test",
+                reason: "fail"
             }
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let result: Result<(TestError, usize), _> =
-                serde_json_core::from_str(json_parameters_first);
-            match result {
-                Err(_) => {
-                    // Expected - deserialization fails due to field order requirement
-                    // serde_json_core error types are different from serde_json
-                }
-                Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
-            }
-        }
+        );
 
-        // But error before parameters works fine
+        // Error-first JSON also works
         let json_error_first = r#"{"error":"com.example.Test.InvalidInput","parameters":{"field":"test","reason":"fail"}}"#;
-
-        #[cfg(feature = "std")]
-        {
-            let result: Result<TestError, _> = serde_json::from_str(json_error_first);
-            assert!(result.is_ok());
-            assert_eq!(
-                result.unwrap(),
-                TestError::InvalidInput {
-                    field: "test",
-                    reason: "fail"
-                }
-            );
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let (result, _): (TestError, usize) =
-                serde_json_core::from_str(json_error_first).unwrap();
-            assert_eq!(
-                result,
-                TestError::InvalidInput {
-                    field: "test",
-                    reason: "fail"
-                }
-            );
-        }
+        let result: Result<TestError, _> = serde_json::from_str(json_error_first);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            TestError::InvalidInput {
+                field: "test",
+                reason: "fail"
+            }
+        );
     }
 
     #[derive(ReplyError, Debug, PartialEq)]
@@ -205,81 +174,38 @@ mod tests {
     }
 
     #[test]
-    fn field_order_requirements_without_lifetimes() {
-        // For enums without lifetimes, we now also require error field first for simplicity
+    fn field_order_agnostic_without_lifetimes() {
+        // With alloc available, we no longer require a specific field order
+
+        // Parameters-first JSON should now work
         let json_parameters_first = r#"{"parameters":{"field":"test","reason":"fail"},"error":"com.example.Owned.InvalidInput"}"#;
-
-        // Parameters-first JSON should fail to deserialize
-        #[cfg(feature = "std")]
-        {
-            let result: Result<OwnedError, _> = serde_json::from_str(json_parameters_first);
-            match result {
-                Err(e) if e.is_data() => {
-                    // Expected - our custom deserializer error becomes a "data" error in serde_json
-                    // This confirms the field order validation is working
-                }
-                Err(_) => panic!("Expected a data error for field order violation"),
-                Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
+        let result: Result<OwnedError, _> = serde_json::from_str(json_parameters_first);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            OwnedError::InvalidInput {
+                field: "test".to_string(),
+                reason: "fail".to_string()
             }
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let result: Result<(OwnedError, usize), _> =
-                serde_json_core::from_str(json_parameters_first);
-            match result {
-                Err(_) => {
-                    // Expected - deserialization fails due to field order requirement
-                    // serde_json_core error types are different from serde_json
-                }
-                Ok(_) => panic!("Expected deserialization to fail for parameters-first JSON"),
-            }
-        }
+        );
 
-        // But error before parameters works fine
+        // Error-first JSON also works
         let json_error_first = r#"{"error":"com.example.Owned.InvalidInput","parameters":{"field":"test","reason":"fail"}}"#;
-
-        #[cfg(feature = "std")]
-        {
-            let result: Result<OwnedError, _> = serde_json::from_str(json_error_first);
-            assert!(result.is_ok());
-            assert_eq!(
-                result.unwrap(),
-                OwnedError::InvalidInput {
-                    field: "test".to_string(),
-                    reason: "fail".to_string()
-                }
-            );
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let (result, _): (OwnedError, usize) =
-                serde_json_core::from_str(json_error_first).unwrap();
-            assert_eq!(
-                result,
-                OwnedError::InvalidInput {
-                    field: "test".to_string(),
-                    reason: "fail".to_string()
-                }
-            );
-        }
+        let result: Result<OwnedError, _> = serde_json::from_str(json_error_first);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            OwnedError::InvalidInput {
+                field: "test".to_string(),
+                reason: "fail".to_string()
+            }
+        );
     }
 
     // Helper function for round-trip serialization test, abstracting std vs nostd differences
     fn round_trip_serialize(original: &TestError) {
-        #[cfg(feature = "std")]
-        {
-            let json = serde_json::to_string(original).unwrap();
-            let deserialized: TestError = serde_json::from_str(&json).unwrap();
-            assert_eq!(*original, deserialized);
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let mut buffer = [0u8; 512];
-            let len = serde_json_core::to_slice(original, &mut buffer).unwrap();
-            let json_bytes = &buffer[..len];
-            let (deserialized, _): (TestError, usize) =
-                serde_json_core::from_slice(json_bytes).unwrap();
-            assert_eq!(*original, deserialized);
-        }
+        let json = serde_json::to_string(original).unwrap();
+        let deserialized: TestError = serde_json::from_str(&json).unwrap();
+        assert_eq!(*original, deserialized);
     }
 }

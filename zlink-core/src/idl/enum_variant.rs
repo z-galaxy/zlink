@@ -23,8 +23,7 @@ impl<'a> EnumVariant<'a> {
     }
 
     /// Creates a new enum variant with the given name and owned comments.
-    #[cfg(feature = "std")]
-    pub fn new_owned(name: &'a str, comments: Vec<Comment<'a>>) -> Self {
+    pub fn new_owned(name: &'a str, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
         Self {
             name,
             comments: List::from(comments),
@@ -75,7 +74,7 @@ mod tests {
         assert_eq!(variant.name(), "active");
         assert!(!variant.has_comments());
 
-        let mut displayed = mayheap::String::<32>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "active");
     }
@@ -89,7 +88,7 @@ mod tests {
         assert_eq!(variant.name(), "active");
         assert!(variant.has_comments());
 
-        let mut displayed = mayheap::String::<64>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# The active state\nactive");
     }
@@ -105,15 +104,14 @@ mod tests {
         assert!(variant.has_comments());
         assert_eq!(variant.comments().count(), 2);
 
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# First comment\n# Second comment\ncomplex");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn owned_variant_with_comments() {
-        let comments = vec![
+        let comments = alloc::vec![
             Comment::new("Owned comment 1"),
             Comment::new("Owned comment 2"),
         ];
@@ -122,7 +120,7 @@ mod tests {
         assert_eq!(variant.name(), "owned");
         assert!(variant.has_comments());
 
-        let mut displayed = mayheap::String::<128>::new();
+        let mut displayed = String::new();
         write!(&mut displayed, "{}", variant).unwrap();
         assert_eq!(displayed, "# Owned comment 1\n# Owned comment 2\nowned");
     }

@@ -5,7 +5,7 @@
 //! connections.
 
 use crate::connection::socket::{ReadHalf, Socket, WriteHalf};
-use mayheap::Vec;
+use alloc::vec::Vec;
 
 /// Mock socket implementation for testing.
 ///
@@ -15,7 +15,7 @@ use mayheap::Vec;
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockSocket {
-    read_data: Vec<u8, 1024>,
+    read_data: Vec<u8>,
     read_pos: usize,
 }
 
@@ -28,11 +28,11 @@ impl MockSocket {
         let mut data = Vec::new();
 
         for response in responses {
-            data.extend_from_slice(response.as_bytes()).unwrap();
-            data.push(b'\0').unwrap();
+            data.extend_from_slice(response.as_bytes());
+            data.push(b'\0');
         }
         // Add an extra null byte to mark end of all messages
-        data.push(b'\0').unwrap();
+        data.push(b'\0');
 
         Self {
             read_data: data,
@@ -62,7 +62,7 @@ impl Socket for MockSocket {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockReadHalf {
-    data: Vec<u8, 1024>,
+    data: Vec<u8>,
     pos: usize,
 }
 
@@ -91,7 +91,7 @@ impl ReadHalf for MockReadHalf {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockWriteHalf {
-    written: Vec<u8, 1024>,
+    written: Vec<u8>,
 }
 
 impl MockWriteHalf {
@@ -103,7 +103,7 @@ impl MockWriteHalf {
 
 impl WriteHalf for MockWriteHalf {
     async fn write(&mut self, buf: &[u8]) -> crate::Result<()> {
-        self.written.extend_from_slice(buf).unwrap();
+        self.written.extend_from_slice(buf);
         Ok(())
     }
 }

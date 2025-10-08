@@ -12,9 +12,7 @@
 #![doc = include_str!("../README.md")]
 
 #[cfg(not(feature = "tokio"))]
-compile_error!(
-    "Currently 'tokio' feature must be enabled. `embassy` feature will also be supported in the future."
-);
+compile_error!("Currently 'tokio' feature must be enabled.");
 
 #[cfg(feature = "tokio")]
 pub use zlink_tokio::*;
