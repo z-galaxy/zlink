@@ -29,7 +29,7 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         Self {
             socket,
             id,
-            buffer: Vec::new(),
+            buffer: alloc::vec![0; BUFFER_SIZE],
             pos: 0,
         }
     }
