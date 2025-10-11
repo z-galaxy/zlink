@@ -425,38 +425,17 @@ cargo run \
 
 ### Main Features
 
-- `tokio` (default): Enable tokio runtime integration and use of standard library, `serde_json` and
-  `tracing`. This is **currently** the only supported backend and therefore required.
+- `tokio` (default): Enable tokio runtime integration and use of standard library.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
+- `tracing` (default): Enable `tracing`-based logging.
+- `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
+  used.
 
 ### IDL and Introspection
 
 - `idl`: Support for IDL type representations.
 - `introspection`: Enable runtime introspection of service interfaces.
 - `idl-parse`: Parse Varlink IDL files at runtime (requires `std`).
-
-### Buffer Size Features
-
-Control the I/O buffer size (only one can be enabled at a time):
-
-- `io-buffer-2kb` (default): 2KB buffers for minimal memory usage.
-- `io-buffer-4kb`: 4KB buffers.
-- `io-buffer-16kb`: 16KB buffers for better performance with larger messages.
-- `io-buffer-1mb`: 1MB buffers for high-throughput scenarios.
-
-> **Note**: These feature flags are mainly of interest to embedded systems. With `tokio` enabled,
-> these only represent the initial buffer sizes.
-
-## Upcoming Features & Crates
-
-- `embedded`: No-std support for embedded systems. It will enable use of:
-  - `serde-json-core` for JSON serialization and deserialization.
-  - `embassy-usb` for communication with a host via a USB device.
-  - `defmt` for logging.
-- `usb`: USB transport support for host-side communication.
-
-Behind the scenes, `zlink` will make use of the upcoming `zlink-micro` and `zlink-usb` crates.
-Together these will enable RPC between a (Linux) host and microcontroller(s).
 
 ## Getting Help and/or Contributing
 

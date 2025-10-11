@@ -8,12 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["tokio", "proxy"]
+default = ["tokio", "proxy", "tracing"]
 tokio = ["dep:zlink-tokio"]
 proxy = ["zlink-tokio/proxy"]
 idl = ["zlink-tokio/idl"]
 idl-parse = ["zlink-tokio/idl-parse"]
 introspection = ["zlink-tokio/introspection"]
+tracing = ["zlink-tokio/tracing"]
+defmt = ["zlink-tokio/defmt"]
 
 [dependencies]
 zlink-tokio = { path = "../zlink-tokio", version = "=0.1.1", default-features = false, optional = true }

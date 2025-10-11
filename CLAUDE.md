@@ -8,8 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Run the full test suite, including doc tests and compile-tests
 cargo test --all-features
-# For embedded
-cargo test -p zlink-core --no-default-features --features embedded,introspection
+# For no_std
+cargo test -p zlink-core --no-default-features --features idl-parse,proxy,defmt
 ```
 
 ### Code Quality
@@ -22,8 +22,8 @@ cargo clippy -- -D warnings
 
 # Check all features compile
 cargo check --all-features
-# For embedded
-cargo check -p zlink-core --no-default-features --features embedded,introspection
+# For no_std
+cargo check -p zlink-core --no-default-features --features idl-parse,proxy,defmt
 ```
 
 ### Git Hooks Setup
@@ -34,13 +34,13 @@ cp .githooks/* .git/hooks/
 
 ## Architecture Overview
 
-This is a Rust workspace implementing an asynchronous no-std-compatible Varlink IPC library. The architecture is modular with clear separation of concerns:
+This is a Rust workspace implementing an asynchronous Varlink IPC library. The architecture is modular with clear separation of concerns:
 
 ### Core Architecture
-- **zlink-core**: No-std/no-alloc foundation providing core APIs. Not used directly.
-- **zlink**: Main unified API crate that re-exports appropriate subcrates based on cargo features
-- **zlink-tokio**: Tokio runtime integration and transport implementations
-- **zlink-usb** + **zlink-micro**: Enable USB-based IPC between Linux hosts and microcontrollers
+- **zlink-core**: No-std foundation providing core APIs. Not used directly.
+- **zlink-macros**: Contains the attribute and derive macros. Not used directly.
+- **zlink-tokio**: Tokio runtime integration and transport implementations. Not used directly.
+- **zlink**: Main unified API crate that re-exports appropriate subcrates based on cargo features.
 
 ### Key Components
 - **Connection**: Low-level API for message send/receive with unique IDs for read/write halves
@@ -49,14 +49,24 @@ This is a Rust workspace implementing an asynchronous no-std-compatible Varlink 
 - **Call/Reply**: Core message types for IPC communication
 
 ### Feature System
-- `std` feature: Standard library support with serde_json and tracing for logging
-- `embedded` feature: No-std support with serde-json-core and defmt logging
-- I/O buffer size features: `io-buffer-2kb` (default), `io-buffer-4kb`, `io-buffer-16kb`, `io-buffer-1mb`
+
+#### Main Features
+
+- `tokio` (default): Enable tokio runtime integration and use of standard library.
+- `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
+- `tracing` (default): Enable `tracing`-based logging.
+- `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
+  used.
+
+#### IDL and Introspection
+
+- `idl`: Support for IDL type representations.
+- `introspection`: Enable runtime introspection of service interfaces.
+- `idl-parse`: Parse Varlink IDL files at runtime (requires `std`).
 
 ### Development Patterns
 - Uses workspace-level package metadata (edition, rust-version, license, repository)
-- Supports both std and no_std environments through feature flags
-- Leverages mayheap for heap/heapless abstraction
+- zlink-core supports both std and no_std environments through feature flags
 - Uses pin-project-lite for async/await support
 - Only enable needed features of dependencies
 - For logging, use the macros from `log` module that abstract over tracing and defmt
