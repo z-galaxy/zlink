@@ -57,3 +57,8 @@ tokio = { version = "1.44.0", features = [
     "test-util",
     "fs",
 ] }
+criterion = { version = "0.7", features = ["async_tokio"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
