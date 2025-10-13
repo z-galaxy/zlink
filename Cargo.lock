@@ -1945,7 +1945,6 @@ dependencies = [
  "futures-util",
  "indexmap",
  "itoa",
- "memchr",
  "pin-project-lite",
  "ryu",
  "serde",

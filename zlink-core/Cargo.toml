@@ -22,7 +22,6 @@ zlink-macros = { path = "../zlink-macros", version = "=0.1.1" }
 serde_json = { version = "1.0.139", default-features = false, features = ["alloc"] }
 itoa = { version = "1.0", default-features = false }
 ryu = { version = "1.0", default-features = false }
-memchr = { version = "2.7.4", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "async-await-macro",
