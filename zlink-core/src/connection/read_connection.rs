@@ -10,8 +10,8 @@ use super::{
     Call, BUFFER_SIZE, MAX_BUFFER_SIZE,
 };
 use alloc::vec::Vec;
-use memchr::memchr;
 use serde::Deserialize;
+use serde_json::Deserializer;
 
 /// A connection that can only be used for reading.
 ///
@@ -121,9 +121,9 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     {
         self.read_from_socket().await?;
 
-        // Unwrap is safe because `read_from_socket` call above ensures at least one null byte in
-        // the buffer.
-        let null_index = memchr(b'\0', &self.buffer[self.msg_pos..]).unwrap() + self.msg_pos;
+        let mut stream = Deserializer::from_slice(&self.buffer[self.msg_pos..]).into_iter::<M>();
+        let msg = stream.next();
+        let null_index = self.msg_pos + stream.byte_offset();
         let buffer = &self.buffer[self.msg_pos..null_index];
         if self.buffer[null_index + 1] == b'\0' {
             // This means we're reading the last message and can now reset the indices.
@@ -133,8 +133,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             self.msg_pos = null_index + 1;
         }
 
-        match from_slice::<M>(buffer) {
-            Ok(msg) => {
+        match msg {
+            Some(Ok(msg)) => {
                 // SAFETY: Since the parsing from JSON already succeeded, we can be sure that the
                 // buffer contains a valid UTF-8 string.
                 trace!("connection {}: received a message: {}", self.id, unsafe {
@@ -142,7 +142,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
                 });
                 Ok(msg)
             }
-            Err(e) => Err(e),
+            Some(Err(e)) => Err(e.into()),
+            None => Err(crate::Error::UnexpectedEof),
         }
     }
 
@@ -186,11 +187,4 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     pub fn read_half(&self) -> &Read {
         &self.socket
     }
-}
-
-fn from_slice<'a, T>(buffer: &'a [u8]) -> Result<T>
-where
-    T: Deserialize<'a>,
-{
-    serde_json::from_slice::<T>(buffer).map_err(Into::into)
 }
