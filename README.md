@@ -5,13 +5,13 @@
   <a href="https://docs.rs/zlink/">
     <img alt="API Documentation" src="https://docs.rs/zlink/badge.svg">
   </a>
-  <a href="https://github.com/zeenix/zlink/actions/workflows/rust.yml">
-    <img alt="Build Status" src="https://github.com/zeenix/zlink/actions/workflows/rust.yml/badge.svg">
+  <a href="https://github.com/z-galaxy/zlink/actions/workflows/rust.yml">
+    <img alt="Build Status" src="https://github.com/z-galaxy/zlink/actions/workflows/rust.yml/badge.svg">
   </a>
 </p>
 
 <p align="center">
-  <img alt="Project logo" src="https://raw.githubusercontent.com/zeenix/zlink/3660d731d7de8f60c8d82e122b3ece15617185e4/data/logo.svg">
+  <img alt="Project logo" src="https://raw.githubusercontent.com/z-galaxy/zlink/3660d731d7de8f60c8d82e122b3ece15617185e4/data/logo.svg">
 </p>
 
 <h1 align="center">zlink</h1>
@@ -442,7 +442,7 @@ cargo run \
 If you need help in using these crates, are looking for ways to contribute, or just want to hang out
 with the cool kids, please come chat with us in the
 [`#zlink:matrix.org`](https://matrix.to/#/#zlink:matrix.org) Matrix room. If something doesn't seem
-right, please [file an issue](https://github.com/zeenix/zlink/issues/new).
+right, please [file an issue](https://github.com/z-galaxy/zlink/issues/new).
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -450,7 +450,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 This project is licensed under the [MIT License][license].
 
-[cips]: https://github.com/zeenix/zlink/actions/workflows/rust.yml
+[cips]: https://github.com/z-galaxy/zlink/actions/workflows/rust.yml
 [crates.io]: https://crates.io/crates/zlink
 [license]: ./LICENSE
 [`zlink`]: https://docs.rs/zlink
