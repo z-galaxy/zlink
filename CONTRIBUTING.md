@@ -9,7 +9,7 @@ you contribute.
 
 ## Submitting bug reports and feature requests
 
-You can create issues [here](https://github.com/zeenix/zlink/issues/new). When reporting a bug or
+You can create issues [here](https://github.com/z-galaxy/zlink/issues/new). When reporting a bug or
 asking for help, please include enough details so that the people helping you can reproduce the
 behavior you are seeing. For some tips on how to approach this, read about how to produce a
 [Minimal, Complete, and Verifiable Example](https://stackoverflow.com/help/mcve).
