@@ -12,7 +12,7 @@ on:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: codspeed-macro
     steps:
       - uses: actions/checkout@v5
       - name: Setup rust toolchain, cache and cargo-codspeed binary
@@ -22,10 +22,10 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
       - name: Build the benchmark target(s)
-        run: cargo codspeed build
+        run: cargo codspeed build -m walltime
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          mode: instrumentation
+          mode: walltime
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }} # optional for public repos
