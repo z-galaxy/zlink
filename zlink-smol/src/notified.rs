@@ -8,14 +8,14 @@ use std::{
 };
 
 use crate::Reply;
-use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures_channel::oneshot;
+use async_broadcast::{broadcast, Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use async_channel::{bounded, Receiver as OneshotReceiver, Sender as OneshotSender};
 
 /// A notified state (e.g a field) of a service implementation.
 #[derive(Debug, Clone)]
 pub struct State<T, ReplyParams> {
     value: T,
-    tx: UnboundedSender<ReplyParams>,
+    tx: BroadcastSender<ReplyParams>,
 }
 
 impl<T, ReplyParams> State<T, ReplyParams>
@@ -25,7 +25,7 @@ where
 {
     /// Create a new notified field.
     pub fn new(value: T) -> Self {
-        let (tx, _rx) = unbounded();
+        let (tx, _) = broadcast(1);
 
         Self { value, tx }
     }
@@ -34,7 +34,7 @@ where
     pub fn set(&mut self, value: T) {
         self.value = value.clone();
         // Failure means that there are currently no receivers and that's ok.
-        let _ = self.tx.unbounded_send(value.into());
+        let _ = self.tx.try_broadcast(value.into());
     }
 
     /// Get the value of the notified field.
@@ -44,13 +44,7 @@ where
 
     /// Get a stream of replies for the notified field.
     pub fn stream(&self) -> Stream<ReplyParams> {
-        // Create a new receiver that shares the sender
-        // Note: Since unbounded channels don't support multiple receivers natively,
-        // we create a new channel pair. This is a limitation compared to tokio's broadcast.
-        // For a production implementation, consider using a proper broadcast channel.
-        let (tx, rx) = unbounded();
-        // Store the new tx for future updates (this is a simplification)
-        Stream(StreamInner::Broadcast(rx))
+        Stream(StreamInner::Broadcast(self.tx.new_receiver()))
     }
 }
 
@@ -59,7 +53,7 @@ where
 /// This is useful for handling method calls in a separate task/thread.
 #[derive(Debug)]
 pub struct Once<ReplyParams> {
-    tx: oneshot::Sender<ReplyParams>,
+    tx: OneshotSender<ReplyParams>,
 }
 
 impl<ReplyParams> Once<ReplyParams>
@@ -68,7 +62,7 @@ where
 {
     /// Create a new notified oneshot state.
     pub fn new() -> (Self, Stream<ReplyParams>) {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = bounded(1);
 
         (Self { tx }, Stream(StreamInner::Oneshot(rx)))
     }
@@ -80,7 +74,7 @@ where
     {
         // Failure means that we dropped the receiver stream internally before it received anything
         // and that's a big bug that must not happen.
-        self.tx.send(value.into()).unwrap();
+        self.tx.try_send(value.into()).unwrap();
     }
 }
 
@@ -98,25 +92,38 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut self.0 {
             StreamInner::Broadcast(stream) => {
+                let reply = loop {
+                    match ready!(Pin::new(&mut *stream).poll_next(cx)) {
+                        Some(Ok(reply)) => {
+                            break Some(Reply::new(Some(reply)).set_continues(Some(true)));
+                        }
+                        // Some intermediate values were missed. That's OK, as long as we get the
+                        // latest value.
+                        Some(Err(_)) => continue,
+                        None => break None,
+                    }
+                };
+
+                Poll::Ready(reply)
+            }
+            StreamInner::Oneshot(stream) => {
+                if stream.is_closed() && stream.is_empty() {
+                    return Poll::Ready(None);
+                }
+
                 match ready!(Pin::new(&mut *stream).poll_next(cx)) {
-                    Some(reply) => Poll::Ready(Some(
-                        Reply::new(Some(reply)).set_continues(Some(true)),
-                    )),
+                    Some(reply) => {
+                        Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(false))))
+                    }
                     None => Poll::Ready(None),
                 }
             }
-            StreamInner::Oneshot(stream) => match ready!(Pin::new(&mut *stream).poll(cx)) {
-                Ok(reply) => {
-                    Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(false))))
-                }
-                Err(_) => Poll::Ready(None),
-            },
         }
     }
 }
 
 #[derive(Debug)]
 enum StreamInner<ReplyParams> {
-    Broadcast(UnboundedReceiver<ReplyParams>),
-    Oneshot(oneshot::Receiver<ReplyParams>),
+    Broadcast(BroadcastReceiver<ReplyParams>),
+    Oneshot(OneshotReceiver<ReplyParams>),
 }
