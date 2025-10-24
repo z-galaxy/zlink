@@ -21,9 +21,9 @@ smol = { version = "2.0", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "alloc",
+    "sink",
 ] }
-async-broadcast = "0.7"
-async-channel = "2.3"
+futures-channel = { version = "0.3.31", default-features = false, features = ["alloc", "sink"] }
 
 [dev-dependencies]
 smol = { version = "2.0" }
