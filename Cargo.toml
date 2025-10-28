@@ -5,6 +5,7 @@ members = [
     "zlink-codegen",
     "zlink-codegen/test-integration",
     "zlink-tokio",
+    "zlink-smol",
     "zlink-macros",
 ]
 resolver = "2"

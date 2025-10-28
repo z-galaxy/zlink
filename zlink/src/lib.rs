@@ -1,4 +1,4 @@
-#![cfg_attr(not(feature = "tokio"), no_std)]
+#![cfg_attr(not(any(feature = "tokio", feature = "smol")), no_std)]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/z-galaxy/zlink/3660d731d7de8f60c8d82e122b3ece15617185e4/data/logo.png"
 )]
@@ -11,8 +11,11 @@
 #![warn(unreachable_pub)]
 #![doc = include_str!("../README.md")]
 
-#[cfg(not(feature = "tokio"))]
-compile_error!("Currently 'tokio' feature must be enabled.");
+#[cfg(not(any(feature = "tokio", feature = "smol")))]
+compile_error!("At least one runtime feature must be enabled: 'tokio' or 'smol'");
 
 #[cfg(feature = "tokio")]
 pub use zlink_tokio::*;
+
+#[cfg(all(feature = "smol", not(feature = "tokio")))]
+pub use zlink_smol::*;
