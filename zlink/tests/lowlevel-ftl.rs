@@ -243,7 +243,7 @@ impl Service for Ftl {
                 if call.more() {
                     return MethodReply::Error(ReplyError::Ftl(FtlError::ParameterOutOfRange));
                 }
-                self.drive_condition.set(*condition);
+                self.drive_condition.set(*condition).await;
                 MethodReply::Single(Some(Reply::Ftl(self.drive_condition.get().into())))
             }
             Method::Ftl(FtlMethod::GetCoordinates) => {
@@ -270,7 +270,7 @@ impl Service for Ftl {
                 };
                 condition.state = DriveState::Idle;
                 condition.tylium_level = condition.tylium_level - tylium_required;
-                self.drive_condition.set(condition);
+                self.drive_condition.set(condition).await;
                 self.coordinates = coords;
 
                 MethodReply::Single(Some(Reply::Ftl(FtlReply::Coordinates(coords))))

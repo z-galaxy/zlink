@@ -31,7 +31,7 @@ where
     }
 
     /// Set the value of the notified field and notify all listeners.
-    pub fn set(&mut self, value: T) {
+    pub async fn set(&mut self, value: T) {
         self.value = value.clone();
         // Failure means that there are currently no receivers and that's ok.
         let _ = self.tx.send(value.into());
