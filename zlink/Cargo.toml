@@ -10,15 +10,17 @@ repository.workspace = true
 [features]
 default = ["tokio", "proxy", "tracing"]
 tokio = ["dep:zlink-tokio"]
-proxy = ["zlink-tokio/proxy"]
-idl = ["zlink-tokio/idl"]
-idl-parse = ["zlink-tokio/idl-parse"]
-introspection = ["zlink-tokio/introspection"]
-tracing = ["zlink-tokio/tracing"]
-defmt = ["zlink-tokio/defmt"]
+smol = ["dep:zlink-smol"]
+proxy = ["zlink-tokio?/proxy", "zlink-smol?/proxy"]
+idl = ["zlink-tokio?/idl", "zlink-smol?/idl"]
+idl-parse = ["zlink-tokio?/idl-parse", "zlink-smol?/idl-parse"]
+introspection = ["zlink-tokio?/introspection", "zlink-smol?/introspection"]
+tracing = ["zlink-tokio?/tracing", "zlink-smol?/tracing"]
+defmt = ["zlink-tokio?/defmt", "zlink-smol?/defmt"]
 
 [dependencies]
 zlink-tokio = { path = "../zlink-tokio", version = "=0.1.1", default-features = false, optional = true }
+zlink-smol = { path = "../zlink-smol", version = "=0.1.1", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.44.0", features = [
