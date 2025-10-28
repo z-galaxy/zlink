@@ -95,6 +95,8 @@ jobs:
         run: |
           cargo test --release --all-features
           cargo test -p zlink-core --release --no-default-features --features idl-parse,proxy,defmt
+          # Test the smol support
+          cargo test -p zlink --release --no-default-features --features tracing,smol,proxy,introspection,idl-parse
 
   doc_build:
     runs-on: ubuntu-latest
