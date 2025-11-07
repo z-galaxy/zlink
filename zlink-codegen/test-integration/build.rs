@@ -29,14 +29,11 @@ fn main() {
     let output_file = PathBuf::from(out_dir).join("generated.rs");
 
     // Generate code from all interface files
-    let idl_path_refs: Vec<&PathBuf> = idl_paths.iter().collect();
-    zlink_codegen::generate_files(
-        &idl_path_refs,
-        &output_file,
-        &zlink_codegen::CodegenOptions {
-            rustfmt: true,
-            ..Default::default()
-        },
-    )
+    zlink_codegen::generate_files(&zlink_codegen::CodegenOptions {
+        files: idl_paths,
+        output: Some(output_file),
+        rustfmt: true,
+        ..Default::default()
+    })
     .expect("Failed to generate code");
 }
