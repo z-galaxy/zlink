@@ -19,6 +19,10 @@ pub struct Args {
     /// Generate separate files for each interface (ignored if --output is specified).
     #[arg(short = 'm', long)]
     pub multiple_files: bool,
+
+    /// Format the generated Rust code using rustfmt.
+    #[arg(short = 'f', long)]
+    pub rustfmt: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -36,5 +40,9 @@ pub enum Command {
         /// Generate separate files for each interface.
         #[arg(short = 'm', long)]
         multiple_files: bool,
+
+        /// Format the generated Rust code using rustfmt.
+        #[arg(short = 'f', long)]
+        rustfmt: bool,
     },
 }
