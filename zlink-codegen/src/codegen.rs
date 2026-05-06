@@ -1,6 +1,6 @@
 //! Code generation implementation.
 
-use anyhow::Result;
+use crate::Result;
 use heck::{ToPascalCase, ToSnakeCase};
 use std::fmt::Write;
 use zlink::idl::{CustomEnum, CustomObject, CustomType, Field, Interface, Method, Type};

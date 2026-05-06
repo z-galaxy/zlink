@@ -2159,7 +2159,6 @@ dependencies = [
 name = "zlink-codegen"
 version = "0.5.0"
 dependencies = [
- "anyhow",
  "clap",
  "heck",
  "pretty_assertions",

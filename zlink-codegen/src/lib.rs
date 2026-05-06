@@ -3,9 +3,11 @@
 )]
 //! Code generation for Varlink interfaces.
 
-use anyhow::{Context, Result};
 use std::{fs, path::PathBuf};
 use zlink::idl::Interface;
+
+/// The Result type for the zlink-codegen crate.
+pub type Result<T> = std::result::Result<T, Error>;
 
 mod codegen;
 pub use codegen::CodeGenerator;
@@ -52,18 +54,13 @@ pub fn format_code(code: &str) -> Result<String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .context("Failed to spawn rustfmt")?;
+        .spawn()?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(code.as_bytes())
-            .context("Failed to write to rustfmt stdin")?;
+        stdin.write_all(code.as_bytes())?;
     }
 
-    let output = child
-        .wait_with_output()
-        .context("Failed to wait for rustfmt")?;
+    let output = child.wait_with_output()?;
 
     if !output.status.success() {
         // If rustfmt fails, return the original code.
@@ -74,7 +71,7 @@ pub fn format_code(code: &str) -> Result<String> {
         return Ok(code.to_string());
     }
 
-    String::from_utf8(output.stdout).context("Failed to parse rustfmt output")
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 /// Configuration options for Varlink code generation.
@@ -157,7 +154,7 @@ pub struct CodegenOptions {
 /// };
 /// zlink_codegen::generate_files(&config).expect("Failed to generate code");
 /// ```
-pub fn generate_files(config: &CodegenOptions) -> Result<(), Error> {
+pub fn generate_files(config: &CodegenOptions) -> Result<()> {
     use std::io::Write;
 
     if config.files.is_empty() {

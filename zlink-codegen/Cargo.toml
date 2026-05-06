@@ -21,7 +21,6 @@ zlink = { path = "../zlink", version = "0.5.0", features = [
 ] }
 clap = { version = "4.5", features = ["derive"] }
 heck = "0.5"
-anyhow = "1.0"
 
 [dev-dependencies]
 tempfile = "3.14"

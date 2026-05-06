@@ -1,6 +1,5 @@
-use anyhow::Result;
 use clap::Parser;
-use zlink_codegen::CodegenOptions;
+use zlink_codegen::{CodegenOptions, Result};
 
 mod cli;
 use cli::Args;
