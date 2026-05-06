@@ -18,7 +18,9 @@ pub use self::error::Error;
 ///
 /// # Errors
 ///
-/// Returns an error if code generation fails.
+/// This function will return an error if:
+/// - [`Error::Fmt`] - A formatting error occurs during code generation.
+/// - [`Error::Zlink`] - The Varlink interface definition is malformed or invalid.
 pub fn generate_interface(interface: &Interface<'_>) -> Result<String> {
     let mut generator = CodeGenerator::new();
     generator.generate_interface(interface, false)?;
@@ -26,6 +28,12 @@ pub fn generate_interface(interface: &Interface<'_>) -> Result<String> {
 }
 
 /// Generate Rust code from multiple Varlink interfaces.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - [`Error::Fmt`] - A formatting error occurs during code generation.
+/// - [`Error::Zlink`] - Any Varlink interface definition is malformed or invalid.
 pub fn generate_interfaces(interfaces: &[Interface<'_>]) -> Result<String> {
     let mut generator = CodeGenerator::new();
 
@@ -43,6 +51,12 @@ pub fn generate_interfaces(interfaces: &[Interface<'_>]) -> Result<String> {
 }
 
 /// Format generated Rust code using rustfmt.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - [`Error::Io`] - The `rustfmt` process cannot be spawned or piped to.
+/// - [`Error::InvalidUtf8`] - The formatted output contains invalid UTF-8.
 pub fn format_code(code: &str) -> Result<String> {
     use std::{
         io::Write,
@@ -138,7 +152,6 @@ pub struct CodegenOptions {
 /// - `Error::InvalidArgument` - No input files specified or paths are invalid.
 /// - `Error::Io` - File I/O operations fail (reading input or writing output).
 /// - `Error::Zlink` - Any Varlink interface definition is malformed or invalid.
-/// - `Error::Anyhow` - Code generation or formatting encounters an error.
 ///
 /// # Examples
 ///
