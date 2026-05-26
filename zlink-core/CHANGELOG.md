@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- 🐛 A `Server` driven by a `ReadyListener` (handed-down socket: systemd `Accept=yes`,
+  `varlinkctl exec:`) now exits cleanly from `Server::run` once the lone connection closes,
+  instead of hanging forever waiting for a second `accept()` that never comes. This is driven
+  by a new defaulted `Listener::exit_when_done()` method which `ReadyListener` overrides to
+  `true`.
+
 ## 0.5.0 - 2026-05-03
 
 ### Added

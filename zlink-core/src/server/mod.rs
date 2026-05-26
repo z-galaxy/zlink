@@ -5,7 +5,7 @@ pub mod service;
 mod infallible;
 
 use alloc::vec::Vec;
-use futures_util::{FutureExt, StreamExt};
+use futures_util::{FutureExt, StreamExt, future::Either};
 use select_all::SelectAll;
 use service::MethodReply;
 
@@ -59,6 +59,11 @@ where
     /// [`tokio::select!`]: https://docs.rs/tokio/latest/tokio/macro.select.html
     pub async fn run(mut self) -> crate::Result<()> {
         let mut listener = self.listener.take().unwrap();
+        // Whether this is a one-shot listener whose `accept()` resolves at most once. True for
+        // listeners like `ReadyListener` (handed-down socket); false for listening sockets that
+        // should keep accepting forever. When true, we return once that single connection has
+        // been served and all work has drained (see `accepted_once` below).
+        let exit_when_done = listener.exit_when_done();
         let mut connections = Vec::new();
         let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
         let mut reply_stream_futures = Vec::new();
@@ -67,8 +72,22 @@ where
         let mut read_futures = Vec::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
+        // Tracks whether the listener has produced its connection. For a one-shot listener
+        // (`exit_when_done == true`), `accept()` resolves at most once, so this flag marks the
+        // listener as exhausted: it lets us return cleanly once that connection and all in-flight
+        // work has drained.
+        let mut accepted_once = false;
 
         loop {
+            // Exit cleanly when we're done: a one-shot listener has handed out its single
+            // connection, every connection has been closed, and every reply stream has finished.
+            // Without this, `Server::run` would block forever on `listener.accept()` (which pends
+            // forever for `ReadyListener` after the first call).
+            if exit_when_done && accepted_once && connections.is_empty() && reply_streams.is_empty()
+            {
+                return Ok(());
+            }
+
             // We re-populate the `reply_stream_futures` in each iteration so we must clear it
             // first.
             reply_stream_futures.clear();
@@ -103,10 +122,23 @@ where
                 }
             }
 
+            // Once a one-shot listener has produced its connection, stop polling `accept()` (which
+            // would pend forever for `ReadyListener`) by swapping in a never-ready future at
+            // the same output type. `Either` implements `Future` with the same `Output` as both
+            // arms, so the `select_biased!` arm below sees `Result<Connection<_>>` either way.
+            let accept_fut = if exit_when_done && accepted_once {
+                Either::Left(core::future::pending::<
+                    crate::Result<Connection<Listener::Socket>>,
+                >())
+            } else {
+                Either::Right(listener.accept())
+            };
+
             futures_util::select_biased! {
                 // 1. Accept a new connection.
-                conn = listener.accept().fuse() => {
+                conn = accept_fut.fuse() => {
                     connections.push(conn?);
+                    accepted_once = true;
                 }
                 // 2. Read method calls from the existing connections and handle them.
                 (idx, result) = read_select_all.fuse() => {
