@@ -9,6 +9,8 @@ use std::{pin::pin, time::Duration};
 use futures_util::{TryStreamExt, pin_mut, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::{select, time::sleep};
+#[cfg(feature = "tokio")]
+use zlink::ReadyListener;
 use zlink::{
     introspect::{self, CustomType, ReplyError as _, Type},
     notified::{self, traits::State as _},
@@ -507,6 +509,483 @@ async fn reply_error_derive_works() {
     let fields: Vec<_> = FtlError::VARIANTS[3].fields().collect();
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].name(), "temperature");
+}
+
+/// Test that a server correctly handles a `GetInfo` call with `"parameters":{}` in the request.
+///
+/// Regression test for issue #233: `varlinkctl info` sends the raw bytes
+/// `{"method":"org.varlink.service.GetInfo","parameters":{}}\0` but zlink previously rejected
+/// this with a deserialization error because the no-arg `GetInfo` is a unit variant and serde
+/// rejects an empty-object `parameters` for unit variants.  The fix is a hand-written
+/// `Deserialize for Method` that accepts absent, null, or empty `parameters` for `GetInfo`.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn varlinkctl_get_info_with_empty_parameters() -> Result<(), Box<dyn std::error::Error>> {
+    let (server_conn, client) = connected_pair()?;
+    let service = Ftl::new(DriveCondition {
+        state: DriveState::Idle,
+        tylium_level: 100,
+    });
+    let server = zlink::Server::new(ReadyListener::new(server_conn), service);
+
+    select! {
+        res = server.run() => res?,
+        res = run_varlinkctl_client(client) => res?,
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "tokio")]
+async fn run_varlinkctl_client(
+    mut stream: tokio::net::UnixStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // This is the exact byte sequence that `varlinkctl info` sends (strace from issue #233).
+    // The key difference from zlink's own client: it includes `"parameters":{}` for the
+    // no-argument GetInfo method, which previously triggered a deserialization error.
+    let msg = b"{\"method\":\"org.varlink.service.GetInfo\",\"parameters\":{}}\0";
+    stream.write_all(msg).await?;
+
+    // Read the NUL-terminated reply.
+    let mut buf = Vec::new();
+    loop {
+        match stream.read_u8().await {
+            Ok(0) => break,
+            Ok(b) => buf.push(b),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // Parse and validate the reply.  The Varlink wire format for a successful reply is:
+    //   {"parameters":{"vendor":"...","product":"...","version":"...","url":"...","interfaces":[...
+    // ]}}
+    let reply: serde_json::Value = serde_json::from_slice(&buf)?;
+
+    // Must be a successful reply (no "error" key).
+    assert!(
+        reply.get("error").is_none(),
+        "server returned an error: {reply}"
+    );
+
+    let params = reply
+        .get("parameters")
+        .expect("reply missing 'parameters' key");
+
+    assert_eq!(params["vendor"], VENDOR, "vendor mismatch");
+    assert_eq!(params["product"], PRODUCT, "product mismatch");
+    assert_eq!(params["version"], VERSION, "version mismatch");
+    assert_eq!(params["url"], URL, "url mismatch");
+
+    let interfaces: Vec<&str> = params["interfaces"]
+        .as_array()
+        .expect("interfaces must be an array")
+        .iter()
+        .map(|v| v.as_str().expect("interface entry must be a string"))
+        .collect();
+    assert!(
+        interfaces.contains(&"org.example.ftl"),
+        "missing org.example.ftl in interfaces: {interfaces:?}"
+    );
+    assert!(
+        interfaces.contains(&"org.varlink.service"),
+        "missing org.varlink.service in interfaces: {interfaces:?}"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Issue #233 regression tests: user-method enum with empty `parameters:{}`
+// ============================================================================
+
+/// Send a NUL-terminated message on a fresh connection from `conn` and read the NUL-terminated
+/// reply.
+#[cfg(feature = "tokio")]
+async fn raw_call(
+    conn: &Connector,
+    msg: &[u8],
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = conn.connect();
+    stream.write_all(msg).await?;
+
+    let mut buf = Vec::new();
+    loop {
+        match stream.read_u8().await {
+            Ok(0) => break,
+            Ok(b) => buf.push(b),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    Ok(serde_json::from_slice(&buf)?)
+}
+
+/// Hands out client-side sockets that are already connected to the running server, eliminating the
+/// listener/accept race that path-based `connect()` would otherwise require us to poll around.
+///
+/// Each [`connect`](Self::connect) creates a `socketpair`, pushes the server end to the
+/// [`PairListener`] driving the server, and returns the client end.
+#[cfg(feature = "tokio")]
+#[derive(Clone)]
+struct Connector {
+    tx: tokio::sync::mpsc::UnboundedSender<zlink::unix::Stream>,
+}
+
+#[cfg(feature = "tokio")]
+impl Connector {
+    fn connect(&self) -> tokio::net::UnixStream {
+        let (server_end, client_end) = tokio::net::UnixStream::pair().expect("socketpair");
+        self.tx
+            .send(server_end.try_into().expect("socketpair into Stream"))
+            .expect("server still running");
+        client_end
+    }
+}
+
+/// A [`Listener`] fed by a [`Connector`]: it yields each pushed server-side socket and reports
+/// closure once every `Connector` has been dropped.
+#[cfg(feature = "tokio")]
+#[derive(Debug)]
+struct PairListener {
+    rx: tokio::sync::mpsc::UnboundedReceiver<zlink::unix::Stream>,
+}
+
+#[cfg(feature = "tokio")]
+impl zlink::Listener for PairListener {
+    type Socket = zlink::unix::Stream;
+
+    async fn accept(&mut self) -> zlink::Result<Option<zlink::Connection<Self::Socket>>> {
+        Ok(self.rx.recv().await.map(zlink::Connection::new))
+    }
+}
+
+/// Build a [`Connector`]/[`PairListener`] pair sharing one channel.
+#[cfg(feature = "tokio")]
+fn connector_pair() -> (Connector, PairListener) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    (Connector { tx }, PairListener { rx })
+}
+
+/// Create a single connected `(server, client)` socket pair for one-shot server tests.
+#[cfg(feature = "tokio")]
+fn connected_pair()
+-> Result<(zlink::unix::Stream, tokio::net::UnixStream), Box<dyn std::error::Error>> {
+    let (server_end, client_end) = tokio::net::UnixStream::pair()?;
+    Ok((server_end.try_into()?, client_end))
+}
+
+/// Spin up a short-lived FTL server fed by socketpairs, run `client_fn`, then shut down.
+#[cfg(feature = "tokio")]
+async fn with_server<F, Fut>(client_fn: F) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: FnOnce(Connector) -> Fut,
+    Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
+    let (connector, listener) = connector_pair();
+    let service = Ftl::new(DriveCondition {
+        state: DriveState::Idle,
+        tylium_level: 100,
+    });
+    let server = zlink::Server::new(listener, service);
+    select! {
+        res = server.run() => res?,
+        res = client_fn(connector) => res?,
+    }
+    Ok(())
+}
+
+/// Regression test (issue #233): no-arg user method with `"parameters":{}` must succeed.
+///
+/// `varlinkctl call org.example.ftl.GetCoordinates '{}'` sends
+/// `{"method":"org.example.ftl.GetCoordinates","parameters":{}}\0`
+/// and previously got back `invalid type: map, expected unit variant`.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_no_arg_empty_parameters_object() -> Result<(), Box<dyn std::error::Error>> {
+    with_server(|conn| async move {
+        let reply = raw_call(
+            &conn,
+            b"{\"method\":\"org.example.ftl.GetCoordinates\",\"parameters\":{}}\0",
+        )
+        .await?;
+        assert!(
+            reply.get("error").is_none(),
+            "server returned error for no-arg method with {{}}:  {reply}"
+        );
+        let params = reply
+            .get("parameters")
+            .expect("reply missing 'parameters' key");
+        // GetCoordinates returns Coordinate { longitude, latitude, distance }
+        assert!(
+            params.get("longitude").is_some(),
+            "reply params missing 'longitude': {params}"
+        );
+        assert!(
+            params.get("latitude").is_some(),
+            "reply params missing 'latitude': {params}"
+        );
+        assert!(
+            params.get("distance").is_some(),
+            "reply params missing 'distance': {params}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// No-arg user method: three parameter variants must all succeed identically.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_no_arg_parameter_variants() -> Result<(), Box<dyn std::error::Error>> {
+    with_server(|conn| async move {
+        // (a) no parameters key
+        let r1 = raw_call(&conn, b"{\"method\":\"org.example.ftl.GetCoordinates\"}\0").await?;
+        // (b) parameters: null
+        let r2 = raw_call(
+            &conn,
+            b"{\"method\":\"org.example.ftl.GetCoordinates\",\"parameters\":null}\0",
+        )
+        .await?;
+        // (c) parameters: {}
+        let r3 = raw_call(
+            &conn,
+            b"{\"method\":\"org.example.ftl.GetCoordinates\",\"parameters\":{}}\0",
+        )
+        .await?;
+
+        for (label, reply) in [
+            ("no-params", &r1),
+            ("null-params", &r2),
+            ("empty-params", &r3),
+        ] {
+            assert!(
+                reply.get("error").is_none(),
+                "server returned error for {label}: {reply}"
+            );
+            assert!(
+                reply.get("parameters").is_some(),
+                "reply missing 'parameters' for {label}: {reply}"
+            );
+        }
+        // All three should return the same coordinates.
+        assert_eq!(
+            r1.get("parameters"),
+            r2.get("parameters"),
+            "no-params and null-params replies differ"
+        );
+        assert_eq!(
+            r1.get("parameters"),
+            r3.get("parameters"),
+            "no-params and empty-params replies differ"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// No-arg user method: params key BEFORE method key must succeed.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_no_arg_params_before_method() -> Result<(), Box<dyn std::error::Error>> {
+    with_server(|conn| async move {
+        let reply = raw_call(
+            &conn,
+            b"{\"parameters\":{},\"method\":\"org.example.ftl.GetCoordinates\"}\0",
+        )
+        .await?;
+        assert!(
+            reply.get("error").is_none(),
+            "server returned error when params precede method: {reply}"
+        );
+        assert!(
+            reply.get("parameters").is_some(),
+            "reply missing 'parameters': {reply}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// Struct-variant user method with populated params (method-first) must succeed.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_struct_variant_with_params() -> Result<(), Box<dyn std::error::Error>> {
+    with_server(|conn| async move {
+        // SetDriveCondition takes condition: DriveCondition { state, tylium_level }
+        let reply = raw_call(
+            &conn,
+            b"{\"method\":\"org.example.ftl.SetDriveCondition\",\
+              \"parameters\":{\"condition\":{\"state\":\"spooling\",\"tylium_level\":80}}}\0",
+        )
+        .await?;
+        assert!(
+            reply.get("error").is_none(),
+            "server returned error for struct variant method: {reply}"
+        );
+        // SetDriveCondition returns the updated DriveCondition.
+        let params = reply.get("parameters").expect("reply missing 'parameters'");
+        assert!(
+            params.get("state").is_some(),
+            "reply missing 'state': {params}"
+        );
+        assert!(
+            params.get("tylium_level").is_some(),
+            "reply missing 'tylium_level': {params}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// Unknown method tag returns MethodNotFound, not a panic or deserialisation error.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_unknown_tag_returns_method_not_found() -> Result<(), Box<dyn std::error::Error>>
+{
+    with_server(|conn| async move {
+        let reply = raw_call(
+            &conn,
+            b"{\"method\":\"org.example.ftl.DoesNotExist\",\"parameters\":{}}\0",
+        )
+        .await?;
+        let error = reply
+            .get("error")
+            .expect("expected an error reply for unknown method");
+        assert_eq!(
+            error, "org.varlink.service.MethodNotFound",
+            "wrong error variant: {error}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// Struct-variant method with missing required params must not succeed (no parameters reply).
+///
+/// When required fields are absent, the server either returns an error reply or closes the
+/// connection with a parse failure.  Either outcome is acceptable; what must NOT happen is
+/// a successful reply (no "error" key) being returned.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_method_struct_variant_missing_required_params()
+-> Result<(), Box<dyn std::error::Error>> {
+    with_server(|conn| async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = conn.connect();
+
+        // SetDriveCondition requires `condition` but we send an empty object.
+        stream
+            .write_all(
+                b"{\"method\":\"org.example.ftl.SetDriveCondition\",\"parameters\":{}}\0",
+            )
+            .await?;
+
+        let mut buf = Vec::new();
+        loop {
+            match stream.read_u8().await {
+                Ok(0) => break,
+                Ok(b) => buf.push(b),
+                // EOF / connection closed by server — parse failure is acceptable.
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        let reply: serde_json::Value = serde_json::from_slice(&buf)?;
+        // If a reply was returned it MUST be an error, never a success.
+        assert!(
+            reply.get("error").is_some(),
+            "expected an error reply (or connection close) for missing required params, got: {reply}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+// ============================================================================
+// Single-struct-variant order-independence tests
+// ============================================================================
+
+/// A tiny service with exactly ONE struct-variant method.
+/// Used to prove that the generated deserializer is fully order-independent
+/// when there is only one method that takes parameters.
+#[cfg(feature = "tokio")]
+struct Echo;
+
+/// Reply struct for the Echo service.
+#[cfg(feature = "tokio")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
+struct EchoReply {
+    message: String,
+}
+
+#[cfg(feature = "tokio")]
+#[zlink::service(
+    interface = "org.example.echo",
+    vendor = "Test",
+    product = "Echo",
+    version = "1",
+    url = "https://example.org/",
+    types = [EchoReply]
+)]
+impl Echo {
+    /// Echo the message back.
+    async fn echo(&self, message: String) -> EchoReply {
+        EchoReply { message }
+    }
+}
+
+/// Helper: spin up a short-lived Echo server fed by socketpairs.
+#[cfg(feature = "tokio")]
+async fn with_echo_server<F, Fut>(client_fn: F) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: FnOnce(Connector) -> Fut,
+    Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
+    let (connector, listener) = connector_pair();
+    let server = zlink::Server::new(listener, Echo);
+    select! {
+        res = server.run() => res?,
+        res = client_fn(connector) => res?,
+    }
+    Ok(())
+}
+
+/// Single-struct-variant service: `parameters` BEFORE `method` must succeed.
+///
+/// This is the key order-independence proof: when there is exactly one struct-variant
+/// method in the service, the generated deserializer can eagerly capture `parameters`
+/// into the only possible slot even before the `method` key is seen.
+#[cfg(feature = "tokio")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn single_struct_variant_params_before_method_succeeds()
+-> Result<(), Box<dyn std::error::Error>> {
+    with_echo_server(|conn| async move {
+        let reply = raw_call(
+            &conn,
+            b"{\"parameters\":{\"message\":\"hello\"},\"method\":\"org.example.echo.Echo\"}\0",
+        )
+        .await?;
+        assert!(
+            reply.get("error").is_none(),
+            "single-struct-variant service returned error for params-before-method: {reply}"
+        );
+        let params = reply.get("parameters").expect("reply missing 'parameters'");
+        assert_eq!(
+            params.get("message").and_then(|v| v.as_str()),
+            Some("hello"),
+            "echo reply has wrong message: {params}"
+        );
+        Ok(())
+    })
+    .await
 }
 
 // ============================================================================
