@@ -13,6 +13,8 @@ pub(super) struct MethodAttrs {
     pub is_oneway: bool,
     /// Method returns file descriptors.
     pub return_fds: bool,
+    /// Method is an upgrade protocol call.
+    pub is_upgrade: bool,
 }
 
 impl MethodAttrs {
@@ -46,6 +48,12 @@ impl MethodAttrs {
                             ));
                         }
                         method_attrs.return_fds = true;
+                    }
+                    Meta::Path(path) if path.is_ident("upgrade") => {
+                        if method_attrs.is_upgrade {
+                            return Err(Error::new_spanned(&meta, "duplicate `upgrade` attribute"));
+                        }
+                        method_attrs.is_upgrade = true;
                     }
                     _ => {
                         return Err(Error::new_spanned(&meta, "unknown zlink attribute"));

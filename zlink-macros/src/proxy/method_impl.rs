@@ -35,6 +35,10 @@ pub(super) fn generate_method_impl(
     // Extract data before mutable borrow
     let method_generics = method.sig.generics.clone();
     let method_output = method.sig.output.clone();
+    let is_self_by_value = match method.sig.inputs.first() {
+        Some(FnArg::Receiver(receiver)) => receiver.reference.is_none(),
+        _ => false,
+    };
 
     // Process all method arguments in a single pass
     let arg_infos = parse_method_arguments(method, has_explicit_lifetimes, param_attrs_map)?;
@@ -53,6 +57,32 @@ pub(super) fn generate_method_impl(
         return Err(Error::new_spanned(
             &method.sig,
             "method cannot be both oneway (`oneway`) and return file descriptors (`return_fds`)",
+        ));
+    }
+    if method_attrs.is_upgrade && method_attrs.is_streaming {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "method cannot be both upgrade (`upgrade`) and streaming (`more`)",
+        ));
+    }
+    if method_attrs.is_upgrade && method_attrs.is_oneway {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "method cannot be both upgrade (`upgrade`) and oneway (`oneway`)",
+        ));
+    }
+    if method_attrs.is_upgrade && method_attrs.return_fds {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "method cannot be both upgrade (`upgrade`) and return file descriptors (`return_fds`)",
+        ));
+    }
+
+    // Validate that upgrade method takes `self` by value
+    if method_attrs.is_upgrade && !is_self_by_value {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "upgrade method must take `self` by value",
         ));
     }
 
@@ -86,6 +116,7 @@ pub(super) fn generate_method_impl(
             &method_output,
             method_attrs.is_streaming,
             method_attrs.return_fds,
+            method_attrs.is_upgrade,
         )?
     };
 
@@ -165,6 +196,15 @@ pub(super) fn generate_method_impl(
             &error_type,
             out_params_extract,
             method_attrs.return_fds,
+            #[cfg(feature = "std")]
+            fds_init,
+            crate_path,
+        )
+    } else if method_attrs.is_upgrade {
+        generate_upgrade_method(
+            method_call_setup,
+            &reply_type,
+            &error_type,
             #[cfg(feature = "std")]
             fds_init,
             crate_path,
@@ -595,6 +635,32 @@ fn generate_regular_method(
             Ok(reply) => #ok_arm,
             Err(error) => #err_arm,
         }
+    };
+
+    (return_type, implementation)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_upgrade_method(
+    method_call_setup: TokenStream,
+    reply_type: &Type,
+    error_type: &Type,
+    #[cfg(feature = "std")] fds_init: TokenStream,
+    crate_path: &TokenStream,
+) -> (TokenStream, TokenStream) {
+    let return_type = quote! {
+        #crate_path::Result<#crate_path::connection::UpgradeReply<Self::Socket, #reply_type, #error_type>>
+    };
+
+    #[cfg(feature = "std")]
+    let call_upgrade_args = quote! { &call, #fds_init };
+    #[cfg(not(feature = "std"))]
+    let call_upgrade_args = quote! { &call };
+
+    let implementation = quote! {
+        #method_call_setup
+        let call = #crate_path::Call::new(method_call).set_upgrade(true);
+        self.call_upgrade::<_, #reply_type, #error_type>(#call_upgrade_args).await
     };
 
     (return_type, implementation)

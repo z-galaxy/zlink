@@ -54,6 +54,7 @@ pub mod chain;
 pub mod socket;
 #[cfg(test)]
 mod tests;
+mod upgrade;
 mod write_connection;
 use crate::{
     Call, Result,
@@ -65,6 +66,7 @@ pub use chain::Chain;
 use core::{fmt::Debug, sync::atomic::AtomicUsize};
 #[cfg(feature = "std")]
 use socket::FetchPeerCredentials;
+pub use upgrade::{ConnectionParts, UpgradeReply};
 pub use write_connection::WriteConnection;
 
 use serde::{Deserialize, Serialize};
@@ -147,6 +149,31 @@ where
             write,
             #[cfg(feature = "std")]
             credentials: None,
+        }
+    }
+
+    /// Consumes the connection and extracts the raw socket halves and leftover buffered bytes.
+    ///
+    /// This is used when upgrading the protocol from Varlink to a raw binary protocol.
+    /// After calling this method, the Varlink/JSON framing API is no longer available on this
+    /// connection. The caller must process any bytes in `read_buffer` before reading from
+    /// `read_half`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, this will assert that any buffered writes have been flushed first.
+    pub fn into_parts(self) -> ConnectionParts<S> {
+        debug_assert_eq!(self.write.pos, 0, "flush before into_parts");
+
+        let read_parts = self.read.into_parts();
+        let write_half = self.write.into_inner();
+
+        ConnectionParts {
+            read_half: read_parts.socket,
+            write_half,
+            read_buffer: read_parts.read_buffer,
+            #[cfg(feature = "std")]
+            received_fds: read_parts.pending_fds,
         }
     }
 

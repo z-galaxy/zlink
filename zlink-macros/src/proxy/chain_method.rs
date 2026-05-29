@@ -31,7 +31,7 @@ pub(super) fn generate_chain_method(
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
     // Skip chain methods for methods that return FDs since chains don't support returning FDs.
-    if method_attrs.return_fds {
+    if method_attrs.return_fds || method_attrs.is_upgrade {
         return Ok((quote! {}, quote! {}));
     }
 
@@ -40,7 +40,7 @@ pub(super) fn generate_chain_method(
     // Oneway methods don't have return types so this check doesn't apply to them.
     if !method_attrs.is_oneway {
         let (reply_type, error_type) =
-            parse_return_type(&method.sig.output, method_attrs.is_streaming, false)?;
+            parse_return_type(&method.sig.output, method_attrs.is_streaming, false, false)?;
         if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
             return Ok((quote! {}, quote! {}));
         }

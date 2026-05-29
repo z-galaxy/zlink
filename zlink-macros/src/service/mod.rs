@@ -40,6 +40,10 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
             continue;
         };
 
+        if method.sig.ident == "on_upgrade" {
+            continue;
+        }
+
         let method_info = MethodInfo::extract(method, &mut current_interface)?;
         methods_info.push(method_info);
     }
@@ -94,7 +98,8 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
         let ImplItem::Fn(method) = item else {
             return true;
         };
-        !methods_with_conn.contains(&method.sig.ident.to_string())
+        let name = method.sig.ident.to_string();
+        name != "on_upgrade" && !methods_with_conn.contains(&name)
     });
 
     // Strip generics from the original impl block - they are only for the Service impl.

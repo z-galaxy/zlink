@@ -27,3 +27,5 @@ mod streaming;
 mod streaming_errors;
 #[path = "service/streaming_fds.rs"]
 mod streaming_fds;
+#[path = "service/upgrade.rs"]
+mod upgrade;

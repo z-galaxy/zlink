@@ -309,3 +309,21 @@ method GetData() -> (items: []any, map: [string]any)
     assert!(code.contains("Vec<serde_json::Value>"));
     assert!(code.contains("std::collections::HashMap<"));
 }
+
+#[test]
+fn test_upgrade_method_codegen() {
+    let idl = r#"
+interface org.example.upgrade
+
+upgrade method DoUpgrade() -> (success: bool)
+"#;
+
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // Verify #[zlink(upgrade)] attribute is present
+    assert!(code.contains("#[zlink(upgrade)]"));
+
+    // Verify signature with by-value `self` receiver and UpgradeReply return type
+    assert!(code.contains("async fn do_upgrade(self) -> zlink::Result<zlink::connection::UpgradeReply<Self::Socket, DoUpgradeOutput, UpgradeError>>;"));
+}

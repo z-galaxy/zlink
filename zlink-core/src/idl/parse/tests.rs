@@ -171,12 +171,29 @@ fn test_parse_method() {
     let method = parse_method(input).unwrap();
     assert_eq!(method.name(), "GetInfo");
     assert_eq!(method.inputs().count(), 0);
+    assert!(!method.upgrade());
     let mut outputs = method.outputs();
     assert_eq!(
         outputs.next().unwrap(),
         &Parameter::new("info", &Type::String, &[])
     );
     assert!(outputs.next().is_none());
+
+    // Test upgrade method
+    let input_upgrade = "upgrade method DoUpgrade() -> (success: bool)";
+    let method_upgrade = parse_method(input_upgrade).unwrap();
+    assert_eq!(method_upgrade.name(), "DoUpgrade");
+    assert!(method_upgrade.upgrade());
+    let mut outputs_upgrade = method_upgrade.outputs();
+    assert_eq!(
+        outputs_upgrade.next().unwrap(),
+        &Parameter::new("success", &Type::Bool, &[])
+    );
+    assert!(outputs_upgrade.next().is_none());
+
+    // Test round-trip Display
+    let displayed = method_upgrade.to_string();
+    assert_eq!(displayed, "upgrade method DoUpgrade() -> (success: bool)");
 
     let input = "method Add(a: int, b: int) -> (sum: int)";
     let method = parse_method(input).unwrap();

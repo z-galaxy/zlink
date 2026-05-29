@@ -327,6 +327,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         Ok(())
     }
 
+    /// Consumes the write connection and returns the raw write half of the socket.
+    pub(super) fn into_inner(self) -> Write {
+        self.socket
+    }
+
     fn grow_buffer(&mut self) -> crate::Result<()> {
         if self.buffer.len() >= super::MAX_BUFFER_SIZE {
             return Err(crate::Error::BufferOverflow);

@@ -236,6 +236,7 @@ pub(super) fn parse_return_type(
     output: &ReturnType,
     is_streaming: bool,
     return_fds: bool,
+    is_upgrade: bool,
 ) -> Result<(Type, Type), Error> {
     match output {
         ReturnType::Default => Err(Error::new_spanned(
@@ -243,7 +244,9 @@ pub(super) fn parse_return_type(
             "proxy methods must have a return type",
         )),
         ReturnType::Type(_, ty) => {
-            if is_streaming && return_fds {
+            if is_upgrade {
+                extract_upgrade_result_types(ty)
+            } else if is_streaming && return_fds {
                 // For streaming methods with FDs, expect Result<impl Stream<Item =
                 // Result<(Result<T, E>, Vec<OwnedFd>)>>>
                 extract_streaming_with_fds_result_types(ty)
@@ -259,6 +262,68 @@ pub(super) fn parse_return_type(
             }
         }
     }
+}
+
+fn extract_upgrade_result_types(ty: &Type) -> Result<(Type, Type), Error> {
+    const ERROR_MSG: &str = "expected Result<UpgradeReply<impl Socket, ReplyParams, ReplyError>>";
+
+    let Type::Path(type_path) = ty else {
+        return Err(Error::new_spanned(ty, ERROR_MSG));
+    };
+
+    let segment = type_path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| Error::new_spanned(type_path, ERROR_MSG))?;
+
+    if segment.ident != "Result" {
+        return Err(Error::new_spanned(type_path, ERROR_MSG));
+    }
+
+    let PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return Err(Error::new_spanned(type_path, ERROR_MSG));
+    };
+
+    let GenericArgument::Type(inner_ty) = args
+        .args
+        .first()
+        .ok_or_else(|| Error::new_spanned(type_path, ERROR_MSG))?
+    else {
+        return Err(Error::new_spanned(type_path, ERROR_MSG));
+    };
+
+    let Type::Path(inner_path) = inner_ty else {
+        return Err(Error::new_spanned(inner_ty, ERROR_MSG));
+    };
+
+    let inner_segment = inner_path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| Error::new_spanned(inner_path, ERROR_MSG))?;
+
+    if inner_segment.ident != "UpgradeReply" {
+        return Err(Error::new_spanned(inner_path, ERROR_MSG));
+    }
+
+    let PathArguments::AngleBracketed(inner_args) = &inner_segment.arguments else {
+        return Err(Error::new_spanned(inner_path, ERROR_MSG));
+    };
+
+    if inner_args.args.len() < 3 {
+        return Err(Error::new_spanned(inner_path, ERROR_MSG));
+    }
+
+    let GenericArgument::Type(reply_params_ty) = &inner_args.args[1] else {
+        return Err(Error::new_spanned(inner_path, ERROR_MSG));
+    };
+
+    let GenericArgument::Type(reply_error_ty) = &inner_args.args[2] else {
+        return Err(Error::new_spanned(inner_path, ERROR_MSG));
+    };
+
+    Ok((reply_params_ty.clone(), reply_error_ty.clone()))
 }
 
 fn extract_nested_result_types(ty: &Type) -> Result<(Type, Type), Error> {

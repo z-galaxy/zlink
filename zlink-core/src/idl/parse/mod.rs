@@ -229,6 +229,11 @@ fn parameter_list<'a>(
 fn method_def<'a>(input: &mut &'a [u8]) -> ModalResult<Method<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
 
+    let upgrade = opt(literal("upgrade")).parse_next(input)?.is_some();
+    if upgrade {
+        take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
+    }
+
     literal("method").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
     let name = type_name(input)?;
@@ -239,12 +244,7 @@ fn method_def<'a>(input: &mut &'a [u8]) -> ModalResult<Method<'a>, InputError<&'
     ws(input)?;
     let output_params = parameter_list(input)?;
 
-    Ok(Method::new_owned(
-        name,
-        input_params,
-        output_params,
-        comments,
-    ))
+    Ok(Method::new_owned(name, input_params, output_params, comments).set_upgrade(upgrade))
 }
 
 /// Parse an error definition: error Name (fields).

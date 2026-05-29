@@ -362,8 +362,16 @@ impl CodeGenerator {
             method_name
         };
 
+        if method.upgrade() {
+            self.writeln("#[zlink(upgrade)]")?;
+        }
+
         // Generate method signature.
-        let mut signature = format!("async fn {}(&mut self", safe_method_name);
+        let mut signature = if method.upgrade() {
+            format!("async fn {}(self", safe_method_name)
+        } else {
+            format!("async fn {}(&mut self", safe_method_name)
+        };
 
         // Add input parameters.
         for param in method.inputs() {
@@ -385,7 +393,11 @@ impl CodeGenerator {
             write!(&mut signature, " {}: {}", safe_param_name, rust_type)?;
         }
 
-        signature.push_str(") -> zlink::Result<Result<");
+        if method.upgrade() {
+            signature.push_str(") -> zlink::Result<zlink::connection::UpgradeReply<Self::Socket, ");
+        } else {
+            signature.push_str(") -> zlink::Result<Result<");
+        }
 
         // Handle output parameters.
         let output_count = method.outputs().count();
