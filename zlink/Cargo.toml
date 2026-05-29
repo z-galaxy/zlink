@@ -10,8 +10,9 @@ authors.workspace = true
 
 [features]
 default = ["tokio", "service", "proxy", "tracing"]
-tokio = ["dep:zlink-tokio"]
-smol = ["dep:zlink-smol"]
+std = []
+tokio = ["dep:zlink-tokio", "std"]
+smol = ["dep:zlink-smol", "std"]
 server = ["zlink-tokio?/server", "zlink-smol?/server"]
 proxy = ["zlink-tokio?/proxy", "zlink-smol?/proxy"]
 service = ["server", "introspection", "zlink-tokio?/service", "zlink-smol?/service"]
