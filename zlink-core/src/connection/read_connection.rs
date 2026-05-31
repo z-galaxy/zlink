@@ -35,6 +35,16 @@ pub struct ReadConnection<Read: ReadHalf> {
     socket: Read,
     read_pos: usize,
     msg_pos: usize,
+    /// Byte index one past the terminating `\0` of the most recently returned message.
+    ///
+    /// Together with `last_read_end`, this is the boundary an `upgrade` handoff uses to recover
+    /// leftover raw bytes via [`Self::into_parts`], *after* the normal end-of-burst reset has
+    /// already zeroed `msg_pos`/`read_pos`. It is derived purely from positions, so raw leftovers
+    /// that begin with `\0` are preserved verbatim.
+    last_msg_end: usize,
+    /// Value of `read_pos` (end of real received data, excluding the synthesized sentinel) at the
+    /// time the most recent message was returned, i.e. before any end-of-burst reset.
+    last_read_end: usize,
     buffer: Vec<u8>,
     id: usize,
     #[cfg(feature = "std")]
@@ -52,6 +62,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             socket,
             read_pos: 0,
             msg_pos: 0,
+            last_msg_end: 0,
+            last_read_end: 0,
             id,
             buffer: alloc::vec![0; BUFFER_SIZE],
             #[cfg(feature = "std")]
@@ -159,6 +171,19 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         let msg = stream.next();
         let null_index = self.msg_pos + stream.byte_offset();
         let buffer = &self.buffer[self.msg_pos..null_index];
+
+        // Record where this message ends and how much real data the burst held, *before* the
+        // end-of-burst reset below may zero `msg_pos`/`read_pos`. An `upgrade` handoff
+        // (`into_parts`) uses these to recover any leftover raw bytes verbatim — including
+        // leftovers that begin with `\0` — since the slice is taken by position, not content.
+        self.last_msg_end = null_index + 1;
+        self.last_read_end = self.read_pos;
+
+        // Varlink framing boundary logic: a `\0` immediately after this message's terminator marks
+        // the end of the burst (either consecutive framing nulls from the peer, or the sentinel
+        // `read_from_socket` writes at `buffer[read_pos]`). On normal traffic this resets so the
+        // next read starts fresh; the recorded fields above let the upgrade path still recover any
+        // leftovers afterward.
         if self.buffer[null_index + 1] == b'\0' {
             // This means we're reading the last message and can now reset the indices.
             self.read_pos = 0;
@@ -241,4 +266,30 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     pub fn read_half(&self) -> &Read {
         &self.socket
     }
+
+    /// Consumes the read connection and extracts the raw read socket half, leftover buffered bytes,
+    /// and received FDs.
+    pub(super) fn into_parts(self) -> ReadParts<Read> {
+        // Use the boundary recorded by the last `read_message` rather than the live
+        // `msg_pos`/`read_pos`, which the normal end-of-burst reset may have already zeroed. This
+        // yields exactly the bytes the peer sent after the final Varlink `\0`, verbatim (leading
+        // `\0`s of a raw frame intact). If no message was ever read, both are `0` and the buffer
+        // is empty.
+        debug_assert!(self.last_msg_end <= self.last_read_end);
+        debug_assert!(self.last_read_end <= self.buffer.len());
+        let read_buffer = self.buffer[self.last_msg_end..self.last_read_end].to_vec();
+        ReadParts {
+            socket: self.socket,
+            read_buffer,
+            #[cfg(feature = "std")]
+            pending_fds: self.pending_fds,
+        }
+    }
+}
+
+pub(super) struct ReadParts<Read> {
+    pub(super) socket: Read,
+    pub(super) read_buffer: Vec<u8>,
+    #[cfg(feature = "std")]
+    pub(super) pending_fds: VecDeque<Vec<OwnedFd>>,
 }

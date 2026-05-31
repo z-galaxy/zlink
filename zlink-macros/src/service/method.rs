@@ -41,6 +41,8 @@ pub(super) struct MethodInfo {
     pub stream_uses_impl_trait: bool,
     /// Whether this method returns file descriptors (`#[zlink(return_fds)]`).
     pub return_fds: bool,
+    /// Whether this method is an upgrade call (`#[zlink(upgrade)]`).
+    pub is_upgrade: bool,
 }
 
 impl MethodInfo {
@@ -303,6 +305,7 @@ impl MethodInfo {
             stream_return_type,
             stream_uses_impl_trait,
             return_fds,
+            is_upgrade: method_attrs.is_upgrade,
         })
     }
 
@@ -339,6 +342,8 @@ struct MethodAttrs {
     is_streaming: bool,
     /// Whether this method returns file descriptors.
     return_fds: bool,
+    /// Whether this method is an upgrade protocol call.
+    is_upgrade: bool,
 }
 
 impl MethodAttrs {
@@ -387,6 +392,11 @@ impl MethodAttrs {
                         return Err(meta.error("duplicate `return_fds` attribute"));
                     }
                     result.return_fds = true;
+                } else if meta.path.is_ident("upgrade") {
+                    if result.is_upgrade {
+                        return Err(meta.error("duplicate `upgrade` attribute"));
+                    }
+                    result.is_upgrade = true;
                 } else {
                     return Err(meta.error("unknown zlink attribute"));
                 }

@@ -17,6 +17,8 @@ pub struct Method<'a> {
     outputs: List<'a, Parameter<'a>>,
     /// Comments associated with this method.
     comments: List<'a, Comment<'a>>,
+    /// Whether the method is an upgrade protocol call.
+    upgrade: bool,
 }
 
 impl<'a> Method<'a> {
@@ -32,6 +34,7 @@ impl<'a> Method<'a> {
             inputs: List::Borrowed(inputs),
             outputs: List::Borrowed(outputs),
             comments: List::Borrowed(comments),
+            upgrade: false,
         }
     }
 
@@ -47,7 +50,14 @@ impl<'a> Method<'a> {
             inputs: List::from(inputs),
             outputs: List::from(outputs),
             comments: List::from(comments),
+            upgrade: false,
         }
+    }
+
+    /// Sets whether this method is an upgrade protocol call, returning the updated method.
+    pub const fn set_upgrade(mut self, upgrade: bool) -> Self {
+        self.upgrade = upgrade;
+        self
     }
 
     /// Returns the name of the method.
@@ -79,6 +89,11 @@ impl<'a> Method<'a> {
     pub fn comments(&self) -> impl Iterator<Item = &Comment<'a>> {
         self.comments.iter()
     }
+
+    /// Returns true if the method is an upgrade protocol call.
+    pub fn upgrade(&self) -> bool {
+        self.upgrade
+    }
 }
 
 impl<'a> fmt::Display for Method<'a> {
@@ -87,7 +102,12 @@ impl<'a> fmt::Display for Method<'a> {
         for comment in self.comments.iter() {
             writeln!(f, "{comment}")?;
         }
-        write!(f, "method {}(", self.name)?;
+        let prefix = if self.upgrade {
+            "upgrade method"
+        } else {
+            "method"
+        };
+        write!(f, "{} {}(", prefix, self.name)?;
         let mut first = true;
         for param in self.inputs.iter() {
             if !first {
@@ -115,7 +135,10 @@ impl<'a> fmt::Display for Method<'a> {
 
 impl PartialEq for Method<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.inputs == other.inputs && self.outputs == other.outputs
+        self.name == other.name
+            && self.inputs == other.inputs
+            && self.outputs == other.outputs
+            && self.upgrade == other.upgrade
     }
 }
 
@@ -137,6 +160,7 @@ mod tests {
         assert_eq!(method.outputs().count(), 1);
         assert!(!method.has_no_inputs());
         assert!(!method.has_no_outputs());
+        assert!(!method.upgrade());
 
         // Check the parameters individually - order and values.
         let inputs_vec: Vec<_> = method.inputs().collect();
@@ -172,6 +196,27 @@ mod tests {
         let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "method Register(name: string, id: string) -> ()");
+    }
+
+    #[test]
+    fn method_set_upgrade() {
+        use core::fmt::Write;
+
+        let method = Method::new("DoUpgrade", &[], &[], &[]).set_upgrade(true);
+        assert!(method.upgrade());
+
+        let mut displayed = String::new();
+        write!(&mut displayed, "{}", method).unwrap();
+        assert_eq!(displayed, "upgrade method DoUpgrade() -> ()");
+
+        // A method built without `set_upgrade` defaults to non-upgrade, and `set_upgrade(false)`
+        // is a no-op equivalent.
+        assert!(!Method::new("Plain", &[], &[], &[]).upgrade());
+        assert!(
+            !Method::new("Plain", &[], &[], &[])
+                .set_upgrade(false)
+                .upgrade()
+        );
     }
 
     #[test]

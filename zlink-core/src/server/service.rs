@@ -95,6 +95,22 @@ where
     ) -> impl Future<
         Output = HandleResult<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>>,
     >;
+
+    /// Whether the service handles protocol upgrades.
+    #[cfg(feature = "std")]
+    const HANDLES_UPGRADE: bool = false;
+
+    /// Called when an upgrade has been successfully negotiated.
+    #[cfg(feature = "std")]
+    fn on_upgrade(
+        &mut self,
+        parts: crate::connection::ConnectionParts<Sock>,
+    ) -> impl Future<Output = crate::Result<()>> {
+        async move {
+            let _ = parts;
+            Ok(())
+        }
+    }
 }
 
 /// The result of a [`Service::handle`] call.

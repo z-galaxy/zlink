@@ -24,8 +24,8 @@ pub(super) fn generate_chain_extension_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain extension methods for streaming and return_fds methods.
-    if method_attrs.is_streaming || method_attrs.return_fds {
+    // Skip chain extension methods for streaming, return_fds and upgrade methods.
+    if method_attrs.is_streaming || method_attrs.return_fds || method_attrs.is_upgrade {
         return Ok((quote! {}, quote! {}));
     }
 
@@ -33,7 +33,7 @@ pub(super) fn generate_chain_extension_method(
     // Chain API requires DeserializeOwned for reply and error types.
     // Oneway methods don't have return types so this check doesn't apply to them.
     if !method_attrs.is_oneway {
-        let (reply_type, error_type) = parse_return_type(&method.sig.output, false, false)?;
+        let (reply_type, error_type) = parse_return_type(&method.sig.output, false, false, false)?;
         if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
             return Ok((quote! {}, quote! {}));
         }

@@ -64,6 +64,15 @@ pub(super) fn generate_service_impl(
     let crate_path = &service_attrs.crate_path;
     let self_ty = &item_impl.self_ty;
 
+    let on_upgrade_fn = item_impl.items.iter().find_map(|item| {
+        if let syn::ImplItem::Fn(m) = item {
+            if m.sig.ident == "on_upgrade" {
+                return Some(m);
+            }
+        }
+        None
+    });
+
     // Extract the type name for generating auxiliary type names.
     // All generated types use `__` prefix to indicate they are internal implementation details.
     let type_name = extract_type_name(self_ty).unwrap_or_else(|| "Service".to_string());
@@ -240,6 +249,43 @@ pub(super) fn generate_service_impl(
     #[cfg(not(feature = "std"))]
     let handle_fds_param = quote! {};
 
+    let on_upgrade_impl = if let Some(on_upgrade_fn) = on_upgrade_fn {
+        let user_parts_arg = on_upgrade_fn.sig.inputs.iter().nth(1).ok_or_else(|| {
+            Error::new_spanned(
+                &on_upgrade_fn.sig,
+                "on_upgrade must take self and parts parameters",
+            )
+        })?;
+        let param_ident = if let syn::FnArg::Typed(pat_type) = user_parts_arg {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                Some(pat_ident.ident.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+        .unwrap_or_else(|| syn::Ident::new("parts", proc_macro2::Span::call_site()));
+
+        let on_upgrade_body = &on_upgrade_fn.block;
+        quote! {
+            #[cfg(feature = "std")]
+            const HANDLES_UPGRADE: bool = true;
+
+            #[cfg(feature = "std")]
+            async fn on_upgrade(
+                &mut self,
+                mut #param_ident: #crate_path::connection::ConnectionParts<#socket_ty>,
+            ) -> #crate_path::Result<()>
+            #on_upgrade_body
+        }
+    } else {
+        quote! {
+            #[cfg(feature = "std")]
+            const HANDLES_UPGRADE: bool = false;
+        }
+    };
+
     // Generate the impl block.
     let service_impl = quote! {
         impl #generics #crate_path::Service<#socket_ty> for #self_ty
@@ -251,6 +297,8 @@ pub(super) fn generate_service_impl(
             type ReplyStreamParams = #reply_stream_params_type;
             type ReplyStreamError = #reply_stream_error_ty;
             type ReplyError<'ser> = #error_type where Self: 'ser;
+
+            #on_upgrade_impl
 
             async fn handle<'__zlink_ser>(
                 &'__zlink_ser mut self,
@@ -1056,6 +1104,11 @@ fn generate_interface_descriptions(
                     }
                 });
 
+                let set_upgrade = if method.is_upgrade {
+                    quote! { .set_upgrade(true) }
+                } else {
+                    quote! {}
+                };
                 Ok(quote! {
                     const #method_const_name: &#crate_path::idl::Method<'static> = &{
                         #in_params_const
@@ -1073,7 +1126,7 @@ fn generate_interface_descriptions(
                             __IN_PARAMS,
                             __OUT_PARAMS,
                             &[],
-                        )
+                        )#set_upgrade
                     };
                 })
             })

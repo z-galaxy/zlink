@@ -129,16 +129,55 @@ where
                         let mut remove = true;
                         match call {
                             Ok(call) => {
+                                let is_upgrade = call.upgrade();
                                 #[cfg(feature = "std")]
-                                let result =
-                                    self.handle_call(call, &mut connections[idx], fds).await;
+                                let handles_upgrade = <Service as service::Service<Listener::Socket>>::HANDLES_UPGRADE;
                                 #[cfg(not(feature = "std"))]
-                                let result =
-                                    self.handle_call(call, &mut connections[idx]).await;
-                                match result {
-                                    Ok(None) => remove = false,
-                                    Ok(Some(s)) => stream = Some(s),
-                                    Err(e) => warn!("Error writing to connection: {:?}", e),
+                                let handles_upgrade = false;
+
+                                if is_upgrade && !handles_upgrade {
+                                    // The service doesn't support upgrades: reply with an error and
+                                    // keep the connection in JSON mode (don't hand off, don't drop
+                                    // on success). On a send failure, fall through to removal via
+                                    // the default `remove = true`.
+                                    let error = crate::varlink_service::Error::MethodNotImplemented {
+                                        method: alloc::borrow::Cow::Borrowed("upgrade"),
+                                    };
+                                    #[cfg(feature = "std")]
+                                    let send_err_res = connections[idx].send_error(&error, alloc::vec![]).await;
+                                    #[cfg(not(feature = "std"))]
+                                    let send_err_res = connections[idx].send_error(&error).await;
+                                    match send_err_res {
+                                        Ok(()) => remove = false,
+                                        Err(e) => warn!("Error sending upgrade error reply: {:?}", e),
+                                    }
+                                } else {
+                                    #[cfg(feature = "std")]
+                                    let result =
+                                        self.handle_call(call, &mut connections[idx], fds).await;
+                                    #[cfg(not(feature = "std"))]
+                                    let result =
+                                        self.handle_call(call, &mut connections[idx]).await;
+                                    match result {
+                                        Ok(None) => {
+                                            // The method's own reply has been sent. For an upgrade
+                                            // call (only reachable when the service handles it),
+                                            // hand the now-raw connection off to `on_upgrade`. In
+                                            // both cases the connection is no longer managed by the
+                                            // normal removal path below.
+                                            remove = false;
+                                            #[cfg(feature = "std")]
+                                            if is_upgrade {
+                                                let conn = connections.swap_remove(idx);
+                                                let parts = conn.into_parts();
+                                                if let Err(e) = self.service.on_upgrade(parts).await {
+                                                    warn!("Upgrade handler failed: {:?}", e);
+                                                }
+                                            }
+                                        }
+                                        Ok(Some(s)) => stream = Some(s),
+                                        Err(e) => warn!("Error writing to connection: {:?}", e),
+                                    }
                                 }
                             }
                             Err(e) => debug!("Error reading from socket: {:?}", e),
