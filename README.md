@@ -28,6 +28,9 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Type safety**: Leverage Rust's type system with derive macros and code generation.
 - **Multiple transports**: Unix domain sockets and (upcoming) USB support.
 - **Code generation**: Generate Rust code from Varlink IDL files.
+- **File descriptor passing**: Pass file descriptors alongside messages over Unix sockets,
+  wire-compatible with systemd's `sd-varlink` (the de-facto convention for FD passing over
+  Varlink). See the [`connection` module docs] for details.
 
 ## Project Structure
 
@@ -424,3 +427,4 @@ This project is licensed under the [MIT License][license].
 [`zlink-codegen`]: https://docs.rs/zlink-codegen
 [`zlink-macros`]: https://docs.rs/zlink-macros
 [`Server::run` docs]: https://docs.rs/zlink/latest/zlink/struct.Server.html#method.run
+[`connection` module docs]: https://docs.rs/zlink-core/latest/zlink_core/connection/index.html#file-descriptor-passing
