@@ -1,6 +1,6 @@
 [package]
 name = "zlink-smol"
-version = "0.6.0"
+version = "0.7.0"
 description = "zlink library for the smol runtime"
 edition.workspace = true
 rust-version.workspace = true
@@ -20,7 +20,7 @@ tracing = ["zlink-core/tracing"]
 defmt = ["zlink-core/defmt"]
 
 [dependencies]
-zlink-core = { path = "../zlink-core", version = "=0.6.0", default-features = false, features = ["std"] }
+zlink-core = { path = "../zlink-core", version = "=0.7.0", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "alloc",

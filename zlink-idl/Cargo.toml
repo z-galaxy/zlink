@@ -1,6 +1,6 @@
 [package]
 name = "zlink-idl"
-version = "0.6.0"
+version = "0.7.0"
 description = "Varlink IDL types and parser"
 edition.workspace = true
 rust-version.workspace = true
