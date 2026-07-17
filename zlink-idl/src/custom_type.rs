@@ -74,20 +74,16 @@ impl<'a> fmt::Display for CustomType<'a> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "introspection")]
 mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::{
-        idl::{self, EnumVariant, Field},
-        introspect,
-    };
+    use crate::{EnumVariant, Field, Type};
 
     #[test]
     fn object_creation() {
-        let field_x = Field::new("x", <f64 as introspect::Type>::TYPE, &[]);
-        let field_y = Field::new("y", <f64 as introspect::Type>::TYPE, &[]);
+        let field_x = Field::new("x", &Type::Float, &[]);
+        let field_y = Field::new("y", &Type::Float, &[]);
         let fields = [&field_x, &field_y];
 
         let custom_obj = CustomObject::new("Point", &fields, &[]);
@@ -97,9 +93,9 @@ mod tests {
         // Check the fields individually - order and values.
         let fields = custom_obj.fields().collect::<Vec<_>>();
         assert_eq!(fields[0].name(), "x");
-        assert_eq!(fields[0].ty(), &idl::Type::Float);
+        assert_eq!(fields[0].ty(), &Type::Float);
         assert_eq!(fields[1].name(), "y");
-        assert_eq!(fields[1].ty(), &idl::Type::Float);
+        assert_eq!(fields[1].ty(), &Type::Float);
     }
 
     #[test]
@@ -121,12 +117,12 @@ mod tests {
 
     #[test]
     fn type_from_object() {
-        let field_x = Field::new("x", <f64 as introspect::Type>::TYPE, &[]);
-        let field_y = Field::new("y", <f64 as introspect::Type>::TYPE, &[]);
+        let field_x = Field::new("x", &Type::Float, &[]);
+        let field_y = Field::new("y", &Type::Float, &[]);
         let fields = [&field_x, &field_y];
 
         let custom_obj = CustomObject::new("Point", &fields, &[]);
-        let custom_type = idl::CustomType::from(custom_obj);
+        let custom_type = CustomType::from(custom_obj);
 
         assert_eq!(custom_type.name(), "Point");
         assert!(custom_type.is_object());
@@ -141,7 +137,7 @@ mod tests {
         let green = EnumVariant::new_owned("green", vec![]);
         let blue = EnumVariant::new_owned("blue", vec![]);
         let custom_enum = CustomEnum::new_owned("Color", vec![red, green, blue], vec![]);
-        let custom_type = idl::CustomType::from(custom_enum);
+        let custom_type = CustomType::from(custom_enum);
 
         assert_eq!(custom_type.name(), "Color");
         assert!(!custom_type.is_object());
@@ -153,11 +149,11 @@ mod tests {
     #[test]
     fn type_display_object() {
         // Test object display
-        let field_x = Field::new("x", <i64 as introspect::Type>::TYPE, &[]);
-        let field_y = Field::new("y", <i64 as introspect::Type>::TYPE, &[]);
+        let field_x = Field::new("x", &Type::Int, &[]);
+        let field_y = Field::new("y", &Type::Int, &[]);
         let fields = [&field_x, &field_y];
         let custom_obj = CustomObject::new("Point", &fields, &[]);
-        let custom_type = idl::CustomType::from(custom_obj);
+        let custom_type = CustomType::from(custom_obj);
         use core::fmt::Write;
         let mut buf = String::new();
         write!(buf, "{}", custom_type).unwrap();
@@ -174,7 +170,7 @@ mod tests {
             &EnumVariant::new("west", &[]),
         ];
         let custom_enum = CustomEnum::new("Direction", DIRECTION_VARIANTS, &[]);
-        let custom_type = idl::CustomType::from(custom_enum);
+        let custom_type = CustomType::from(custom_enum);
         use core::fmt::Write;
         let mut buf = String::new();
         write!(buf, "{}", custom_type).unwrap();
@@ -185,8 +181,8 @@ mod tests {
     fn owned_types() {
         // Test owned object
         let fields = vec![
-            Field::new("name", <&str as introspect::Type>::TYPE, &[]),
-            Field::new("age", <i64 as introspect::Type>::TYPE, &[]),
+            Field::new("name", &Type::String, &[]),
+            Field::new("age", &Type::Int, &[]),
         ];
         let custom_obj = CustomObject::new_owned("Person", fields, vec![]);
         assert_eq!(custom_obj.name(), "Person");

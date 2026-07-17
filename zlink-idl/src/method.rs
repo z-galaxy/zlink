@@ -122,7 +122,7 @@ impl PartialEq for Method<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::idl::{Parameter, Type};
+    use crate::{Parameter, Type};
 
     #[test]
     fn method_creation() {
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn display_with_comments() {
-        use crate::idl::Comment;
+        use crate::Comment;
         use core::fmt::Write;
 
         let comment1 = Comment::new("Get user information");

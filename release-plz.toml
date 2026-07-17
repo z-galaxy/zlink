@@ -10,7 +10,9 @@ git_release_name = "{{ package }}-{{ version }}"
 git_release_enable = true
 git_tag_enable = true
 publish = true
-semver_check = true
+# The CI already runs cargo-semver-checks on every PR, so checking again at release time is
+# redundant.
+semver_check = false
 
 # Bump minor version for non-bugfix commits.
 custom_minor_increment_regex = """\

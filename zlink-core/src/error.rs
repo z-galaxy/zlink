@@ -61,6 +61,15 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[cfg(feature = "idl-parse")]
+impl From<zlink_idl::parse::Error> for Error {
+    fn from(e: zlink_idl::parse::Error) -> Self {
+        use alloc::string::ToString;
+
+        Error::IdlParse(e.to_string())
+    }
+}
+
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {

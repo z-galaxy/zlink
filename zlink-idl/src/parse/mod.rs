@@ -1,7 +1,7 @@
-//! Parsers for Varlink IDL using winnow.
+//! Parsing of Varlink IDL.
 //!
-//! This module provides parsers for converting IDL strings into the corresponding
-//! Rust types defined in the parent module. Uses byte-based parsing to avoid UTF-8 overhead.
+//! An [`Interface`] is parsed from a string through its [`TryFrom`] implementation, which
+//! returns an [`Error`] on failure.
 
 use winnow::{
     ModalResult, Parser,
@@ -11,12 +11,15 @@ use winnow::{
     token::{literal, one_of, take_while},
 };
 
+mod error;
+pub use error::Error;
+
 use super::{
-    Comment, CustomEnum, CustomObject, CustomType, EnumVariant, Error, Field, Interface, List,
-    Method, Parameter, Type, TypeRef,
+    Comment, CustomEnum, CustomObject, CustomType, EnumVariant, Field, Interface, List, Method,
+    Parameter, Type, TypeRef,
 };
 
-use alloc::{format, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 
 /// Parse a `# ... eol` comment as inter-token whitespace, discarding its
 /// content. Used by [`ws`].
@@ -248,7 +251,7 @@ fn method_def<'a>(input: &mut &'a [u8]) -> ModalResult<Method<'a>, InputError<&'
 }
 
 /// Parse an error definition: error Name (fields).
-fn error_def<'a>(input: &mut &'a [u8]) -> ModalResult<Error<'a>, InputError<&'a [u8]>> {
+fn error_def<'a>(input: &mut &'a [u8]) -> ModalResult<super::Error<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
 
     literal("error").parse_next(input)?;
@@ -257,7 +260,7 @@ fn error_def<'a>(input: &mut &'a [u8]) -> ModalResult<Error<'a>, InputError<&'a 
     ws(input)?;
     let params = parameter_list(input)?;
 
-    Ok(Error::new_owned(name, params, comments))
+    Ok(super::Error::new_owned(name, params, comments))
 }
 
 /// A typed field or an untyped enum variant. Custom types may be either a
@@ -357,7 +360,7 @@ fn comment_def<'a>(input: &mut &'a [u8]) -> ModalResult<Comment<'a>, InputError<
 enum InterfaceMember<'a> {
     Custom(CustomType<'a>),
     Method(Method<'a>),
-    Error(Error<'a>),
+    Error(super::Error<'a>),
 }
 
 /// Parse an interface definition.
@@ -402,7 +405,7 @@ fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputEr
 }
 
 /// Parse an interface from a string.
-pub(super) fn parse_interface(input: &str) -> Result<Interface<'_>, crate::Error> {
+pub(super) fn parse_interface(input: &str) -> Result<Interface<'_>, Error> {
     parse_from_str(input, interface_def)
 }
 
@@ -410,12 +413,10 @@ pub(super) fn parse_interface(input: &str) -> Result<Interface<'_>, crate::Error
 fn parse_from_str<'a, T>(
     input: &'a str,
     parser: impl Fn(&mut &'a [u8]) -> ModalResult<T, InputError<&'a [u8]>>,
-) -> Result<T, crate::Error> {
-    use alloc::string::ToString;
-
+) -> Result<T, Error> {
     let input_bytes = input.trim().as_bytes();
     if input_bytes.is_empty() {
-        return Err(crate::Error::IdlParse("Input is empty".to_string()));
+        return Err(Error::Empty);
     }
 
     let mut input_mut = input_bytes;
@@ -425,13 +426,14 @@ fn parse_from_str<'a, T>(
             if input_mut.is_empty() {
                 Ok(result)
             } else {
-                Err(crate::Error::IdlParse(format!(
-                    "Unexpected remaining input: {:?}",
-                    core::str::from_utf8(input_mut).map_or("<invalid UTF-8>", |s| s)
-                )))
+                Err(Error::TrailingInput(
+                    core::str::from_utf8(input_mut)
+                        .map_or("<invalid UTF-8>", |s| s)
+                        .to_string(),
+                ))
             }
         }
-        Err(err) => Err(crate::Error::IdlParse(format!("Parse error: {err}"))),
+        Err(err) => Err(Error::Parse(err.to_string())),
     }
 }
 

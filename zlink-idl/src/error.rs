@@ -90,7 +90,7 @@ impl<'a> PartialEq for Error<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::idl::Type;
+    use crate::Type;
 
     #[test]
     fn error_creation() {
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn display_with_comments() {
-        use crate::idl::Comment;
+        use crate::Comment;
         use core::fmt::Write;
 
         let comment1 = Comment::new("Authentication failed");

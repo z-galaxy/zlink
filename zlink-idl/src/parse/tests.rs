@@ -355,10 +355,8 @@ fn parse_error_messages() {
     let result = parse_interface(invalid_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Parse error"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::Parse(_) => (),
+        other => panic!("Expected Parse error, got: {:?}", other),
     }
 
     // Test with unexpected remaining input
@@ -366,10 +364,8 @@ fn parse_error_messages() {
     let result = parse_interface(incomplete_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Unexpected remaining input") || msg.contains("Parse error"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::TrailingInput(_) | Error::Parse(_) => (),
+        other => panic!("Expected TrailingInput or Parse error, got: {:?}", other),
     }
 
     // Test with empty input
@@ -377,10 +373,8 @@ fn parse_error_messages() {
     let result = parse_interface(empty_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Input is empty"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::Empty => (),
+        other => panic!("Expected Empty error, got: {:?}", other),
     }
 }
 
@@ -461,22 +455,16 @@ fn ws_with_comments() {
     assert!(input_bytes3.is_empty());
 }
 
-#[test_log::test]
+#[test]
 fn parse_simple_enum() {
     let input = "(one, two, three)";
     let mut input_bytes = input.as_bytes();
-    match enum_type(&mut input_bytes) {
-        Ok(enum_type) => {
-            debug!("✓ Successfully parsed simple enum: {:?}", enum_type);
-        }
-        Err(e) => {
-            debug!("✗ Failed to parse simple enum: {:?}", e);
-            panic!("Should be able to parse simple enum: {:?}", e);
-        }
+    if let Err(e) = enum_type(&mut input_bytes) {
+        panic!("Should be able to parse simple enum: {:?}", e);
     }
 }
 
-#[test_log::test]
+#[test]
 fn parse_acquiremetadata_enum_directly() {
     let input = r#"(
 	# Do not include metadata in the output
@@ -488,26 +476,16 @@ fn parse_acquiremetadata_enum_directly() {
 )"#;
 
     let mut input_bytes = input.as_bytes();
-    match enum_type(&mut input_bytes) {
-        Ok(enum_type) => {
-            debug!(
-                "✓ Successfully parsed AcquireMetadata enum: {:?}",
-                enum_type
-            );
-        }
-        Err(e) => {
-            debug!("✗ Failed to parse AcquireMetadata enum: {:?}", e);
-            // Print the remaining input to see where it failed
-            debug!(
-                "Remaining input: {:?}",
-                core::str::from_utf8(input_bytes).unwrap_or("<invalid UTF-8>")
-            );
-            panic!("Should be able to parse AcquireMetadata enum: {:?}", e);
-        }
+    if let Err(e) = enum_type(&mut input_bytes) {
+        panic!(
+            "Should be able to parse AcquireMetadata enum: {:?}. Remaining input: {:?}",
+            e,
+            core::str::from_utf8(input_bytes).unwrap_or("<invalid UTF-8>")
+        );
     }
 }
 
-#[test_log::test]
+#[test]
 fn parse_enum_with_comments() {
     let input = r#"type AcquireMetadata(
 	# Do not include metadata in the output
@@ -547,16 +525,8 @@ fn parse_enum_with_comments() {
                 variants[2].comments().next().unwrap().content(),
                 "Include metadata in the output, but gracefully eat up errors"
             );
-
-            debug!(
-                "✓ Successfully parsed enum with per-variant comments: {}",
-                custom_type
-            );
         }
-        Err(e) => {
-            debug!("✗ Failed to parse enum with comments: {}", e);
-            panic!("Should be able to parse enum with comments: {}", e);
-        }
+        Err(e) => panic!("Should be able to parse enum with comments: {}", e),
     }
 }
 
@@ -900,27 +870,27 @@ method GetData() -> (items: []any, map: [string]any)
 }
 
 /// Parse a Varlink type from a string.
-fn parse_type(input: &str) -> Result<Type<'_>, crate::Error> {
+fn parse_type(input: &str) -> Result<Type<'_>, Error> {
     parse_from_str(input, varlink_type)
 }
 
 /// Parse a method from a string.
-fn parse_method(input: &str) -> Result<Method<'_>, crate::Error> {
+fn parse_method(input: &str) -> Result<Method<'_>, Error> {
     parse_from_str(input, method_def)
 }
 
 /// Parse an error from a string.
-fn parse_error(input: &str) -> Result<Error<'_>, crate::Error> {
+fn parse_error(input: &str) -> Result<crate::Error<'_>, Error> {
     parse_from_str(input, error_def)
 }
 
 /// Parse a custom type from a string.
-fn parse_custom_type(input: &str) -> Result<CustomType<'_>, crate::Error> {
+fn parse_custom_type(input: &str) -> Result<CustomType<'_>, Error> {
     parse_from_str(input, type_def)
 }
 
 /// Parse a field from a string.
-fn parse_field(input: &str) -> Result<Field<'_>, crate::Error> {
+fn parse_field(input: &str) -> Result<Field<'_>, Error> {
     parse_from_str(input, field)
 }
 

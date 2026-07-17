@@ -93,7 +93,7 @@ impl<'a> PartialEq for CustomObject<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::idl::{Comment, Field, Type};
+    use crate::{Comment, Field, Type};
     use core::fmt::Write;
 
     #[test]

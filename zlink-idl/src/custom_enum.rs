@@ -114,7 +114,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::idl::{Comment, EnumVariant};
+    use crate::{Comment, EnumVariant};
     use core::fmt::Write;
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
         );
     }
 
-    #[test_log::test]
+    #[test]
     fn comprehensive_enum_with_per_variant_comments() {
         // Test enum-level comments plus per-variant comments
         let enum_comment = Comment::new("Status enumeration with detailed docs");
@@ -183,8 +183,6 @@ mod tests {
         assert!(displayed.contains("# System is operational\n\tactive"));
         assert!(displayed.contains("# System is stopped\n\tinactive"));
         assert!(displayed.contains("# System is starting up\n\tpending"));
-
-        debug!("✓ Comprehensive enum display: {}", displayed);
     }
 
     #[test]
