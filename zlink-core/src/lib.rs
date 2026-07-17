@@ -41,7 +41,15 @@ pub use call::Call;
 pub mod reply;
 pub use reply::Reply;
 #[cfg(feature = "idl")]
-pub mod idl;
+pub mod idl {
+    //! Interface Definition Language (IDL) support for Varlink.
+    //!
+    //! This is a re-export of the [`zlink_idl`] crate, for those who only need the IDL API and not
+    //! the rest of zlink.
+
+    #[doc(inline)]
+    pub use zlink_idl::*;
+}
 #[cfg(feature = "introspection")]
 pub mod introspect;
 pub mod varlink_service;

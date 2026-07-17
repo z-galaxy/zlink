@@ -156,7 +156,7 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-    use crate::idl::{Comment, EnumVariant};
+    use crate::{Comment, EnumVariant};
 
     #[test]
     fn type_names() {

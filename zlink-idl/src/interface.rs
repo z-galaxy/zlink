@@ -107,7 +107,7 @@ impl<'a> fmt::Display for Interface<'a> {
     }
 }
 
-#[cfg(feature = "idl-parse")]
+#[cfg(feature = "parse")]
 impl<'a> TryFrom<&'a str> for Interface<'a> {
     type Error = super::parse::Error;
 
@@ -128,12 +128,12 @@ impl PartialEq for Interface<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::idl::{Error, Field, Method, Parameter, Type};
+    use crate::{Error, Field, Method, Parameter, Type};
     use alloc::string::String;
 
     #[test]
     fn org_varlink_service_interface() {
-        use crate::idl::TypeRef;
+        use crate::TypeRef;
 
         // Build the org.varlink.service interface as our test case
         let interfaces_type = Type::Array(TypeRef::new(&Type::String));
@@ -210,9 +210,9 @@ mod tests {
         assert!(idl.as_str().contains("error PermissionDenied ()"));
 
         // Test parsing the official org.varlink.service IDL and compare with manually constructed
-        #[cfg(feature = "idl-parse")]
+        #[cfg(feature = "parse")]
         {
-            use crate::idl::parse;
+            use crate::parse;
 
             const ORG_VARLINK_SERVICE_IDL: &str = r#"interface org.varlink.service
 
@@ -256,12 +256,12 @@ error ExpectedMore ()
         assert_eq!(interface.custom_types().count(), 0);
     }
 
-    #[cfg(feature = "idl-parse")]
+    #[cfg(feature = "parse")]
     #[test]
     fn systemd_resolved_interface_parsing() {
         use alloc::vec::Vec;
 
-        use crate::idl::{CustomObject, CustomType, TypeRef, parse};
+        use crate::{CustomObject, CustomType, TypeRef, parse};
 
         // Manually construct the systemd-resolved interface for comparison.
 
@@ -592,7 +592,7 @@ error DNSError(
 
     #[test]
     fn display_with_comments() {
-        use crate::idl::{Comment, Method};
+        use crate::{Comment, Method};
         use core::fmt::Write;
 
         let comment1 = Comment::new("Interface documentation");
@@ -615,9 +615,7 @@ error DNSError(
 
     #[test]
     fn comprehensive_display_with_nested_comments() {
-        use crate::idl::{
-            Comment, CustomObject, CustomType, Error, Field, Method, Parameter, Type,
-        };
+        use crate::{Comment, CustomObject, CustomType, Error, Field, Method, Parameter, Type};
         use core::fmt::Write;
 
         // Interface comments
@@ -672,7 +670,7 @@ error DNSError(
     }
 
     #[test]
-    #[cfg(feature = "idl-parse")]
+    #[cfg(feature = "parse")]
     fn parse_and_display_round_trip_with_comments() {
         use core::fmt::Write;
 

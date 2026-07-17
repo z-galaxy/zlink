@@ -2248,8 +2248,15 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "winnow",
+ "zlink-idl",
  "zlink-macros",
+]
+
+[[package]]
+name = "zlink-idl"
+version = "0.6.0"
+dependencies = [
+ "winnow",
 ]
 
 [[package]]

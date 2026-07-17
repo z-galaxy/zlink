@@ -455,22 +455,16 @@ fn ws_with_comments() {
     assert!(input_bytes3.is_empty());
 }
 
-#[test_log::test]
+#[test]
 fn parse_simple_enum() {
     let input = "(one, two, three)";
     let mut input_bytes = input.as_bytes();
-    match enum_type(&mut input_bytes) {
-        Ok(enum_type) => {
-            debug!("✓ Successfully parsed simple enum: {:?}", enum_type);
-        }
-        Err(e) => {
-            debug!("✗ Failed to parse simple enum: {:?}", e);
-            panic!("Should be able to parse simple enum: {:?}", e);
-        }
+    if let Err(e) = enum_type(&mut input_bytes) {
+        panic!("Should be able to parse simple enum: {:?}", e);
     }
 }
 
-#[test_log::test]
+#[test]
 fn parse_acquiremetadata_enum_directly() {
     let input = r#"(
 	# Do not include metadata in the output
@@ -482,26 +476,16 @@ fn parse_acquiremetadata_enum_directly() {
 )"#;
 
     let mut input_bytes = input.as_bytes();
-    match enum_type(&mut input_bytes) {
-        Ok(enum_type) => {
-            debug!(
-                "✓ Successfully parsed AcquireMetadata enum: {:?}",
-                enum_type
-            );
-        }
-        Err(e) => {
-            debug!("✗ Failed to parse AcquireMetadata enum: {:?}", e);
-            // Print the remaining input to see where it failed
-            debug!(
-                "Remaining input: {:?}",
-                core::str::from_utf8(input_bytes).unwrap_or("<invalid UTF-8>")
-            );
-            panic!("Should be able to parse AcquireMetadata enum: {:?}", e);
-        }
+    if let Err(e) = enum_type(&mut input_bytes) {
+        panic!(
+            "Should be able to parse AcquireMetadata enum: {:?}. Remaining input: {:?}",
+            e,
+            core::str::from_utf8(input_bytes).unwrap_or("<invalid UTF-8>")
+        );
     }
 }
 
-#[test_log::test]
+#[test]
 fn parse_enum_with_comments() {
     let input = r#"type AcquireMetadata(
 	# Do not include metadata in the output
@@ -541,16 +525,8 @@ fn parse_enum_with_comments() {
                 variants[2].comments().next().unwrap().content(),
                 "Include metadata in the output, but gracefully eat up errors"
             );
-
-            debug!(
-                "✓ Successfully parsed enum with per-variant comments: {}",
-                custom_type
-            );
         }
-        Err(e) => {
-            debug!("✗ Failed to parse enum with comments: {}", e);
-            panic!("Should be able to parse enum with comments: {}", e);
-        }
+        Err(e) => panic!("Should be able to parse enum with comments: {}", e),
     }
 }
 
@@ -904,7 +880,7 @@ fn parse_method(input: &str) -> Result<Method<'_>, Error> {
 }
 
 /// Parse an error from a string.
-fn parse_error(input: &str) -> Result<crate::idl::Error<'_>, Error> {
+fn parse_error(input: &str) -> Result<crate::Error<'_>, Error> {
     parse_from_str(input, error_def)
 }
 
