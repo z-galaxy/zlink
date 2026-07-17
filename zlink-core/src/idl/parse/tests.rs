@@ -355,10 +355,8 @@ fn parse_error_messages() {
     let result = parse_interface(invalid_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Parse error"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::Parse(_) => (),
+        other => panic!("Expected Parse error, got: {:?}", other),
     }
 
     // Test with unexpected remaining input
@@ -366,10 +364,8 @@ fn parse_error_messages() {
     let result = parse_interface(incomplete_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Unexpected remaining input") || msg.contains("Parse error"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::TrailingInput(_) | Error::Parse(_) => (),
+        other => panic!("Expected TrailingInput or Parse error, got: {:?}", other),
     }
 
     // Test with empty input
@@ -377,10 +373,8 @@ fn parse_error_messages() {
     let result = parse_interface(empty_interface);
     assert!(result.is_err());
     match result.unwrap_err() {
-        crate::Error::IdlParse(msg) => {
-            assert!(msg.contains("Input is empty"));
-        }
-        other => panic!("Expected IdlParse error, got: {:?}", other),
+        Error::Empty => (),
+        other => panic!("Expected Empty error, got: {:?}", other),
     }
 }
 
@@ -900,27 +894,27 @@ method GetData() -> (items: []any, map: [string]any)
 }
 
 /// Parse a Varlink type from a string.
-fn parse_type(input: &str) -> Result<Type<'_>, crate::Error> {
+fn parse_type(input: &str) -> Result<Type<'_>, Error> {
     parse_from_str(input, varlink_type)
 }
 
 /// Parse a method from a string.
-fn parse_method(input: &str) -> Result<Method<'_>, crate::Error> {
+fn parse_method(input: &str) -> Result<Method<'_>, Error> {
     parse_from_str(input, method_def)
 }
 
 /// Parse an error from a string.
-fn parse_error(input: &str) -> Result<Error<'_>, crate::Error> {
+fn parse_error(input: &str) -> Result<crate::idl::Error<'_>, Error> {
     parse_from_str(input, error_def)
 }
 
 /// Parse a custom type from a string.
-fn parse_custom_type(input: &str) -> Result<CustomType<'_>, crate::Error> {
+fn parse_custom_type(input: &str) -> Result<CustomType<'_>, Error> {
     parse_from_str(input, type_def)
 }
 
 /// Parse a field from a string.
-fn parse_field(input: &str) -> Result<Field<'_>, crate::Error> {
+fn parse_field(input: &str) -> Result<Field<'_>, Error> {
     parse_from_str(input, field)
 }
 

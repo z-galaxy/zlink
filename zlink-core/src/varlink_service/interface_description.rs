@@ -30,7 +30,7 @@ impl<'a> InterfaceDescription<'a> {
         match &self.description {
             Description::Parsed(interface) => Ok(interface.clone()),
             #[cfg(feature = "idl-parse")]
-            Description::Raw(description) => description.as_str().try_into(),
+            Description::Raw(description) => Ok(description.as_str().try_into()?),
         }
     }
 

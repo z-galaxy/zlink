@@ -4,9 +4,6 @@ use core::fmt;
 
 use alloc::vec::Vec;
 
-#[cfg(feature = "idl-parse")]
-use crate::Error;
-
 use super::List;
 
 /// A Varlink interface definition.
@@ -112,7 +109,7 @@ impl<'a> fmt::Display for Interface<'a> {
 
 #[cfg(feature = "idl-parse")]
 impl<'a> TryFrom<&'a str> for Interface<'a> {
-    type Error = Error;
+    type Error = super::parse::Error;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         super::parse::parse_interface(value)

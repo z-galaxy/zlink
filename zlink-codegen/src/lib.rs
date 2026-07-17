@@ -158,7 +158,7 @@ pub fn generate_files(config: &CodegenOptions) -> Result<(), Error> {
 
     let mut interfaces = Vec::new();
     for content in &file_contents {
-        let interface = Interface::try_from(content.as_str())?;
+        let interface = Interface::try_from(content.as_str()).map_err(zlink::Error::from)?;
         interfaces.push(interface);
     }
 

@@ -38,4 +38,4 @@ mod interface;
 pub use interface::Interface;
 
 #[cfg(feature = "idl-parse")]
-mod parse;
+pub mod parse;
