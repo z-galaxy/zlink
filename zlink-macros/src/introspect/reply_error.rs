@@ -83,7 +83,23 @@ fn generate_error_definitions(
                 error_variants.push(error_variant);
             }
             Fields::Named(fields) => {
-                let (field_statics, field_refs) = shared::generate_field_definitions(
+                // `#[zlink(skip)]` / `#[zlink(flatten)]` are only meaningful on the `Type` and
+                // `CustomType` derives, where they mirror a `#[serde(..)]` attribute. `ReplyError`
+                // generates its own serde, so there is nothing to pair them with; reject them
+                // rather than silently omit the field from the IDL while it stays on the wire.
+                for field in &fields.named {
+                    if utils::has_zlink_bool_attr(&field.attrs, "skip")
+                        || utils::has_zlink_bool_attr(&field.attrs, "flatten")
+                    {
+                        return Err(Error::new_spanned(
+                            field,
+                            "`#[zlink(skip)]` and `#[zlink(flatten)]` are not supported on \
+                             `ReplyError` fields; they only apply to `Type`/`CustomType`",
+                        ));
+                    }
+                }
+
+                let (field_statics, field_refs_init) = shared::generate_field_definitions(
                     &Fields::Named(fields.clone()),
                     crate_path,
                     Some(&variant.ident),
@@ -97,9 +113,7 @@ fn generate_error_definitions(
                     &{
                         #(#field_statics)*
 
-                        static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = &[
-                            #(#field_refs),*
-                        ];
+                        static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = #field_refs_init;
 
                         #crate_path::idl::Error::new(#variant_name, FIELD_REFS, &[#(#comment_objects),*])
                     }

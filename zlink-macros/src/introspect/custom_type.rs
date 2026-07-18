@@ -58,15 +58,13 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
     let custom_type = match &input.data {
         Data::Struct(data_struct) => {
             let fields = &data_struct.fields;
-            let (field_statics, field_refs) =
+            let (field_statics, field_refs_init) =
                 generate_field_definitions(fields, &crate_path, rename_all)?;
 
             quote!({
                 #(#field_statics)*
 
-                static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = &[
-                    #(#field_refs),*
-                ];
+                static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = #field_refs_init;
 
                 #crate_path::idl::CustomType::Object(
                     #crate_path::idl::CustomObject::new(#name_str, FIELD_REFS, &[#(#type_comment_objects),*])
@@ -110,7 +108,7 @@ fn generate_field_definitions(
     fields: &Fields,
     crate_path: &TokenStream2,
     rename_all: Option<RenameAll>,
-) -> Result<(Vec<TokenStream2>, Vec<TokenStream2>), Error> {
+) -> Result<(Vec<TokenStream2>, TokenStream2), Error> {
     shared::generate_field_definitions(fields, crate_path, None, rename_all)
 }
 

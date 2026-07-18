@@ -224,6 +224,38 @@ fn derive_macro_available_from_main_module() {
 }
 
 #[test]
+fn skip_and_flatten_reshape_the_custom_object() {
+    use zlink::introspect::Type;
+
+    #[derive(Type)]
+    #[allow(dead_code)]
+    struct Inner {
+        a: u32,
+        b: String,
+    }
+
+    #[derive(CustomType)]
+    #[allow(dead_code)]
+    struct WithSkipAndFlatten {
+        id: u64,
+        #[zlink(skip)]
+        internal: Vec<u8>,
+        #[zlink(flatten)]
+        inner: Inner,
+        tail: bool,
+    }
+
+    match WithSkipAndFlatten::CUSTOM_TYPE {
+        idl::CustomType::Object(obj) => {
+            let names: Vec<_> = obj.fields().map(|f| f.name()).collect();
+            // `internal` is skipped; `inner` is replaced by its members `a`, `b`, in place.
+            assert_eq!(names, ["id", "a", "b", "tail"]);
+        }
+        _ => panic!("Expected custom object type for WithSkipAndFlatten"),
+    }
+}
+
+#[test]
 fn enum_variant_names_not_renamed_for_encoding() {
     // This test verifies that enum variant names in Type are preserved exactly
     // as written in the code, ignoring any serde renaming attributes
