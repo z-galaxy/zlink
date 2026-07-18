@@ -30,6 +30,10 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Runtime choice**: Use either the Tokio or smol async runtime.
 - **Code generation**: Generate Rust code from Varlink IDL files.
 
+📖 To learn all about using zlink (and Varlink) step by step, check out
+[the zlink book](https://z-galaxy.github.io/zlink/). Its sources are in the
+[`book` directory](https://github.com/z-galaxy/zlink/tree/main/book) of the repository.
+
 ## Project Structure
 
 The zlink project consists of several subcrates:

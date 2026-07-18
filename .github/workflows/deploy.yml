@@ -1,0 +1,51 @@
+name: Deployments
+
+on:
+  push:
+    tags:
+      - zlink-0.*
+    paths:
+      - book/**/*
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install latest mdbook
+        run: |
+          tag=$(curl 'https://api.github.com/repos/rust-lang/mdbook/releases/latest' | jq -r '.tag_name')
+          url="https://github.com/rust-lang/mdbook/releases/download/${tag}/mdbook-${tag}-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir mdbook
+          curl -sSL $url | tar -xz --directory=./mdbook
+          echo `pwd`/mdbook >> $GITHUB_PATH
+      - name: Install latest mdbook-toc
+        run: |
+          tag=$(curl 'https://api.github.com/repos/badboy/mdbook-toc/releases/latest' | jq -r '.tag_name')
+          url="https://github.com/badboy/mdbook-toc/releases/download/${tag}/mdbook-toc-${tag}-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir mdbook-toc
+          curl -sSL $url | tar -xz --directory=./mdbook-toc
+          echo `pwd`/mdbook-toc >> $GITHUB_PATH
+      - name: Build Book
+        run: mdbook build book
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/book
+      - name: Deploy 🚀
+        id: deployment
+        uses: actions/deploy-pages@v4
