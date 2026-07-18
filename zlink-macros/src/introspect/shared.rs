@@ -95,7 +95,7 @@ pub(super) fn generate_enum_variant_definitions(
         match &variant.fields {
             Fields::Unit => {
                 let variant_name =
-                    naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
+                    naming::enum_variant_name(&variant.attrs, &variant.ident, rename_all)?;
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = generate_comment_objects(&comments, crate_path);
                 let variant_ref = quote! {

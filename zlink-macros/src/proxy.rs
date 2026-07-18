@@ -152,6 +152,7 @@ fn parse_proxy_attributes(
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("interface") {
             let value: syn::LitStr = meta.value()?.parse()?;
+            crate::naming::validate_interface(&value)?;
             interface_name = Some(value.value());
         } else if meta.path.is_ident("crate") {
             let value: syn::LitStr = meta.value()?.parse()?;

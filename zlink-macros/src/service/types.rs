@@ -1,8 +1,6 @@
 //! Types used in service macro processing.
 
-use std::borrow::Cow;
-
-use syn::{FnArg, Ident, Pat, Type};
+use syn::{FnArg, Ident, LitStr, Pat, Type};
 
 /// Information about a method parameter.
 #[derive(Clone)]
@@ -11,8 +9,9 @@ pub(super) struct ParamInfo {
     pub name: Ident,
     /// The parameter type.
     pub ty: Type,
-    /// The serialized name (from `#[zlink(rename = "...")]`).
-    pub serialized_name: Option<String>,
+    /// The serialized name (from `#[zlink(rename = "...")]`). The literal is kept, not just its
+    /// value, so a bad wire name can be reported against the span the user wrote it at.
+    pub serialized_name: Option<LitStr>,
     /// Whether this parameter is marked with `#[zlink(connection)]`.
     pub is_connection: bool,
     /// Whether this parameter is marked with `#[zlink(fds)]`.
@@ -28,10 +27,10 @@ impl ParamInfo {
     /// parameter name otherwise. Unrawing is what keeps the IDL and the wire in agreement: serde
     /// unraws the name it deserializes, so an `r#`-prefixed IDL name would advertise a parameter
     /// the method could never accept.
-    pub(super) fn wire_name(&self) -> Cow<'_, str> {
+    pub(super) fn wire_name(&self) -> String {
         match &self.serialized_name {
-            Some(name) => Cow::Borrowed(name),
-            None => Cow::Owned(crate::naming::unraw(&self.name)),
+            Some(name) => name.value(),
+            None => crate::naming::unraw(&self.name),
         }
     }
 

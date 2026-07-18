@@ -2,9 +2,11 @@
 
 use proc_macro2::TokenStream;
 use syn::{
-    Attribute, Error, Expr, GenericArgument, Ident, ImplItemFn, Lit, Meta, PathArguments,
+    Attribute, Error, Expr, GenericArgument, Ident, ImplItemFn, Lit, LitStr, Meta, PathArguments,
     ReturnType, Type, parse::Parse,
 };
+
+use crate::naming::{self, Grammar, NameSource};
 
 use super::types::ParamInfo;
 
@@ -67,9 +69,15 @@ impl MethodInfo {
 
         // Determine the Varlink method name. The ident is unraw'd first: `r#` is Rust syntax, not
         // part of the name, and it would otherwise reach `format_ident!` as `R#type`.
-        let varlink_name = method_attrs
-            .rename
-            .unwrap_or_else(|| snake_case_to_pascal_case(&crate::naming::unraw(&name)));
+        let (varlink_name, name_source) = match &method_attrs.rename {
+            Some(lit) => (lit.value(), NameSource::Rename(lit)),
+            None => (
+                snake_case_to_pascal_case(&naming::unraw(&name)),
+                NameSource::Ident(&name),
+            ),
+        };
+        // A method is named like a type, so it must be expressible as one.
+        naming::validate(&varlink_name, Grammar::Type, "method name", name_source)?;
 
         // Check if this is a streaming method.
         let is_streaming = method_attrs.is_streaming;
@@ -114,20 +122,18 @@ impl MethodInfo {
             }
         }
 
-        // Underscore-prefixed names are not valid Varlink field names, so serialized parameters
-        // (the ones that end up on the wire and in the IDL) must be given an explicit wire name.
+        // Serialized parameters (the ones that end up on the wire and in the IDL) must carry a
+        // name Varlink can express. The `_`-prefixed case falls out of this: `_foo` fails the
+        // field grammar at its first character.
         for param in params
             .iter()
             .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
         {
-            if param.serialized_name.is_none() && crate::naming::unraw(&param.name).starts_with('_')
-            {
-                return Err(Error::new_spanned(
-                    &param.name,
-                    "parameter names starting with `_` are not valid Varlink field names; \
-                     specify the wire name with `#[zlink(rename = \"...\")]`",
-                ));
-            }
+            let (wire_name, source) = match &param.serialized_name {
+                Some(lit) => (lit.value(), NameSource::Rename(lit)),
+                None => (naming::unraw(&param.name), NameSource::Ident(&param.name)),
+            };
+            naming::validate(&wire_name, Grammar::Field, "parameter name", source)?;
         }
 
         // Validate FD attributes.
@@ -357,7 +363,7 @@ struct MethodAttrs {
     /// Custom types scoped to this method's interface.
     custom_types: Vec<Type>,
     /// Custom method name.
-    rename: Option<String>,
+    rename: Option<LitStr>,
     /// Whether this method returns a stream of replies.
     is_streaming: bool,
     /// Whether this method returns file descriptors.
@@ -390,10 +396,11 @@ impl MethodAttrs {
             let parser = syn::meta::parser(|meta| {
                 if meta.path.is_ident("interface") {
                     let value: syn::LitStr = meta.value()?.parse()?;
+                    naming::validate_interface(&value)?;
                     result.interface = Some(value.value());
                 } else if meta.path.is_ident("rename") {
                     let value: syn::LitStr = meta.value()?.parse()?;
-                    result.rename = Some(value.value());
+                    result.rename = Some(value);
                 } else if meta.path.is_ident("types") {
                     meta.input.parse::<syn::Token![=]>()?;
                     let content;
@@ -432,7 +439,7 @@ impl MethodAttrs {
 #[derive(Default)]
 struct ParamAttrs {
     /// Custom serialized name for the parameter.
-    rename: Option<String>,
+    rename: Option<LitStr>,
     /// Whether this parameter should receive the connection.
     is_connection: bool,
     /// Whether this parameter receives file descriptors.
@@ -464,7 +471,7 @@ fn extract_param_attrs(attrs: &[Attribute]) -> ParamAttrs {
                     if let Expr::Lit(expr_lit) = &nv.value
                         && let Lit::Str(lit_str) = &expr_lit.lit
                     {
-                        result.rename = Some(lit_str.value());
+                        result.rename = Some(lit_str.clone());
                     }
                 }
                 Meta::Path(path) if path.is_ident("connection") => {
@@ -680,8 +687,9 @@ mod tests {
     use super::*;
     use syn::{FnArg, parse_quote};
 
-    /// The `_` check must judge the same string `ParamInfo::wire_name` does, or a raw ident slips
-    /// past it and reaches the IDL unraw'd as `_foo`.
+    /// Validation must judge the same string `ParamInfo::wire_name` does, or a raw ident slips past
+    /// it and reaches the IDL unraw'd as `_foo`. Both spellings resolve to `_foo`, which the field
+    /// grammar rejects at its first character.
     #[test]
     fn underscore_prefixed_params_rejected_raw_or_not() {
         for src in ["_foo: String", "r#_foo: String"] {
@@ -695,9 +703,14 @@ mod tests {
                 panic!("`{src}` must be rejected: it reaches the IDL as `_foo`");
             };
 
+            let err = err.to_string();
             assert!(
-                err.to_string().contains("not valid Varlink field names"),
-                "unexpected error for `{src}`: {err}"
+                err.contains("`_foo`") && err.contains("parameter name"),
+                "message must name the offending parameter: {err}"
+            );
+            assert!(
+                err.contains("rename"),
+                "message must point at the `rename` escape hatch: {err}"
             );
         }
     }
