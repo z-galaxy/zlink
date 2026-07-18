@@ -2,6 +2,97 @@ use syn::{Attribute, Error, Ident, LitStr};
 
 use crate::utils::skip_unknown_meta;
 
+/// The grammar a resolved Varlink name must follow.
+///
+/// Varlink names fields, parameters and enum variants one way, and types, methods and errors
+/// another, so every name falls under one of these two rules.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Grammar {
+    /// The field-name rule, `[A-Za-z][A-Za-z0-9_]*`. Fields, parameters and enum variants.
+    Field,
+    /// The type-name rule, `[A-Z][A-Za-z0-9]*`. Types, methods and errors.
+    Type,
+}
+
+/// Where a resolved name came from, which decides what a rejection points at and suggests.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NameSource<'a> {
+    /// An explicit `#[zlink(rename = "...")]`.
+    Rename(&'a LitStr),
+    /// A Rust ident, possibly with a case convention applied to it.
+    Ident(&'a Ident),
+}
+
+/// Reject `name` if Varlink cannot express it under `grammar`, describing it as `what`.
+///
+/// Only ever called on a *resolved* name: unrawing and `rename`/`rename_all` decide what a thing is
+/// called, and this decides whether that answer is sayable. Checking any earlier would reject
+/// perfectly good Rust, e.g. `r#type`, which resolves to the valid `type`.
+pub(crate) fn validate(
+    name: &str,
+    grammar: Grammar,
+    what: &str,
+    source: NameSource<'_>,
+) -> Result<(), Error> {
+    if !grammar.accepts(name) {
+        // Pointing at the rename literal is precise enough on its own; suggesting a rename to
+        // someone who just wrote one would only be noise.
+        let hint = match source {
+            NameSource::Rename(_) => "",
+            NameSource::Ident(_) => ", so name it explicitly with `#[zlink(rename = \"...\")]`",
+        };
+        let msg = format!(
+            "`{name}` is not a valid Varlink {what}: it must match `{}`{hint}",
+            grammar.pattern(),
+        );
+
+        return Err(match source {
+            NameSource::Rename(lit) => Error::new_spanned(lit, msg),
+            NameSource::Ident(ident) => Error::new_spanned(ident, msg),
+        });
+    }
+
+    Ok(())
+}
+
+/// Reject an interface name Varlink cannot express, reporting against `lit`'s span.
+///
+/// Kept apart from [`validate`]: an interface name is always a literal the user wrote out (never a
+/// resolved ident), and its grammar is neither the field nor the type rule but reverse-domain
+/// notation.
+pub(crate) fn validate_interface(lit: &LitStr) -> Result<(), Error> {
+    let name = lit.value();
+    if !zlink_idl::is_valid_interface_name(&name) {
+        return Err(Error::new_spanned(
+            lit,
+            format!(
+                "`{name}` is not a valid Varlink interface name: it must be in reverse-domain \
+                 notation, e.g. `org.example.Foo`"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+impl Grammar {
+    /// Whether Varlink can express `name` under this rule.
+    fn accepts(self, name: &str) -> bool {
+        match self {
+            Self::Field => zlink_idl::is_valid_field_name(name),
+            Self::Type => zlink_idl::is_valid_type_name(name),
+        }
+    }
+
+    /// The rule as it reads in the Varlink specification.
+    fn pattern(self) -> &'static str {
+        match self {
+            Self::Field => "[A-Za-z][A-Za-z0-9_]*",
+            Self::Type => "[A-Z][A-Za-z0-9]*",
+        }
+    }
+}
+
 /// The case convention requested by `#[zlink(rename_all = "...")]`.
 ///
 /// The variants mirror serde's rename rules so the semantics are familiar. Note that the field and
@@ -80,6 +171,21 @@ impl RenameAll {
         }
     }
 
+    /// Whether this convention could ever produce a name valid under `grammar`.
+    ///
+    /// Some conventions can satisfy a grammar for no input at all: `snake_case`, say, always
+    /// lowercases the first character, which the type-name rule (uppercase-first) rejects for
+    /// every possible name. Offering such a pairing is a footgun, so it is refused up front rather
+    /// than left for the per-name check to reject one produced name at a time.
+    ///
+    /// Probing a single-word sample rather than re-encoding that reasoning keeps the parser the one
+    /// authority on the grammar: a word carries the first-character and character-set rules without
+    /// the separators that only longer names introduce, so if a convention cannot make even this
+    /// fit, no name ever will.
+    fn can_produce(self, grammar: Grammar) -> bool {
+        grammar.accepts(&self.apply_to_variant("Word"))
+    }
+
     fn parse(lit: &LitStr) -> Result<Self, Error> {
         let rule = match lit.value().as_str() {
             "lowercase" => Self::Lower,
@@ -113,18 +219,55 @@ pub(crate) fn field_name(
     ident: &Ident,
     rename_all: Option<RenameAll>,
 ) -> Result<String, Error> {
-    resolve(attrs, ident, rename_all, RenameAll::apply_to_field)
+    resolve(
+        attrs,
+        ident,
+        rename_all,
+        RenameAll::apply_to_field,
+        Grammar::Field,
+        "field name",
+    )
 }
 
 /// The name an enum variant should carry in the IDL and on the wire.
 ///
 /// `#[zlink(rename)]` wins over an inherited `rename_all`, which wins over the Rust ident.
-pub(crate) fn variant_name(
+#[cfg(feature = "introspection")]
+pub(crate) fn enum_variant_name(
     attrs: &[Attribute],
     ident: &Ident,
     rename_all: Option<RenameAll>,
 ) -> Result<String, Error> {
-    resolve(attrs, ident, rename_all, RenameAll::apply_to_variant)
+    resolve(
+        attrs,
+        ident,
+        rename_all,
+        RenameAll::apply_to_variant,
+        Grammar::Field,
+        "enum variant name",
+    )
+}
+
+/// The name an error variant should carry in the IDL and on the wire.
+///
+/// `#[zlink(rename)]` wins over an inherited `rename_all`, which wins over the Rust ident.
+///
+/// Kept apart from [`enum_variant_name`] because the two obey different grammars: an error is named
+/// like a type, an enum variant like a field. Sharing one function would leave the choice of rule
+/// to whichever caller happened to reach for it.
+pub(crate) fn error_name(
+    attrs: &[Attribute],
+    ident: &Ident,
+    rename_all: Option<RenameAll>,
+) -> Result<String, Error> {
+    resolve(
+        attrs,
+        ident,
+        rename_all,
+        RenameAll::apply_to_variant,
+        Grammar::Type,
+        "error name",
+    )
 }
 
 /// Reject a container-level `#[zlink(rename)]` with `msg`, for derives where it means nothing.
@@ -137,12 +280,34 @@ pub(crate) fn reject_container_rename(attrs: &[Attribute], msg: &str) -> Result<
     }
 }
 
-/// The container's `#[zlink(rename_all = "...")]`, if any.
-pub(crate) fn parse_rename_all(attrs: &[Attribute]) -> Result<Option<RenameAll>, Error> {
-    match parse_zlink_lit_str(attrs, "rename_all")? {
-        Some(lit) => RenameAll::parse(&lit).map(Some),
-        None => Ok(None),
+/// The container's `#[zlink(rename_all = "...")]`, if any, checked against `grammar`.
+///
+/// A convention that could never produce a name valid under `grammar` -- `snake_case` where a type
+/// name is wanted, say -- is rejected here, against the attribute's own span, rather than left for
+/// the per-name check to reject one produced name at a time.
+pub(crate) fn parse_rename_all(
+    attrs: &[Attribute],
+    grammar: Grammar,
+) -> Result<Option<RenameAll>, Error> {
+    let Some(lit) = parse_zlink_lit_str(attrs, "rename_all")? else {
+        return Ok(None);
+    };
+
+    let rule = RenameAll::parse(&lit)?;
+    if !rule.can_produce(grammar) {
+        return Err(Error::new_spanned(
+            &lit,
+            format!(
+                "`{}` can never produce a name matching the Varlink grammar `{}`, so it cannot \
+                 apply here. Drop `rename_all`, use a convention that fits (e.g. `UPPERCASE` or \
+                 `PascalCase`), or name items individually with `#[zlink(rename = \"...\")]`",
+                lit.value(),
+                grammar.pattern(),
+            ),
+        ));
     }
+
+    Ok(Some(rule))
 }
 
 /// The item's `#[zlink(rename = "...")]`, if any.
@@ -168,20 +333,29 @@ fn resolve<F>(
     ident: &Ident,
     rename_all: Option<RenameAll>,
     apply: F,
+    grammar: Grammar,
+    what: &str,
 ) -> Result<String, Error>
 where
     F: FnOnce(RenameAll, &str) -> String,
 {
+    // An explicit rename is a name the user wrote out, so it is taken verbatim -- mangling it would
+    // defeat the point of the attribute -- but it still has to be a name Varlink can say.
     if let Some(lit) = parse_rename(attrs)? {
-        return Ok(lit.value());
+        let name = lit.value();
+        validate(&name, grammar, what, NameSource::Rename(&lit))?;
+
+        return Ok(name);
     }
 
-    let ident = unraw(ident);
+    let unrawed = unraw(ident);
+    let name = match rename_all {
+        Some(rule) => apply(rule, &unrawed),
+        None => unrawed,
+    };
+    validate(&name, grammar, what, NameSource::Ident(ident))?;
 
-    Ok(match rename_all {
-        Some(rule) => apply(rule, &ident),
-        None => ident,
-    })
+    Ok(name)
 }
 
 /// The string value of `#[zlink(<key> = "...")]`, if present.
@@ -315,13 +489,18 @@ mod tests {
         let attrs: Vec<Attribute> =
             vec![parse_quote!(#[zlink(crate = "crate", rename_all = "camelCase")])];
 
-        assert_eq!(parse_rename_all(&attrs).unwrap(), Some(RenameAll::Camel));
+        assert_eq!(
+            parse_rename_all(&attrs, Grammar::Field).unwrap(),
+            Some(RenameAll::Camel)
+        );
     }
 
     #[test]
     fn unknown_rename_all_value_rejected() {
         let attrs: Vec<Attribute> = vec![parse_quote!(#[zlink(rename_all = "bogus")])];
-        let err = parse_rename_all(&attrs).unwrap_err().to_string();
+        let err = parse_rename_all(&attrs, Grammar::Field)
+            .unwrap_err()
+            .to_string();
 
         assert!(
             err.contains("bogus"),
@@ -341,5 +520,145 @@ mod tests {
             .to_string();
 
         assert_eq!(err, "nope");
+    }
+
+    /// A raw-ident param unraws to a valid field name and must survive validation: this pins the
+    /// order (unraw, then validate). Validating `r#type` verbatim would reject legitimate Rust.
+    #[test]
+    fn raw_ident_field_resolves_then_validates() {
+        let attrs: Vec<Attribute> = vec![];
+        let ident: Ident = parse_quote!(r#type);
+
+        assert_eq!(field_name(&attrs, &ident, None).unwrap(), "type");
+    }
+
+    /// The error-name counterpart: `r#Fn` unraws to the valid error name `Fn`.
+    #[test]
+    fn raw_ident_error_variant_resolves_then_validates() {
+        let attrs: Vec<Attribute> = vec![];
+        let ident: Ident = parse_quote!(r#Fn);
+
+        assert_eq!(error_name(&attrs, &ident, None).unwrap(), "Fn");
+    }
+
+    /// Enum variants follow field rules, which admit a lowercase first letter.
+    #[cfg(feature = "introspection")]
+    #[test]
+    fn enum_variant_lowercase_is_accepted() {
+        let attrs: Vec<Attribute> = vec![];
+        let ident: Ident = parse_quote!(Active);
+
+        assert_eq!(
+            enum_variant_name(&attrs, &ident, Some(RenameAll::Lower)).unwrap(),
+            "active"
+        );
+    }
+
+    /// The very same lowercase name is rejected as an error name, which follows type rules.
+    #[test]
+    fn error_name_lowercase_is_rejected() {
+        let attrs: Vec<Attribute> = vec![];
+        let ident: Ident = parse_quote!(Active);
+        let err = error_name(&attrs, &ident, Some(RenameAll::Lower))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("`active`"), "must name the bad name: {err}");
+        assert!(err.contains("error name"), "must name the context: {err}");
+    }
+
+    /// A bad `rename` is reported against its own value, not the ident it overrode, and offers no
+    /// "use rename" hint to someone who already wrote one. This is how the error lands on the
+    /// literal's span.
+    #[test]
+    fn invalid_rename_reports_the_literal_not_the_ident() {
+        let attrs: Vec<Attribute> = vec![parse_quote!(#[zlink(rename = "not valid!")])];
+        let ident: Ident = parse_quote!(good_field);
+        let err = field_name(&attrs, &ident, None).unwrap_err().to_string();
+
+        assert!(err.contains("`not valid!`"), "must quote the rename: {err}");
+        assert!(
+            !err.contains("good_field"),
+            "must not blame the ident: {err}"
+        );
+        assert!(
+            !err.contains("`#[zlink(rename"),
+            "no hint on a rename: {err}"
+        );
+    }
+
+    /// A bad ident, by contrast, is pointed at the `rename` escape hatch.
+    #[test]
+    fn invalid_ident_suggests_rename() {
+        let attrs: Vec<Attribute> = vec![];
+        let ident: Ident = parse_quote!(_foo);
+        let err = field_name(&attrs, &ident, None).unwrap_err().to_string();
+
+        assert!(err.contains("`_foo`"), "must name the bad ident: {err}");
+        assert!(err.contains("rename"), "must offer the escape hatch: {err}");
+    }
+
+    #[test]
+    fn interface_names_validated() {
+        let good: LitStr = parse_quote!("org.example.Foo");
+        assert!(validate_interface(&good).is_ok());
+
+        // A `_` is not allowed in an interface segment (unlike a field name).
+        let bad: LitStr = parse_quote!("org.example.bad_name");
+        let err = validate_interface(&bad).unwrap_err().to_string();
+
+        assert!(
+            err.contains("`org.example.bad_name`"),
+            "must quote it: {err}"
+        );
+        assert!(
+            err.contains("interface name"),
+            "must name the context: {err}"
+        );
+    }
+
+    /// A convention that can sometimes yield a valid type name -- `SCREAMING_SNAKE_CASE` does for a
+    /// single-word variant -- is accepted; the per-name check catches the names that do not fit.
+    #[test]
+    fn rename_all_that_can_sometimes_fit_the_type_grammar_is_accepted() {
+        let attrs: Vec<Attribute> =
+            vec![parse_quote!(#[zlink(rename_all = "SCREAMING_SNAKE_CASE")])];
+
+        assert_eq!(
+            parse_rename_all(&attrs, Grammar::Type).unwrap(),
+            Some(RenameAll::ScreamingSnake)
+        );
+    }
+
+    /// A convention that can never yield a valid type name -- `snake_case` always lowercases the
+    /// first letter -- is refused up front, against the attribute's own span.
+    #[test]
+    fn rename_all_that_never_fits_the_type_grammar_is_rejected() {
+        let attrs: Vec<Attribute> = vec![parse_quote!(#[zlink(rename_all = "snake_case")])];
+        let err = parse_rename_all(&attrs, Grammar::Type)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("`snake_case`"),
+            "must name the convention: {err}"
+        );
+        assert!(
+            err.contains("[A-Z][A-Za-z0-9]*"),
+            "must name the grammar it cannot meet: {err}"
+        );
+    }
+
+    /// The field grammar admits a lowercase first letter, so every convention can fit it -- even
+    /// the ones the type grammar refuses.
+    #[test]
+    fn every_rename_all_fits_the_field_grammar() {
+        for value in VALID_RENAME_ALL {
+            let attr: Attribute = parse_quote!(#[zlink(rename_all = #value)]);
+            assert!(
+                parse_rename_all(&[attr], Grammar::Field).unwrap().is_some(),
+                "`{value}` should be accepted for a field name"
+            );
+        }
     }
 }

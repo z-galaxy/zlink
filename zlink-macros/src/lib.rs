@@ -372,8 +372,10 @@ pub fn derive_introspect_custom_type(input: proc_macro::TokenStream) -> proc_mac
 /// ```rust
 /// use zlink::{ReplyError, introspect};
 ///
+/// // `UPPERCASE`, not `SCREAMING_SNAKE_CASE`: an error name has no place for underscores
+/// // (`[A-Z][A-Za-z0-9]*`), so the screaming-snake form would not be expressible in Varlink.
 /// #[derive(ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.Test", rename_all = "SCREAMING_SNAKE_CASE")]
+/// #[zlink(interface = "org.example.Test", rename_all = "UPPERCASE")]
 /// enum ServiceError {
 ///     NotFound,
 /// }

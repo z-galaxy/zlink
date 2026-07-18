@@ -117,7 +117,7 @@ struct FdReadResult {
 /// A service that streams file descriptors.
 struct StreamingFdService;
 
-#[zlink::service(interface = "org.example.streaming_fd")]
+#[zlink::service(interface = "org.example.streamingFd")]
 impl StreamingFdService {
     /// Stream FDs with handles, one per name. Each stream item contains a handle and the FD.
     #[zlink(more, return_fds)]
@@ -181,7 +181,7 @@ impl StreamingFdService {
 }
 
 /// Proxy for streaming FD service.
-#[zlink::proxy("org.example.streaming_fd")]
+#[zlink::proxy("org.example.streamingFd")]
 trait StreamingFdProxy {
     #[zlink(more, return_fds)]
     async fn stream_fds(

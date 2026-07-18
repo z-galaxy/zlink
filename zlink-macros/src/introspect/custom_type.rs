@@ -21,11 +21,33 @@ pub(crate) fn derive_custom_type(input: proc_macro::TokenStream) -> proc_macro::
 
 fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
     let name = &input.ident;
+    // Not `naming::resolve`: a container has no `rename_all` of its own to apply to itself, only
+    // one it hands down to its fields. The name still has to be one Varlink can say.
     let name_str = match naming::parse_rename(&input.attrs)? {
-        Some(lit) => lit.value(),
-        None => naming::unraw(name),
+        Some(lit) => {
+            let name_str = lit.value();
+            naming::validate(
+                &name_str,
+                naming::Grammar::Type,
+                "type name",
+                naming::NameSource::Rename(&lit),
+            )?;
+
+            name_str
+        }
+        None => {
+            let name_str = naming::unraw(name);
+            naming::validate(
+                &name_str,
+                naming::Grammar::Type,
+                "type name",
+                naming::NameSource::Ident(name),
+            )?;
+
+            name_str
+        }
     };
-    let rename_all = naming::parse_rename_all(&input.attrs)?;
+    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Field)?;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let crate_path = utils::parse_crate_path(&input.attrs)?;

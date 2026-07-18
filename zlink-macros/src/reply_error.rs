@@ -68,6 +68,7 @@ fn parse_interface_from_attrs(attrs: &[syn::Attribute]) -> Result<String, Error>
             if meta.path.is_ident("interface") {
                 let value = meta.value()?;
                 let lit_str: syn::LitStr = value.parse()?;
+                crate::naming::validate_interface(&lit_str)?;
                 interface_result = Some(lit_str.value());
             } else {
                 // Skip unknown attributes by consuming their values.
@@ -130,7 +131,7 @@ fn generate_serialize_impl(
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
 
-    let rename_all = naming::parse_rename_all(input_attrs)?;
+    let rename_all = naming::parse_rename_all(input_attrs, naming::Grammar::Type)?;
     // Generate match arms for each variant (empty for empty enums).
     let variant_arms = data_enum
         .variants
@@ -168,9 +169,9 @@ fn generate_serialize_variant_arm(
     rename_all: Option<RenameAll>,
 ) -> Result<TokenStream2, Error> {
     let variant_name = &variant.ident;
-    let resolved = naming::variant_name(&variant.attrs, variant_name, rename_all)?;
+    let resolved = naming::error_name(&variant.attrs, variant_name, rename_all)?;
     let qualified_name = format!("{interface}.{resolved}");
-    let field_rename_all = naming::parse_rename_all(&variant.attrs)?;
+    let field_rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
 
     match &variant.fields {
         // Unit variant - serialize as tagged enum with just error field.
@@ -259,7 +260,7 @@ fn generate_deserialize_with_derive(
         .iter()
         .map(|variant| match &variant.fields {
             Fields::Named(fields) => {
-                let rename_all = naming::parse_rename_all(&variant.attrs)?;
+                let rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
                 FieldInfo::extract(fields, rename_all).map(Some)
             }
             _ => Ok(None),
@@ -269,12 +270,12 @@ fn generate_deserialize_with_derive(
     // Clone and modify the enum to add serde attributes.
     let mut modified_enum = data_enum.clone();
 
-    let rename_all = naming::parse_rename_all(&input.attrs)?;
+    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Type)?;
 
     // Now modify the variants.
     for (i, variant) in modified_enum.variants.iter_mut().enumerate() {
         let field_info = &variant_field_info[i];
-        let resolved = naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
+        let resolved = naming::error_name(&variant.attrs, &variant.ident, rename_all)?;
         let qualified_name = format!("{interface}.{resolved}");
 
         // Strip our helper attributes before they reach the generated helper enum, which only

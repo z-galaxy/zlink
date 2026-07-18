@@ -28,16 +28,6 @@ fn explicit_rename_overrides_rename_all() {
 }
 
 #[test]
-fn kebab_case_field_names_do_not_break_statics() {
-    let idl::Type::Object(fields) = Kebabed::TYPE else {
-        panic!("expected an object type");
-    };
-    let fields: Vec<_> = fields.iter().collect();
-
-    assert_eq!(fields[0].name(), "user-name");
-}
-
-#[test]
 fn enum_variant_rename_all() {
     let idl::Type::Enum(variants) = Status::TYPE else {
         panic!("expected an enum type");
@@ -161,13 +151,6 @@ struct Overridden {
     #[zlink(rename = "ID")]
     user_id: String,
     group_name: String,
-}
-
-#[derive(Type)]
-#[allow(unused)]
-#[zlink(rename_all = "kebab-case")]
-struct Kebabed {
-    user_name: String,
 }
 
 #[derive(Type)]

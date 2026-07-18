@@ -27,7 +27,7 @@ fn derive_reply_error_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
         "`#[zlink(rename)]` has no effect on the `ReplyError` derive: error names are qualified \
          by `#[zlink(interface)]`. Rename individual variants instead.",
     )?;
-    let rename_all = naming::parse_rename_all(&input.attrs)?;
+    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Type)?;
 
     let expanded = match &input.data {
         Data::Enum(data_enum) => {
@@ -66,12 +66,12 @@ fn generate_error_definitions(
     let mut error_variants = Vec::new();
 
     for variant in &data_enum.variants {
-        let variant_name = naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
+        let variant_name = naming::error_name(&variant.attrs, &variant.ident, rename_all)?;
         // The variant's own `rename_all` governs its fields, kept separate from the enum-level
         // rule above, which governs variant names instead. Parsed unconditionally (even for unit
         // variants, which have no fields to apply it to) so a bogus value is always rejected,
         // matching the wire derive's `generate_serialize_variant_arm`.
-        let field_rename_all = naming::parse_rename_all(&variant.attrs)?;
+        let field_rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
 
         match &variant.fields {
             Fields::Unit => {

@@ -51,6 +51,7 @@ impl ServiceAttrs {
                     custom_types = types.into_iter().collect();
                 } else if meta.path.is_ident("interface") {
                     let value: syn::LitStr = meta.value()?.parse()?;
+                    crate::naming::validate_interface(&value)?;
                     interface = Some(value.value());
                 } else if meta.path.is_ident("vendor") {
                     let value: syn::Expr = meta.value()?.parse()?;
