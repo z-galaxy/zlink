@@ -180,10 +180,12 @@ fn single_variant_enum() {
 
 #[test]
 fn type_names_preserved() {
-    // Test that type names are exactly preserved as written
+    // Test that type names are used verbatim, with no case normalisation applied. `HTTPServer`
+    // (rather than the earlier `snake_case_name`) makes the point while staying a valid Varlink
+    // type name: a naive PascalCase normaliser would fold its run of capitals to `HttpServer`.
     #[derive(CustomType)]
-    #[allow(dead_code, non_camel_case_types)]
-    struct snake_case_name {
+    #[allow(dead_code)]
+    struct HTTPServer {
         value: i32,
     }
 
@@ -195,7 +197,7 @@ fn type_names_preserved() {
         VARIANT_THREE,
     }
 
-    assert_eq!(snake_case_name::CUSTOM_TYPE.name(), "snake_case_name");
+    assert_eq!(HTTPServer::CUSTOM_TYPE.name(), "HTTPServer");
     assert_eq!(MixedCaseEnum::CUSTOM_TYPE.name(), "MixedCaseEnum");
 
     if let idl::CustomType::Enum(enm) = MixedCaseEnum::CUSTOM_TYPE {
