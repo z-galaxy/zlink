@@ -1,0 +1,20 @@
+[book]
+authors = ["Zeeshan Ali Khan"]
+language = "en"
+src = "src"
+title = "zlink: Varlink IPC in Rust, minus the middleman"
+
+[rust]
+edition = "2024"
+
+[output.html]
+default-theme = "Rust"
+smart-punctuation = true
+git-repository-url = "https://github.com/z-galaxy/zlink"
+edit-url-template = "https://github.com/z-galaxy/zlink/edit/main/book/{path}"
+git-repository-icon = "fab-github"
+no-section-label = true
+
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]
