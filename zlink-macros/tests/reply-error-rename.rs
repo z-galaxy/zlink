@@ -9,9 +9,13 @@ use zlink::{ReplyError, introspect};
 // `zlink::ReplyError` (serde) and `zlink::introspect::ReplyError` (IDL) share a name, so import the
 // containing module for the latter rather than aliasing, and reach the trait's associated const
 // through a qualified path below.
+// `UPPERCASE` rather than `SCREAMING_SNAKE_CASE`: an error name follows the type-name grammar
+// (`[A-Z][A-Za-z0-9]*`), which admits no underscores, so the screaming-snake form would not be a
+// name Varlink can express. `UPPERCASE` still visibly transforms the variant, exercising the same
+// `rename_all` path.
 #[derive(Debug, PartialEq, ReplyError, introspect::ReplyError)]
 #[zlink(interface = "org.example.Test")]
-#[zlink(rename_all = "SCREAMING_SNAKE_CASE")]
+#[zlink(rename_all = "UPPERCASE")]
 enum RenamedError {
     NotFound,
     #[zlink(rename = "TimedOut")]
@@ -29,7 +33,7 @@ enum RenamedError {
 fn variant_rename_all_reaches_the_wire() {
     let json = serde_json::to_value(RenamedError::NotFound).unwrap();
 
-    assert_eq!(json, json!({"error": "org.example.Test.NOT_FOUND"}));
+    assert_eq!(json, json!({"error": "org.example.Test.NOTFOUND"}));
 }
 
 #[test]
@@ -54,7 +58,7 @@ fn variant_rename_all_applies_to_that_variants_fields() {
     assert_eq!(
         json,
         json!({
-            "error": "org.example.Test.BAD_REQUEST",
+            "error": "org.example.Test.BADREQUEST",
             "parameters": {"requestId": 7},
         }),
     );
@@ -71,7 +75,7 @@ fn renamed_variants_round_trip() {
     assert_eq!(back, error);
 
     // `BadRequest` covers the `rename_all`-derived path (variant name from the enum-level
-    // `SCREAMING_SNAKE_CASE` rule, field name from the variant-level `camelCase` rule).
+    // `UPPERCASE` rule, field name from the variant-level `camelCase` rule).
     let error = RenamedError::BadRequest { request_id: 7 };
     let json = serde_json::to_string(&error).unwrap();
     let back: RenamedError = serde_json::from_str(&json).unwrap();
@@ -85,9 +89,9 @@ fn idl_error_names_match_the_wire() {
     // wire name is the same string qualified by the interface.
     let variants = <RenamedError as introspect::ReplyError>::VARIANTS;
 
-    assert_eq!(variants[0].name(), "NOT_FOUND");
+    assert_eq!(variants[0].name(), "NOTFOUND");
     assert_eq!(variants[1].name(), "TimedOut");
-    assert_eq!(variants[2].name(), "BAD_REQUEST");
+    assert_eq!(variants[2].name(), "BADREQUEST");
 }
 
 #[test]
@@ -185,21 +189,24 @@ fn idl_and_wire_agree_on_raw_ident_variant_and_field_names() {
     assert_eq!(fields[0].name(), "type");
 }
 
-// A lowercase variant needs an `#[allow]` on both this enum and the helper the wire derive nests
-// inside `Deserialize::deserialize`, which cannot inherit this one. Dropping the derive's own
-// `#[allow(non_camel_case_types)]` fails this file to compile, pointing here.
+// A non-camel-case variant ident needs an `#[allow]` on both this enum and the helper the wire
+// derive nests inside `Deserialize::deserialize`, which cannot inherit this one. Dropping the
+// derive's own `#[allow(non_camel_case_types)]` fails this file to compile, pointing here.
 //
-// Only the wire derive is applied: `lowercase` is not a valid Varlink error name (those are
-// PascalCase, as `RawIdentVariantError` above notes), so there is no IDL worth asserting on.
+// The Rust ident stays `lowercase` (that is what trips the lint), but the *wire* name is renamed to
+// the valid Varlink error name `Lowercase`: an error name follows the type-name grammar and
+// `lowercase` is not expressible in it. Only the wire derive is applied, so there is no IDL to
+// assert on.
 #[derive(Debug, PartialEq, ReplyError)]
 #[zlink(interface = "org.example.Probe")]
 #[allow(non_camel_case_types)]
 enum ProbeError {
+    #[zlink(rename = "Lowercase")]
     lowercase { value: String },
 }
 
 #[test]
-fn lowercase_variant_name_is_allowed_by_the_users_own_allow() {
+fn non_camel_case_variant_ident_is_allowed_by_the_users_own_allow() {
     let error = ProbeError::lowercase {
         value: "x".to_owned(),
     };
@@ -208,7 +215,7 @@ fn lowercase_variant_name_is_allowed_by_the_users_own_allow() {
     assert_eq!(
         json,
         json!({
-            "error": "org.example.Probe.lowercase",
+            "error": "org.example.Probe.Lowercase",
             "parameters": {"value": "x"},
         }),
     );
