@@ -186,7 +186,7 @@ impl RenameAll {
         grammar.accepts(&self.apply_to_variant("Word"))
     }
 
-    fn parse(lit: &LitStr) -> Result<Self, Error> {
+    pub(crate) fn parse(lit: &LitStr) -> Result<Self, Error> {
         let rule = match lit.value().as_str() {
             "lowercase" => Self::Lower,
             "UPPERCASE" => Self::Upper,
@@ -200,7 +200,7 @@ impl RenameAll {
                 return Err(Error::new_spanned(
                     lit,
                     format!(
-                        "unknown `rename_all` value `{unknown}`, expected one of: {}",
+                        "`{unknown}` is not a known case convention, expected one of: {}",
                         VALID_RENAME_ALL.join(", "),
                     ),
                 ));

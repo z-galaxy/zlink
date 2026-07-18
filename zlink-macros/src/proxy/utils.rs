@@ -1,7 +1,10 @@
-use crate::utils::*;
+use crate::{
+    naming::{self, Grammar, NameSource, RenameAll},
+    utils::*,
+};
 use std::collections::HashSet;
 use syn::{
-    Attribute, Error, Expr, GenericArgument, Lit, Meta, PathArguments, ReturnType, Type,
+    Attribute, Error, Expr, GenericArgument, Ident, Lit, Meta, PathArguments, ReturnType, Type,
     punctuated::Punctuated,
 };
 
@@ -162,6 +165,36 @@ pub(super) fn parse_rename_value(expr: &Expr) -> Result<Option<String>, Error> {
 pub(super) struct ParamAttrs {
     pub rename: Option<String>,
     pub is_fds: bool,
+}
+
+/// The name a parameter should carry on the wire, when it differs from its Rust ident.
+///
+/// An explicit `#[zlink(rename = "...")]` wins over the trait-level `rename_all_arguments`. A
+/// `rename_all_arguments` convention is applied to the unraw'd ident -- `r#` is Rust syntax,
+/// never part of the name -- and the name it produces is checked against the Varlink field
+/// grammar, which conventions like `kebab-case` cannot always satisfy.
+pub(super) fn resolve_serialized_name(
+    ident: &Ident,
+    param_attrs: Option<&ParamAttrs>,
+    rename_all: Option<RenameAll>,
+) -> Result<Option<String>, Error> {
+    if let Some(rename) = param_attrs.and_then(|attrs| attrs.rename.clone()) {
+        return Ok(Some(rename));
+    }
+
+    let Some(rule) = rename_all else {
+        return Ok(None);
+    };
+
+    let name = rule.apply_to_field(&naming::unraw(ident));
+    naming::validate(
+        &name,
+        Grammar::Field,
+        "parameter name",
+        NameSource::Ident(ident),
+    )?;
+
+    Ok(Some(name))
 }
 
 /// Extract parameter attributes from zlink attributes and remove processed attributes.
@@ -643,5 +676,51 @@ fn extract_stream_item_fds_types(ty: &Type) -> Result<(Type, Type), Error> {
             ty,
             "expected impl Stream<Item = Result<(Result<ReplyType, ErrorType>, Vec<OwnedFd>)>>",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    /// `rename_all` must see `type`, not `r#type`: the prefix is Rust syntax, not the name.
+    #[test]
+    fn rename_all_applies_to_the_unrawed_ident() {
+        let ident: Ident = parse_quote!(r#type);
+        let name = resolve_serialized_name(&ident, None, Some(RenameAll::Pascal)).unwrap();
+
+        assert_eq!(name.as_deref(), Some("Type"));
+    }
+
+    #[test]
+    fn explicit_rename_beats_rename_all() {
+        let ident: Ident = parse_quote!(dry_run);
+        let attrs = ParamAttrs {
+            rename: Some("customName".into()),
+            is_fds: false,
+        };
+        let name = resolve_serialized_name(&ident, Some(&attrs), Some(RenameAll::Pascal)).unwrap();
+
+        assert_eq!(name.as_deref(), Some("customName"));
+    }
+
+    #[test]
+    fn no_attrs_leave_the_ident_alone() {
+        let ident: Ident = parse_quote!(dry_run);
+
+        assert_eq!(resolve_serialized_name(&ident, None, None).unwrap(), None);
+    }
+
+    /// A produced name the Varlink field grammar cannot express is a compile error, not a wire
+    /// name the peer rejects.
+    #[test]
+    fn invalid_produced_name_is_rejected() {
+        let ident: Ident = parse_quote!(dry_run);
+        let err = resolve_serialized_name(&ident, None, Some(RenameAll::Kebab))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("`dry-run`"), "must name the bad name: {err}");
     }
 }
