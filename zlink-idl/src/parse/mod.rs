@@ -51,7 +51,7 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
 }
 
 /// Parse a field name: starts with letter, continues with alphanumeric and underscores.
-fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
+pub(crate) fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
     (
         one_of(|c: u8| c.is_ascii_alphabetic()),
         take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'_'),
@@ -62,7 +62,7 @@ fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [
 }
 
 /// Parse a type name: starts with uppercase letter, continues with alphanumeric.
-fn type_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
+pub(crate) fn type_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
     (
         one_of(|c: u8| c.is_ascii_uppercase()),
         take_while(0.., |c: u8| c.is_ascii_alphanumeric()),
@@ -193,7 +193,9 @@ fn varlink_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'
 ///   first segment      = [A-Za-z][A-Za-z0-9-]*
 ///   subsequent segment = "." [A-Za-z0-9][A-Za-z0-9-]*
 ///   name               = first_segment subsequent_segment+
-fn interface_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
+pub(crate) fn interface_name<'a>(
+    input: &mut &'a [u8],
+) -> ModalResult<&'a str, InputError<&'a [u8]>> {
     (
         // First segment.
         (
