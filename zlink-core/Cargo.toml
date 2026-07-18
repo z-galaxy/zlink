@@ -50,6 +50,7 @@ rustix = { version = "1.1.2", default-features = false, features = [
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
+doc-comment = "0.3.3"
 serde = { version = "1.0.218", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0.139" }
 serde-prefix-all = "0.1.0"

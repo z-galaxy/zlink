@@ -6,6 +6,14 @@
 use std::{fs, path::PathBuf};
 use zlink::idl::Interface;
 
+#[cfg(doctest)]
+mod doctests {
+    // Book markdown checks. The other chapters are checked from the `zlink` crate; this one is
+    // checked from here because its code-generation examples depend on this crate, which `zlink`
+    // can't (dev-)depend on without creating a dependency cycle.
+    doc_comment::doctest!("../../book/src/introspection.md");
+}
+
 mod codegen;
 pub use codegen::CodeGenerator;
 mod error;

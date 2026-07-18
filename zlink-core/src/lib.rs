@@ -14,6 +14,15 @@
 #[cfg(not(any(feature = "tracing", feature = "defmt")))]
 compile_error!("Either 'tracing' or 'defmt' feature must be enabled.");
 
+#[cfg(doctest)]
+mod doctests {
+    // Book markdown checks. The other chapters are checked from the `zlink` crate; this one is
+    // checked from here because its transport example implements the `no_std` variants of the
+    // socket traits, whose signatures differ when the `std` feature is enabled.
+    #[cfg(not(feature = "std"))]
+    doc_comment::doctest!("../../book/src/embedded.md");
+}
+
 extern crate alloc;
 
 #[macro_use]
