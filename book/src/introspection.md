@@ -25,7 +25,7 @@ use zlink::varlink_service::Proxy as _;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // Who are you?
     let info = conn.get_info().await?.map_err(|e| e.to_string())?;

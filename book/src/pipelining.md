@@ -41,7 +41,7 @@ trait ResolveProxy {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // Three DNS lookups, one write, one batch of replies.
     let replies = conn
@@ -100,7 +100,7 @@ The same machinery is available on `Connection` directly, no macros involved:
 ```rust,noplayground
 # use zlink::Call;
 # async fn example(
-#     conn: &mut zlink::unix::Connection,
+#     conn: &mut zlink::tokio::unix::Connection,
 #     get_user: Call<u32>, get_project: Call<u32>,
 # ) -> zlink::Result<()> {
 # #[derive(Debug, serde::Deserialize)] struct User;
@@ -135,7 +135,7 @@ with `chain_from_iter` (and `chain_from_iter_with_fds` when file descriptors are
 # #[derive(Debug, Deserialize)] struct User;
 # #[derive(Debug, zlink::ReplyError)]
 # #[zlink(interface = "org.example")] enum ApiError { NotFound }
-# async fn example(conn: &mut zlink::unix::Connection) -> zlink::Result<()> {
+# async fn example(conn: &mut zlink::tokio::unix::Connection) -> zlink::Result<()> {
 let user_ids = [1, 2, 3, 4, 5];
 let replies = conn
     .chain_from_iter::<Methods, _, _>(user_ids.iter().map(|&id| Methods::GetUser { id }))?

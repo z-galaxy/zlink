@@ -12,16 +12,27 @@ authors.workspace = true
 default = ["tokio", "service", "proxy", "tracing"]
 tokio = ["dep:zlink-tokio"]
 smol = ["dep:zlink-smol"]
-server = ["zlink-tokio?/server", "zlink-smol?/server"]
-proxy = ["zlink-tokio?/proxy", "zlink-smol?/proxy"]
-service = ["server", "introspection", "zlink-tokio?/service", "zlink-smol?/service"]
-idl = ["zlink-tokio?/idl", "zlink-smol?/idl"]
-idl-parse = ["zlink-tokio?/idl-parse", "zlink-smol?/idl-parse"]
-introspection = ["zlink-tokio?/introspection", "zlink-smol?/introspection"]
-tracing = ["zlink-tokio?/tracing", "zlink-smol?/tracing"]
-defmt = ["zlink-tokio?/defmt", "zlink-smol?/defmt"]
+server = ["zlink-core/server", "zlink-tokio?/server", "zlink-smol?/server"]
+proxy = ["zlink-core/proxy", "zlink-tokio?/proxy", "zlink-smol?/proxy"]
+service = [
+    "server",
+    "introspection",
+    "zlink-core/service",
+    "zlink-tokio?/service",
+    "zlink-smol?/service",
+]
+idl = ["zlink-core/idl", "zlink-tokio?/idl", "zlink-smol?/idl"]
+idl-parse = ["zlink-core/idl-parse", "zlink-tokio?/idl-parse", "zlink-smol?/idl-parse"]
+introspection = [
+    "zlink-core/introspection",
+    "zlink-tokio?/introspection",
+    "zlink-smol?/introspection",
+]
+tracing = ["zlink-core/tracing", "zlink-tokio?/tracing", "zlink-smol?/tracing"]
+defmt = ["zlink-core/defmt", "zlink-tokio?/defmt", "zlink-smol?/defmt"]
 
 [dependencies]
+zlink-core = { path = "../zlink-core", version = "=0.7.0", default-features = false }
 zlink-tokio = { path = "../zlink-tokio", version = "=0.7.0", default-features = false, optional = true }
 zlink-smol = { path = "../zlink-smol", version = "=0.7.0", default-features = false, optional = true }
 

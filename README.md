@@ -57,7 +57,7 @@ macros:
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::{select, sync::oneshot};
-use zlink::{introspect, proxy, service, unix, ReplyError, Server};
+use zlink::{introspect, proxy, service, tokio::unix, ReplyError, Server};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -286,7 +286,7 @@ responses.
 ```rust,no_run
 use futures_util::{StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
-use zlink::{proxy, unix, ReplyError};
+use zlink::{proxy, tokio::unix, ReplyError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -388,14 +388,18 @@ enum ProcessError {
 
 ### Main Features
 
-- `tokio` (default): Enable tokio runtime integration.
-- `smol`: Enable smol runtime integration.
+- `tokio` (default): Enable tokio runtime integration, under the `tokio` module.
+- `smol`: Enable smol runtime integration, under the `smol` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
 - `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
   used.
+
+The runtime features are additive: both can be enabled at the same time, with the
+runtime-specific API (currently the `unix` and `notified` modules) of each residing in its own
+module. The rest of the API is runtime-agnostic and available at the crate root.
 
 ### IDL and Introspection
 

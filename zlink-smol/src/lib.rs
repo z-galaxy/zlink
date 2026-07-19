@@ -10,7 +10,7 @@
 #![warn(unreachable_pub)]
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 
-pub use zlink_core::*;
+pub(crate) use zlink_core::*;
 #[cfg(feature = "server")]
 pub mod notified;
 pub mod unix;

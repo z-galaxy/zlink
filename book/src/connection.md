@@ -8,7 +8,7 @@ the zlink API.
 ## Picking an async runtime
 
 zlink is async-first and runtime-agnostic at its core, with ready-made integration for the two
-popular runtimes, selected through cargo features:
+popular runtimes, enabled through cargo features:
 
 ```toml
 # tokio (the default):
@@ -18,9 +18,12 @@ zlink = "0.7"
 zlink = { version = "0.7", default-features = false, features = ["smol", "service", "proxy", "tracing"] }
 ```
 
-Exactly the same API is available with either runtime — the examples in this book use tokio, but
-they work identically with smol. If you enable neither feature, the crate fails to compile with an
-explicit error, since the transport implementations live in the runtime-integration crates.
+The features are additive — you can enable both at once. The bulk of the API is runtime-agnostic
+and lives at the crate root; only the transport-specific parts (the `unix` and `notified` modules)
+are per-runtime, under `zlink::tokio` and `zlink::smol` respectively. The examples in this book use
+tokio, but they work identically with smol — just replace `zlink::tokio` with `zlink::smol`. If you
+enable neither feature, the crate fails to compile with an explicit error, since the transport
+implementations live in the runtime-integration crates.
 
 ## Connecting to a service
 
@@ -30,7 +33,7 @@ directly to the service you're interested in, through the socket it listens on:
 ```rust,no_run
 #[tokio::main]
 async fn main() -> zlink::Result<()> {
-    let mut conn = zlink::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // ... use the connection ...
     Ok(())
@@ -39,8 +42,9 @@ async fn main() -> zlink::Result<()> {
 
 That's it. No handshake, no authentication round-trips, no name registration: after `connect`
 returns, you can immediately send your first method call. The returned type is
-`zlink::unix::Connection`, an alias for `zlink::Connection<zlink::unix::Stream>` — the `Connection`
-type is generic over its transport (more on that in the [embedded chapter](embedded.html)).
+`zlink::tokio::unix::Connection`, an alias for `zlink::Connection<zlink::tokio::unix::Stream>` —
+the `Connection` type is generic over its transport (more on that in the
+[embedded chapter](embedded.html)).
 
 Note that `connect()` gives you the connection *by value* and all its methods take `&mut self`.
 This is a deliberate — and central — design decision in zlink: a connection is exclusively owned by
@@ -96,7 +100,7 @@ enum ResolveError {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     let call = Call::new(ResolveMethods::ResolveHostname { name: "systemd.io" });
     let (reply, _fds): (reply::Result<ResolveHostnameReply, ResolveError>, _) =
@@ -146,7 +150,7 @@ each owning its own buffer. You can split a connection into its halves and use t
 for instance, one task feeding calls while another consumes streaming replies:
 
 ```rust,noplayground
-# fn example(conn: zlink::unix::Connection) {
+# fn example(conn: zlink::tokio::unix::Connection) {
 let (mut read, mut write) = conn.split();
 // `read.receive_reply(...)` and `write.send_call(...)` can now be driven
 // from separate tasks. `Connection::join(read, write)` puts them back together.

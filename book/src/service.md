@@ -23,7 +23,7 @@ socket it listens on. Setting up shop is exactly two steps — bind a listener a
 #     }
 # }
 # async fn example(greeter: Greeter) -> Result<(), Box<dyn std::error::Error>> {
-let listener = zlink::unix::bind("/run/user/1000/org.zlink.MyGreeter")?;
+let listener = zlink::tokio::unix::bind("/run/user/1000/org.zlink.MyGreeter")?;
 let server = zlink::Server::new(listener, greeter);
 server.run().await?;
 # Ok(())
@@ -40,7 +40,7 @@ The `service` attribute macro turns an ordinary `impl` block into a full Varlink
 generates the message handling, method dispatch, and introspection support:
 
 ```rust,no_run
-use zlink::{service, unix, Server};
+use zlink::{service, tokio::unix, Server};
 use serde::{Deserialize, Serialize};
 use zlink::introspect;
 
@@ -111,8 +111,8 @@ Due to a [compiler bug][rustc-100013], the future returned by `Server::run` cann
 work using `select!`:
 
 ```rust,noplayground
-# async fn example<Svc: zlink::Service<zlink::unix::Stream>>(
-#     server: zlink::Server<zlink::unix::Listener, Svc>,
+# async fn example<Svc: zlink::Service<zlink::tokio::unix::Stream>>(
+#     server: zlink::Server<zlink::tokio::unix::Listener, Svc>,
 # ) -> Result<(), Box<dyn std::error::Error>> {
 # async fn do_other_things() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
 tokio::select! {
@@ -205,7 +205,7 @@ one-liner. Here's the relevant part of the FTL (faster-than-light drive 🚀) ex
 test suite:
 
 ```rust,noplayground
-use zlink::notified::{self, traits::State as _};
+use zlink::tokio::notified::{self, traits::State as _};
 # use zlink::service;
 # #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, zlink::introspect::CustomType)]
 # struct DriveCondition { tylium_level: i64 }

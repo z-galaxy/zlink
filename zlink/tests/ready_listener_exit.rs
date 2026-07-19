@@ -10,8 +10,12 @@ use tokio::time::timeout;
 use zlink::{
     Connection, ReadyListener, Server,
     introspect::{self, CustomType},
-    unix::Stream,
 };
+
+#[cfg(all(feature = "smol", not(feature = "tokio")))]
+use zlink::smol::unix::Stream;
+#[cfg(feature = "tokio")]
+use zlink::tokio::unix::Stream;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
