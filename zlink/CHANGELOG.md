@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.0 - 2026-07-19
+
+### Added
+- ✨ Support skip and flatten in Type/CustomType.
+
+### Changed
+- 🏗️ Make the runtime features additive.
+
+### Documentation
+- 📝 Mention the book in the README.
+- 📝 Link to the examples directory instead of duplicating it.
+- 📝 Document the resolved example in the examples README.
+- 📝 Remove obsolete USB transport note and document smol crate.
+
+### Testing
+- ✅ Test the book examples as doctests.
+- ✅ Use a valid Varlink type name in a custom-type test.
+
 ## 0.6.0 - 2026-07-11
 
 ### Breaking
