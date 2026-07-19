@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.0 - 2026-07-19
+
+### Added
+- ✨ Support skip and flatten in Type/CustomType.
+- ✨ Support `rename_all_arguments` on the proxy macro. #170
+
+### Changed
+- 🏗️ Make the runtime features additive.
+- 🚚 Support renaming ReplyError variants.
+- 🎨 Collapse nested ifs into let-chains.
+
+### Dependencies
+- ➕ Depend on zlink-idl for name validation.
+
+### Documentation
+- 📝 Mention the book in the README.
+- 📝 Document the rename attributes.
+- 📝 Link to the examples directory instead of duplicating it.
+- 📝 Remove obsolete USB transport note and document smol crate.
+
+### Fixed
+- 🚑️ Unraw idents in the service macro. #292
+- 🚑️ Unraw idents when deriving names. #290
+- 🩹 Don't abort attr parsing on valueless keys.
+
+### Other
+- 🦺 Validate emitted names against the Varlink grammar. #296
+- 💣 Unraw idents in the proxy macro.
+- 🚨 Allow non-camel-case variants in ReplyError's helper. #293
+- 🏷️ Honor renaming in Type and CustomType derives.
+
+### Testing
+- ✅ Use valid Varlink names in the tests and doc examples.
+
 ## 0.6.0 - 2026-07-11
 
 ### Added
