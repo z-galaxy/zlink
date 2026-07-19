@@ -25,8 +25,9 @@ pub(crate) fn proxy(attr: TokenStream, input: TokenStream) -> TokenStream {
 fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Error> {
     let mut trait_def = parse2::<ItemTrait>(input)?;
 
-    // Parse the interface name, crate path, and chain name from the attribute
-    let (interface_name, crate_path, chain_name) = parse_proxy_attributes(&attr, &trait_def)?;
+    // Parse the interface name, crate path, chain name, and rename_all from the attribute
+    let (interface_name, crate_path, chain_name, rename_all) =
+        parse_proxy_attributes(&attr, &trait_def)?;
 
     // Validate trait definition
     validate_trait(&trait_def)?;
@@ -65,6 +66,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
                 &method_attrs,
                 &crate_path,
                 &param_attrs_map,
+                rename_all,
             )?;
             if !extension_method.is_empty() {
                 chain_extension_methods.push(extension_method);
@@ -81,6 +83,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
                 &method_attrs,
                 &crate_path,
                 &param_attrs_map,
+                rename_all,
             )?;
             methods.push(method_impl);
 
@@ -92,6 +95,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
                 &method_attrs,
                 &crate_path,
                 &param_attrs_map,
+                rename_all,
             )?;
             if !chain_trait.is_empty() {
                 chain_method_traits.push(chain_trait);
@@ -130,7 +134,15 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
 fn parse_proxy_attributes(
     attr: &TokenStream,
     trait_def: &ItemTrait,
-) -> Result<(String, TokenStream, Option<syn::Ident>), Error> {
+) -> Result<
+    (
+        String,
+        TokenStream,
+        Option<syn::Ident>,
+        Option<crate::naming::RenameAll>,
+    ),
+    Error,
+> {
     if attr.is_empty() {
         return Err(Error::new_spanned(
             trait_def,
@@ -141,13 +153,14 @@ fn parse_proxy_attributes(
 
     // Try parsing as a simple string literal first (backward compatibility)
     if let Ok(Lit::Str(lit_str)) = parse2::<Lit>(attr.clone()) {
-        return Ok((lit_str.value(), quote! { ::zlink }, None));
+        return Ok((lit_str.value(), quote! { ::zlink }, None, None));
     }
 
     // Parse as name-value pairs
     let mut interface_name = None;
     let mut crate_path = None;
     let mut chain_name = None;
+    let mut rename_all = None;
 
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("interface") {
@@ -161,6 +174,9 @@ fn parse_proxy_attributes(
         } else if meta.path.is_ident("chain_name") {
             let value: syn::LitStr = meta.value()?.parse()?;
             chain_name = Some(syn::Ident::new(&value.value(), value.span()));
+        } else if meta.path.is_ident("rename_all_arguments") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            rename_all = Some(crate::naming::RenameAll::parse(&value)?);
         } else {
             return Err(meta.error("unsupported attribute"));
         }
@@ -179,7 +195,7 @@ fn parse_proxy_attributes(
 
     let crate_path = crate_path.unwrap_or_else(|| quote! { ::zlink });
 
-    Ok((interface_name, crate_path, chain_name))
+    Ok((interface_name, crate_path, chain_name, rename_all))
 }
 
 fn validate_trait(trait_def: &ItemTrait) -> Result<(), Error> {

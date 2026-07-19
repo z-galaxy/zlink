@@ -5,8 +5,8 @@ use syn::{Error, FnArg, Pat};
 use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
-        ParamAttrs, convert_to_single_lifetime, parse_return_type, snake_case_to_pascal_case,
-        type_contains_lifetime,
+        ParamAttrs, convert_to_single_lifetime, parse_return_type, resolve_serialized_name,
+        snake_case_to_pascal_case, type_contains_lifetime,
     },
 };
 
@@ -22,6 +22,7 @@ pub(super) fn generate_chain_method(
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
+    rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<(TokenStream, TokenStream), Error> {
     // Only the wire name and the `chain_` ident are unraw'd; `method_ident` stays raw so the
     // generated fn still matches the trait it implements.
@@ -60,7 +61,8 @@ pub(super) fn generate_chain_method(
     let method_where_clause = method.sig.generics.where_clause.clone();
 
     // Parse method arguments (skip &mut self)
-    let arg_infos = parse_method_arguments(method, has_explicit_lifetimes, param_attrs_map)?;
+    let arg_infos =
+        parse_method_arguments(method, has_explicit_lifetimes, param_attrs_map, rename_all)?;
     let has_any_lifetime = arg_infos.iter().any(|info| info.has_lifetime);
 
     // Handle lifetimes for function signature - only add if no explicit lifetimes
@@ -153,6 +155,7 @@ fn parse_method_arguments<'a>(
     method: &'a mut syn::TraitItemFn,
     has_explicit_lifetimes: bool,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
+    rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<Vec<ArgInfo<'a>>, Error> {
     method
         .sig
@@ -171,9 +174,11 @@ fn parse_method_arguments<'a>(
             let ty = &pat_type.ty;
 
             // Get pre-extracted parameter attributes
-            let param_name = name.to_string();
-            let param_attrs = param_attrs_map.get(&param_name);
-            let serialized_name = param_attrs.and_then(|attrs| attrs.rename.clone());
+            let param_attrs = param_attrs_map.get(&name.to_string());
+            let serialized_name = match resolve_serialized_name(name, param_attrs, rename_all) {
+                Ok(serialized_name) => serialized_name,
+                Err(err) => return Some(Err(err)),
+            };
             let is_fds = param_attrs.map(|attrs| attrs.is_fds).unwrap_or(false);
 
             // Only convert to single lifetime if there are no explicit lifetimes

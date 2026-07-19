@@ -7,7 +7,7 @@ use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
         ParamAttrs, collect_used_type_params, convert_to_single_lifetime, parse_return_type,
-        snake_case_to_pascal_case, type_contains_lifetime,
+        resolve_serialized_name, snake_case_to_pascal_case, type_contains_lifetime,
     },
 };
 use crate::utils::is_option_type;
@@ -19,6 +19,7 @@ pub(super) fn generate_method_impl(
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
+    rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<TokenStream, Error> {
     let method_name = &method.sig.ident;
     // Only the wire name is unraw'd; the generated fn keeps the raw ident so it still matches the
@@ -39,7 +40,8 @@ pub(super) fn generate_method_impl(
     let method_output = method.sig.output.clone();
 
     // Process all method arguments in a single pass
-    let arg_infos = parse_method_arguments(method, has_explicit_lifetimes, param_attrs_map)?;
+    let arg_infos =
+        parse_method_arguments(method, has_explicit_lifetimes, param_attrs_map, rename_all)?;
 
     // Extract the data we need from the processed arguments
     let has_any_lifetime = arg_infos.iter().any(|info| info.has_lifetime);
@@ -201,6 +203,7 @@ fn parse_method_arguments<'a>(
     method: &'a mut syn::TraitItemFn,
     has_explicit_lifetimes: bool,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
+    rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<Vec<ArgInfo<'a>>, Error> {
     method
         .sig
@@ -219,9 +222,11 @@ fn parse_method_arguments<'a>(
             let ty = &pat_type.ty;
 
             // Get pre-extracted parameter attributes
-            let param_name = name.to_string();
-            let param_attrs = param_attrs_map.get(&param_name);
-            let serialized_name = param_attrs.and_then(|attrs| attrs.rename.clone());
+            let param_attrs = param_attrs_map.get(&name.to_string());
+            let serialized_name = match resolve_serialized_name(name, param_attrs, rename_all) {
+                Ok(serialized_name) => serialized_name,
+                Err(err) => return Some(Err(err)),
+            };
             let is_fds = param_attrs.map(|attrs| attrs.is_fds).unwrap_or(false);
 
             // Check if the type is optional

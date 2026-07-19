@@ -441,6 +441,25 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// * `crate` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
 /// * `chain_name` - Custom name for the generated chain extension trait. Defaults to
 ///   `{TraitName}Chain`.
+/// * `rename_all_arguments` - Applies a case convention to all method argument names. Valid values
+///   are `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`, `snake_case`, `SCREAMING_SNAKE_CASE`,
+///   `kebab-case`, `SCREAMING-KEBAB-CASE`. systemd's Varlink APIs, for instance, use `camelCase`
+///   argument names (with `PascalCase` where a name mirrors a documented option name), so a proxy
+///   for one typically wants `rename_all_arguments = "camelCase"`. Per-argument `#[zlink(rename =
+///   "...")]` takes precedence over `rename_all_arguments`. Every produced name must still fit the
+///   Varlink field-name grammar (`[A-Za-z][A-Za-z0-9_]*`), so a convention that steps outside it --
+///   `kebab-case` on a multi-word argument, say -- is rejected at compile time:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy(interface = "org.example.Config", rename_all_arguments = "kebab-case")]
+/// trait ConfigProxy {
+///     // `dry_run` would become `dry-run`, which Varlink cannot express.
+///     async fn set_config(&mut self, dry_run: bool) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
+/// ```
 ///
 /// # Example
 ///
