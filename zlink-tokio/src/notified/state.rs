@@ -62,7 +62,7 @@ where
 }
 
 pin_project! {
-    /// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when
+    /// The stream to use as the [`zlink_core::Service::ReplyStream`] in service implementation when
     /// using [`State`].
     #[derive(Debug)]
     pub struct Stream<ReplyParams> {
