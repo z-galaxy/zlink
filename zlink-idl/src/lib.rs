@@ -38,6 +38,9 @@ pub use custom_type::CustomType;
 mod field;
 pub use field::{Field, Parameter};
 
+#[doc(hidden)]
+pub mod flatten;
+
 mod method;
 pub use method::Method;
 

@@ -144,3 +144,53 @@ fn enum_type_integration() {
         _ => panic!("Expected enum type for Status"),
     }
 }
+
+#[derive(Type)]
+#[allow(dead_code)]
+struct Inner {
+    a: u32,
+    b: String,
+}
+
+#[derive(Type)]
+#[allow(dead_code)]
+struct WithSkipAndFlatten {
+    id: u64,
+    #[zlink(skip)]
+    internal: Vec<u8>,
+    #[zlink(flatten)]
+    inner: Inner,
+    tail: bool,
+}
+
+#[test]
+fn skip_and_flatten_reshape_the_object() {
+    match WithSkipAndFlatten::TYPE {
+        idl::Type::Object(fields) => {
+            let names: Vec<_> = fields.iter().map(|f| f.name()).collect();
+            // `internal` is skipped; `inner` is replaced by its members `a`, `b`, in place.
+            assert_eq!(names, ["id", "a", "b", "tail"]);
+        }
+        _ => panic!("expected object"),
+    }
+}
+
+#[derive(Type)]
+#[allow(dead_code)]
+enum WithSkippedVariant {
+    Active,
+    #[zlink(skip)]
+    Hidden,
+    Pending,
+}
+
+#[test]
+fn skip_drops_an_enum_variant() {
+    match WithSkippedVariant::TYPE {
+        idl::Type::Enum(variants) => {
+            let names: Vec<_> = variants.iter().map(|v| v.name()).collect();
+            assert_eq!(names, ["Active", "Pending"]);
+        }
+        _ => panic!("expected enum"),
+    }
+}

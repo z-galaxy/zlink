@@ -14,6 +14,8 @@ mod utils;
 
 mod naming;
 
+mod attr_mode;
+
 #[cfg(feature = "introspection")]
 mod introspect;
 
@@ -95,6 +97,80 @@ mod service;
 /// struct Membership {
 ///     user_name: String,
 ///     group_name: String,
+/// }
+/// ```
+///
+/// ## Field attributes
+///
+/// - `#[zlink(skip)]` — omit the field (or enum variant) from the emitted IDL. Use it to mirror
+///   `#[serde(skip)]` so the described shape matches what serde actually sends.
+/// - `#[zlink(flatten)]` — inline the field type's members in place, mirroring `#[serde(flatten)]`.
+///   The field's type must be an inline object type (a `#[derive(Type)]` struct); a named custom
+///   type or a scalar is a compile-time error.
+///
+/// Flattening a scalar is rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::Type;
+/// #[derive(Type)]
+/// struct Bad {
+///     #[zlink(flatten)]
+///     n: u32,
+/// }
+/// let _ = Bad::TYPE;
+/// ```
+///
+/// `skip` and `rename` together are rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::Type;
+/// #[derive(Type)]
+/// struct Bad {
+///     #[zlink(skip, rename = "x")]
+///     n: u32,
+/// }
+/// ```
+///
+/// `skip` and `flatten` together are rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::Type;
+/// #[derive(Type)]
+/// struct Bad {
+///     #[zlink(skip, flatten)]
+///     n: u32,
+/// }
+/// ```
+///
+/// `flatten` and `rename` together are rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::Type;
+/// #[derive(Type)]
+/// struct Bad {
+///     #[zlink(flatten, rename = "x")]
+///     n: u32,
+/// }
+/// ```
+///
+/// Flattening a named custom type is rejected — its fields live behind a name, not inline:
+/// ```rust,compile_fail
+/// use zlink::introspect::{CustomType, Type};
+/// #[derive(CustomType)]
+/// struct Named {
+///     a: u32,
+/// }
+/// #[derive(Type)]
+/// struct Bad {
+///     #[zlink(flatten)]
+///     named: Named,
+/// }
+/// let _ = Bad::TYPE;
+/// ```
+///
+/// `flatten` on an enum variant is rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::Type;
+/// #[derive(Type)]
+/// enum Bad {
+///     #[zlink(flatten)]
+///     Variant,
 /// }
 /// ```
 ///
@@ -264,6 +340,35 @@ pub fn derive_introspect_type(input: proc_macro::TokenStream) -> proc_macro::Tok
 /// }
 /// ```
 ///
+/// ## Field attributes
+///
+/// - `#[zlink(skip)]` — omit the field (or enum variant) from the emitted IDL. Use it to mirror
+///   `#[serde(skip)]` so the described shape matches what serde actually sends.
+/// - `#[zlink(flatten)]` — inline the field type's members in place, mirroring `#[serde(flatten)]`.
+///   The field's type must be an inline object type (a `#[derive(Type)]` struct); a named custom
+///   type or a scalar is a compile-time error.
+///
+/// Flattening a scalar is rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::CustomType;
+/// #[derive(CustomType)]
+/// struct Bad {
+///     #[zlink(flatten)]
+///     n: u32,
+/// }
+/// let _ = Bad::CUSTOM_TYPE;
+/// ```
+///
+/// `skip` and `rename` together are rejected:
+/// ```rust,compile_fail
+/// use zlink::introspect::CustomType;
+/// #[derive(CustomType)]
+/// struct Bad {
+///     #[zlink(skip, rename = "x")]
+///     n: u32,
+/// }
+/// ```
+///
 /// # Examples
 ///
 /// ## Named Structs
@@ -416,6 +521,9 @@ pub fn derive_introspect_custom_type(input: proc_macro::TokenStream) -> proc_mac
 /// assert_eq!(ServiceError::VARIANTS[1].name(), "InvalidQuery");
 /// assert!(!ServiceError::VARIANTS[1].has_no_fields());
 /// ```
+///
+/// `#[zlink(skip)]` and `#[zlink(flatten)]` are not supported on error fields; they only apply to
+/// `Type`/`CustomType`, where they mirror a `#[serde(..)]` attribute.
 #[cfg(feature = "introspection")]
 #[proc_macro_derive(IntrospectReplyError, attributes(zlink))]
 pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
