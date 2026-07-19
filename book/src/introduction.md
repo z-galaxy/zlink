@@ -40,7 +40,8 @@ The zlink project is a Cargo workspace consisting of several crates:
 * **[`zlink-codegen`]**: Generates Rust code from Varlink IDL files.
 
 Since `zlink` re-exports everything you need, this book will only use the `zlink` crate in its
-examples. You pick your async runtime through cargo features: `tokio` (the default) or `smol`.
+examples. You enable your async runtime(s) through the additive cargo features `tokio` (the
+default) and `smol`, with the runtime-specific API of each residing in a module of the same name.
 
 ## Getting help
 

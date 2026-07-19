@@ -1358,7 +1358,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// use zlink::{
 ///     introspect::{self, Type},
 ///     service,
-///     unix::{bind, connect},
+///     tokio::unix::{bind, connect},
 ///     Server,
 /// };
 /// use serde::{Deserialize, Serialize};

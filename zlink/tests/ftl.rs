@@ -11,9 +11,18 @@ use serde::{Deserialize, Serialize};
 use tokio::{select, time::sleep};
 use zlink::{
     introspect::{self, CustomType, ReplyError as _, Type},
+    varlink_service::{self, Proxy as _},
+};
+
+#[cfg(all(feature = "smol", not(feature = "tokio")))]
+use zlink::smol::{
     notified::{self, traits::State as _},
     unix::{bind, connect},
-    varlink_service::{self, Proxy as _},
+};
+#[cfg(feature = "tokio")]
+use zlink::tokio::{
+    notified::{self, traits::State as _},
+    unix::{bind, connect},
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

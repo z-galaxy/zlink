@@ -6,7 +6,7 @@
 use clap::Parser;
 use colored::*;
 use std::process;
-use zlink::{unix, varlink_service::Proxy};
+use zlink::{tokio::unix, varlink_service::Proxy};
 
 #[derive(Parser)]
 #[command(name = "varlink-inspect")]

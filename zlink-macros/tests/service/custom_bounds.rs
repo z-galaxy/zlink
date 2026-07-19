@@ -5,7 +5,7 @@ use zlink::{
     Server,
     connection::socket::FetchPeerCredentials,
     introspect::{self},
-    unix::{bind, connect},
+    tokio::unix::{bind, connect},
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

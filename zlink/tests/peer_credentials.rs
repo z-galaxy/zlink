@@ -10,6 +10,11 @@ use std::os::fd::AsRawFd;
 use tempfile::TempDir;
 use zlink::Listener;
 
+#[cfg(all(feature = "smol", not(feature = "tokio")))]
+use zlink::smol::unix;
+#[cfg(feature = "tokio")]
+use zlink::tokio::unix;
+
 #[tokio::test]
 async fn peer_credentials_unix_socket() {
     // Create a temporary directory for the socket.
@@ -17,7 +22,7 @@ async fn peer_credentials_unix_socket() {
     let socket_path = temp_dir.path().join("test_creds.sock");
 
     // Create a listener.
-    let mut listener = zlink::unix::bind(&socket_path).unwrap();
+    let mut listener = unix::bind(&socket_path).unwrap();
 
     // Connect from a client.
     let socket_path_clone = socket_path.clone();
@@ -87,11 +92,11 @@ async fn passed_credentials_over_unix_socket() {
     let temp_dir = TempDir::new().unwrap();
     let socket_path = temp_dir.path().join("passed_creds.sock");
 
-    let mut listener = zlink::unix::bind(&socket_path).unwrap();
+    let mut listener = unix::bind(&socket_path).unwrap();
 
     let socket_path_clone = socket_path.clone();
     let client_task = tokio::spawn(async move {
-        let mut client = zlink::unix::connect(&socket_path_clone).await.unwrap();
+        let mut client = unix::connect(&socket_path_clone).await.unwrap();
 
         let creds = PassedCredentials::new(
             rustix::process::getuid(),

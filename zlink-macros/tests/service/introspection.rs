@@ -4,7 +4,7 @@ use super::basic::{BankAccount, BankError};
 use zlink::{
     Server,
     idl::Type,
-    unix::{bind, connect},
+    tokio::unix::{bind, connect},
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

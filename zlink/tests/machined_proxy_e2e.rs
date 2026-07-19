@@ -17,9 +17,14 @@ use tempfile::TempDir;
 use tokio::select;
 use tokio::time::{Duration, timeout};
 use zlink::{
-    proxy, unix,
+    proxy,
     varlink_service::{self, Proxy},
 };
+
+#[cfg(all(feature = "smol", not(feature = "tokio")))]
+use zlink::smol::unix;
+#[cfg(feature = "tokio")]
+use zlink::tokio::unix;
 
 use mock_machined_service::{AcquireMetadata, ListReply, MachinedError, OwnedListReply, ProcessId};
 

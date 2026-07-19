@@ -11,7 +11,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup tracing subscriber
     tracing_subscriber::fmt::init();
 
-    let mut connection = zlink::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+    let mut connection =
+        zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     let args: Vec<_> = args().skip(1).collect();
 
