@@ -3,74 +3,9 @@
 //! These run the actual IDL parsers, so a name is accepted here exactly when the parser would
 //! accept it in an interface definition -- there is no second copy of the grammar to drift from it.
 
-use winnow::error::{ErrMode, InputError};
-
-use crate::parse;
-
-/// Whether `name` is a valid Varlink field name.
-///
-/// Struct fields, method parameters and enum variants all follow this rule.
-///
-/// # Examples
-///
-/// ```
-/// use zlink_idl::is_valid_field_name;
-///
-/// assert!(is_valid_field_name("user_name"));
-/// assert!(!is_valid_field_name("user-name"));
-/// ```
-pub fn is_valid_field_name(name: &str) -> bool {
-    parses_fully(parse::field_name, name)
-}
-
-/// Whether `name` is a valid Varlink type name.
-///
-/// Method and error names follow this rule too.
-///
-/// # Examples
-///
-/// ```
-/// use zlink_idl::is_valid_type_name;
-///
-/// assert!(is_valid_type_name("FileNotFound"));
-/// assert!(!is_valid_type_name("fileNotFound"));
-/// ```
-pub fn is_valid_type_name(name: &str) -> bool {
-    parses_fully(parse::type_name, name)
-}
-
-/// Whether `name` is a valid Varlink interface name.
-///
-/// Interface names are reverse-domain notation: dot-separated segments, at least one dot.
-///
-/// # Examples
-///
-/// ```
-/// use zlink_idl::is_valid_interface_name;
-///
-/// assert!(is_valid_interface_name("org.example.Foo"));
-/// assert!(!is_valid_interface_name("Foo"));
-/// ```
-pub fn is_valid_interface_name(name: &str) -> bool {
-    parses_fully(parse::interface_name, name)
-}
-
-/// Whether `parser` accepts the whole of `name`, leaving nothing behind.
-///
-/// The parsers succeed on a valid prefix (e.g. `field_name` takes `foo` out of `foo-bar`), so a
-/// name is only valid when parsing also consumes every byte.
-fn parses_fully<'a, P, T>(mut parser: P, name: &'a str) -> bool
-where
-    P: FnMut(&mut &'a [u8]) -> Result<T, ErrMode<InputError<&'a [u8]>>>,
-{
-    let mut input = name.as_bytes();
-
-    parser(&mut input).is_ok() && input.is_empty()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{is_valid_field_name, is_valid_interface_name, is_valid_type_name};
 
     #[test]
     fn field_names() {

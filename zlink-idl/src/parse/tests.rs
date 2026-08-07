@@ -143,29 +143,6 @@ fn parse_errors() {
 }
 
 #[test]
-fn parse_interface_name() {
-    let input = b"org.example.test";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "org.example.test");
-    assert!(input_mut.is_empty());
-
-    let input = b"com.example.foo.bar";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "com.example.foo.bar");
-    assert!(input_mut.is_empty());
-
-    // Invalid: no dot
-    let mut input_mut = b"example".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-
-    // Invalid: starts with number
-    let mut input_mut = b"1example.test".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-}
-
-#[test]
 fn test_parse_method() {
     let input = "method GetInfo() -> (info: string)";
     let method = parse_method(input).unwrap();

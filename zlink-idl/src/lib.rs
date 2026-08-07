@@ -56,7 +56,10 @@ pub use interface::Interface;
 #[cfg(feature = "parse")]
 mod name;
 #[cfg(feature = "parse")]
-pub use name::{is_valid_field_name, is_valid_interface_name, is_valid_type_name};
+#[deprecated(
+    note = "Use is_valid_field_name, is_valid_interface_name, is_valid_type_name in zlink-names instead"
+)]
+pub use zlink_names::{is_valid_field_name, is_valid_interface_name, is_valid_type_name};
 
 #[cfg(feature = "parse")]
 pub mod parse;

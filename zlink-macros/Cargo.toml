@@ -33,6 +33,7 @@ syn = { version = "2.0", default-features = false, features = [
 # reads them back. `parse` (hence winnow) is always on: this is a proc-macro crate, so the dep is
 # built for the host and never reaches a user's binary.
 zlink-idl = { path = "../zlink-idl", version = "=0.7.0", features = ["parse"] }
+zlink-names = { path = "../zlink-names", version = "=0.7.0", default-features = false }
 
 [dev-dependencies]
 zlink = { path = "../zlink", default-features = false, features = [

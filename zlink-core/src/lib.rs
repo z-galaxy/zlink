@@ -62,6 +62,15 @@ pub mod idl {
 #[cfg(feature = "introspection")]
 pub mod introspect;
 pub mod varlink_service;
+pub mod names {
+    //! Varlink name validation and parsing.
+    //!
+    //! This is a re-export of the [`zlink_names`] crate, for those who only need the name API and
+    //! not the rest of zlink.
+
+    #[doc(inline)]
+    pub use zlink_names::*;
+}
 
 #[cfg(feature = "proxy")]
 pub use zlink_macros::proxy;

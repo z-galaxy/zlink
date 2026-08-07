@@ -62,7 +62,7 @@ pub(crate) fn validate(
 /// notation.
 pub(crate) fn validate_interface(lit: &LitStr) -> Result<(), Error> {
     let name = lit.value();
-    if !zlink_idl::is_valid_interface_name(&name) {
+    if !zlink_names::is_valid_interface_name(&name) {
         return Err(Error::new_spanned(
             lit,
             format!(

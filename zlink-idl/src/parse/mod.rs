@@ -8,11 +8,12 @@ use winnow::{
     ascii::{multispace0, multispace1},
     combinator::{alt, delimited, opt, preceded, repeat, separated},
     error::{ErrMode, InputError, ParserError},
-    token::{literal, one_of, take_while},
+    token::{literal, take_while},
 };
 
 mod error;
 pub use error::Error;
+use zlink_names::{parse_field_name, parse_interface_name, parse_type_name};
 
 use super::{
     Comment, CustomEnum, CustomObject, CustomType, EnumVariant, Field, Interface, List, Method,
@@ -50,28 +51,6 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
     core::str::from_utf8(bytes).unwrap()
 }
 
-/// Parse a field name: starts with letter, continues with alphanumeric and underscores.
-pub(crate) fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    (
-        one_of(|c: u8| c.is_ascii_alphabetic()),
-        take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'_'),
-    )
-        .take()
-        .map(bytes_to_str)
-        .parse_next(input)
-}
-
-/// Parse a type name: starts with uppercase letter, continues with alphanumeric.
-pub(crate) fn type_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    (
-        one_of(|c: u8| c.is_ascii_uppercase()),
-        take_while(0.., |c: u8| c.is_ascii_alphanumeric()),
-    )
-        .take()
-        .map(bytes_to_str)
-        .parse_next(input)
-}
-
 /// Parse a primitive type.
 fn primitive_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [u8]>> {
     alt((
@@ -89,7 +68,7 @@ fn primitive_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<
 fn field<'a>(input: &mut &'a [u8]) -> ModalResult<Field<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
 
-    let name = field_name(input)?;
+    let name = parse_field_name(input)?;
     ws(input)?;
     literal(":").parse_next(input)?;
     ws(input)?;
@@ -125,7 +104,7 @@ fn struct_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a
 /// Parse an enum variant: any preceding comments followed by the variant name.
 fn enum_variant<'a>(input: &mut &'a [u8]) -> ModalResult<EnumVariant<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
-    let name = field_name(input)?;
+    let name = parse_field_name(input)?;
     Ok(EnumVariant::new_owned(name, comments))
 }
 
@@ -153,7 +132,12 @@ fn inline_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a
 
 /// Parse an element type (primitive, custom, or inline).
 fn element_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [u8]>> {
-    alt((primitive_type, type_name.map(Type::Custom), inline_type)).parse_next(input)
+    alt((
+        primitive_type,
+        parse_type_name.map(Type::Custom),
+        inline_type,
+    ))
+    .parse_next(input)
 }
 
 /// Parse an optional type: ?type.
@@ -187,37 +171,6 @@ fn varlink_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'
     alt((optional_type, array_type, map_type, element_type)).parse_next(input)
 }
 
-/// Parse an interface name: reverse domain notation like `org.example.test`.
-///
-/// Grammar:
-///   first segment      = [A-Za-z][A-Za-z0-9-]*
-///   subsequent segment = "." [A-Za-z0-9][A-Za-z0-9-]*
-///   name               = first_segment subsequent_segment+
-pub(crate) fn interface_name<'a>(
-    input: &mut &'a [u8],
-) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    (
-        // First segment.
-        (
-            one_of(|c: u8| c.is_ascii_alphabetic()),
-            take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
-        ),
-        // One or more dotted segments (so the name has at least one `.`).
-        repeat::<_, _, (), _, _>(
-            1..,
-            (
-                literal("."),
-                one_of(|c: u8| c.is_ascii_alphanumeric()),
-                take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
-            )
-                .void(),
-        ),
-    )
-        .take()
-        .map(bytes_to_str)
-        .parse_next(input)
-}
-
 /// Parse a parameter list: (param1: type1, param2: type2).
 fn parameter_list<'a>(
     input: &mut &'a [u8],
@@ -236,7 +189,7 @@ fn method_def<'a>(input: &mut &'a [u8]) -> ModalResult<Method<'a>, InputError<&'
 
     literal("method").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
-    let name = type_name(input)?;
+    let name = parse_type_name(input)?;
     ws(input)?;
     let input_params = parameter_list(input)?;
     ws(input)?;
@@ -258,7 +211,7 @@ fn error_def<'a>(input: &mut &'a [u8]) -> ModalResult<super::Error<'a>, InputErr
 
     literal("error").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
-    let name = type_name(input)?;
+    let name = parse_type_name(input)?;
     ws(input)?;
     let params = parameter_list(input)?;
 
@@ -279,7 +232,7 @@ fn field_or_variant<'a>(
     input: &mut &'a [u8],
 ) -> ModalResult<FieldOrVariant<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
-    let name = field_name(input)?;
+    let name = parse_field_name(input)?;
     let ty = opt(preceded((ws, literal(":"), ws), varlink_type)).parse_next(input)?;
     Ok(match ty {
         Some(ty) => FieldOrVariant::Field(Field::new_owned(name, ty, comments)),
@@ -293,7 +246,7 @@ fn type_def<'a>(input: &mut &'a [u8]) -> ModalResult<CustomType<'a>, InputError<
 
     literal("type").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
-    let name = type_name(input)?;
+    let name = parse_type_name(input)?;
     ws(input)?;
 
     let items: Vec<FieldOrVariant<'a>> = delimited(
@@ -371,7 +324,7 @@ fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputEr
 
     literal("interface").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
-    let name = interface_name(input)?;
+    let name = parse_interface_name(input)?;
 
     let members: Vec<InterfaceMember<'a>> = repeat(
         0..,
