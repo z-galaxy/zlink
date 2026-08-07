@@ -70,3 +70,19 @@ impl MetadataService {
     // Add another method to verify all methods get the interface.
     async fn pong(&self) {}
 }
+
+#[allow(dead_code)]
+struct HyphenService;
+
+// Test if `service` macro can handle an interface with `-` in the name.
+#[zlink::service(
+    interface = "org.example.metadata-hyphen",
+    vendor = "Test Vendor",
+    product = "Test Product",
+    version = env!("CARGO_PKG_VERSION"),
+    url = env!("CARGO_PKG_REPOSITORY")
+)]
+impl HyphenService {
+    #[allow(dead_code)]
+    async fn hyphenhyphen(&self) {}
+}
