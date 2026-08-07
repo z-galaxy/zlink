@@ -3,6 +3,7 @@
 use core::fmt;
 
 use alloc::vec::Vec;
+use zlink_names::InterfaceName;
 
 use super::List;
 
@@ -10,7 +11,7 @@ use super::List;
 #[derive(Debug, Clone, Eq)]
 pub struct Interface<'a> {
     /// The name of the interface in reverse-domain notation.
-    name: &'a str,
+    name: InterfaceName<'a>,
     /// The methods of the interface.
     methods: List<'a, super::Method<'a>>,
     /// The custom types of the interface.
@@ -24,7 +25,7 @@ pub struct Interface<'a> {
 impl<'a> Interface<'a> {
     /// Creates a new interface with the given name, borrowed collections, and comments.
     pub const fn new(
-        name: &'a str,
+        name: InterfaceName<'a>,
         methods: &'a [&'a super::Method<'a>],
         custom_types: &'a [&'a super::CustomType<'a>],
         errors: &'a [&'a super::Error<'a>],
@@ -41,7 +42,7 @@ impl<'a> Interface<'a> {
 
     /// Creates a new interface with the given name, owned collections, and comments.
     pub fn new_owned(
-        name: &'a str,
+        name: InterfaceName<'a>,
         methods: Vec<super::Method<'a>>,
         custom_types: Vec<super::CustomType<'a>>,
         errors: Vec<super::Error<'a>>,
@@ -57,8 +58,8 @@ impl<'a> Interface<'a> {
     }
 
     /// Returns the name of the interface.
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> &InterfaceName<'a> {
+        &self.name
     }
 
     /// Returns an iterator over the methods of the interface.
@@ -180,9 +181,10 @@ mod tests {
             &expected_more,
         ];
 
-        let interface = Interface::new("org.varlink.service", methods, &[], errors, &[]);
+        let interface_name = InterfaceName::try_from("org.varlink.service").unwrap();
+        let interface = Interface::new(interface_name.clone(), methods, &[], errors, &[]);
 
-        assert_eq!(interface.name(), "org.varlink.service");
+        assert_eq!(interface.name(), &interface_name);
         assert_eq!(interface.methods().count(), 2);
         assert_eq!(interface.errors().count(), 6);
         assert!(!interface.is_empty());
@@ -249,7 +251,13 @@ error ExpectedMore ()
 
     #[test]
     fn empty_interface() {
-        let interface = Interface::new("com.example.empty", &[], &[], &[], &[]);
+        let interface = Interface::new(
+            InterfaceName::try_from("com.example.empty").unwrap(),
+            &[],
+            &[],
+            &[],
+            &[],
+        );
         assert!(interface.is_empty());
         assert_eq!(interface.methods().count(), 0);
         assert_eq!(interface.errors().count(), 0);
@@ -396,7 +404,13 @@ error ExpectedMore ()
             &dns_error,
         ];
 
-        let interface = Interface::new("io.systemd.Resolve", methods, custom_types, errors, &[]);
+        let interface = Interface::new(
+            InterfaceName::try_from("io.systemd.Resolve").unwrap(),
+            methods,
+            custom_types,
+            errors,
+            &[],
+        );
 
         // Test parsing the IDL and compare with manually constructed interface.
         const SYSTEMD_RESOLVED_IDL: &str = r#"interface io.systemd.Resolve
@@ -604,7 +618,13 @@ error DNSError(
         let method = Method::new("Test", &[], &[], &method_comments);
         let methods = [&method];
 
-        let interface = Interface::new("org.example.test", &methods, &[], &[], &interface_comments);
+        let interface = Interface::new(
+            InterfaceName::try_from("org.example.test").unwrap(),
+            &methods,
+            &[],
+            &[],
+            &interface_comments,
+        );
 
         let mut output = String::new();
         write!(&mut output, "{}", interface).unwrap();
@@ -655,7 +675,7 @@ error DNSError(
         let errors = [&error];
 
         let interface = Interface::new(
-            "org.example.comprehensive",
+            InterfaceName::try_from("org.example.comprehensive").unwrap(),
             &methods,
             &custom_types,
             &errors,

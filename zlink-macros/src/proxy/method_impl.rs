@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashSet;
 use syn::{Error, FnArg, Pat, Type, punctuated::Punctuated};
+use zlink_names::InterfaceName;
 
 use super::{
     types::{ArgInfo, MethodAttrs},
@@ -12,9 +13,9 @@ use super::{
 };
 use crate::utils::is_option_type;
 
-pub(super) fn generate_method_impl(
+pub(super) fn generate_method_impl<'name>(
     method: &mut syn::TraitItemFn,
-    interface_name: &str,
+    interface_name: &InterfaceName<'name>,
     trait_generics: &syn::Generics,
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,

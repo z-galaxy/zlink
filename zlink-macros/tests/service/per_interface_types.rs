@@ -53,7 +53,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         .await?
         .unwrap();
     let interface = desc.parse()?;
-    assert_eq!(interface.name(), "org.example.books");
+    assert_eq!(interface.name().as_str(), "org.example.books");
 
     let type_names: Vec<_> = interface.custom_types().map(|t| t.name()).collect();
     assert!(
@@ -96,7 +96,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         .await?
         .unwrap();
     let interface = desc.parse()?;
-    assert_eq!(interface.name(), "org.example.music");
+    assert_eq!(interface.name().as_str(), "org.example.music");
 
     let type_names: Vec<_> = interface.custom_types().map(|t| t.name()).collect();
     assert!(

@@ -2,6 +2,7 @@
 use crate::introspect::Type;
 use alloc::{borrow::Cow, vec::Vec};
 use serde::{Deserialize, Serialize};
+use zlink_names::InterfaceName;
 
 /// Information about a Varlink service implementation.
 ///
@@ -24,7 +25,7 @@ pub struct Info<'a> {
     pub url: Cow<'a, str>,
     /// List of interfaces provided by the service.
     #[serde(borrow)]
-    pub interfaces: Vec<Cow<'a, str>>,
+    pub interfaces: Vec<InterfaceName<'a>>,
 }
 
 impl<'a> Info<'a> {
@@ -34,7 +35,7 @@ impl<'a> Info<'a> {
         product: impl Into<Cow<'a, str>>,
         version: impl Into<Cow<'a, str>>,
         url: impl Into<Cow<'a, str>>,
-        interfaces: impl IntoIterator<Item = impl Into<Cow<'a, str>>>,
+        interfaces: impl IntoIterator<Item = impl Into<InterfaceName<'static>>>,
     ) -> Self {
         Self {
             vendor: vendor.into(),
@@ -43,6 +44,20 @@ impl<'a> Info<'a> {
             url: url.into(),
             interfaces: interfaces.into_iter().map(Into::into).collect(),
         }
+    }
+
+    /// Internal function only. Do not call this directly in your own code!
+    pub fn from_static_str_unchecked(
+        vendor: impl Into<Cow<'a, str>>,
+        product: impl Into<Cow<'a, str>>,
+        version: impl Into<Cow<'a, str>>,
+        url: impl Into<Cow<'a, str>>,
+        interfaces: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        let interfaces = interfaces
+            .into_iter()
+            .map(InterfaceName::from_static_str_unchecked);
+        Self::new(vendor, product, version, url, interfaces)
     }
 
     /// Convert this info into an owned version with `'static` lifetime.
@@ -55,7 +70,7 @@ impl<'a> Info<'a> {
             interfaces: self
                 .interfaces
                 .into_iter()
-                .map(|s| Cow::Owned(s.into_owned()))
+                .map(InterfaceName::into_owned)
                 .collect(),
         }
     }
@@ -86,9 +101,23 @@ impl OwnedInfo {
         product: impl Into<Cow<'static, str>>,
         version: impl Into<Cow<'static, str>>,
         url: impl Into<Cow<'static, str>>,
-        interfaces: impl IntoIterator<Item = impl Into<Cow<'static, str>>>,
+        interfaces: impl IntoIterator<Item = impl Into<InterfaceName<'static>>>,
     ) -> Self {
         Self(Info::new(vendor, product, version, url, interfaces))
+    }
+
+    /// Internal function only. Do not call this directly in your own code!
+    pub fn from_static_str_unchecked(
+        vendor: impl Into<Cow<'static, str>>,
+        product: impl Into<Cow<'static, str>>,
+        version: impl Into<Cow<'static, str>>,
+        url: impl Into<Cow<'static, str>>,
+        interfaces: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        let interfaces = interfaces
+            .into_iter()
+            .map(InterfaceName::from_static_str_unchecked);
+        Self::new(vendor, product, version, url, interfaces)
     }
 
     /// Returns a reference to the inner `Info`.
@@ -128,15 +157,16 @@ impl<'de> Deserialize<'de> for OwnedInfo {
         D: serde::Deserializer<'de>,
     {
         use alloc::string::String;
+        use zlink_names::OwnedInterfaceName;
 
-        // Deserialize into owned strings directly.
+        // Deserialize into owned names directly.
         #[derive(Deserialize)]
         struct InfoOwned {
             vendor: String,
             product: String,
             version: String,
             url: String,
-            interfaces: Vec<String>,
+            interfaces: Vec<OwnedInterfaceName>,
         }
 
         let info = InfoOwned::deserialize(deserializer)?;
@@ -145,7 +175,11 @@ impl<'de> Deserialize<'de> for OwnedInfo {
             product: Cow::Owned(info.product),
             version: Cow::Owned(info.version),
             url: Cow::Owned(info.url),
-            interfaces: info.interfaces.into_iter().map(Cow::Owned).collect(),
+            interfaces: info
+                .interfaces
+                .into_iter()
+                .map(InterfaceName::from)
+                .collect(),
         }))
     }
 }
@@ -158,7 +192,7 @@ mod tests {
     fn serialization() {
         let interfaces = alloc::vec!["com.example.test"];
 
-        let info = Info::new(
+        let info = Info::from_static_str_unchecked(
             "Test Vendor",
             "Test Product",
             "1.0.0",
@@ -189,15 +223,15 @@ mod tests {
         assert_eq!(info.version, "1.0.0");
         assert_eq!(info.url, "https://example.com");
         assert_eq!(info.interfaces.len(), 2);
-        assert_eq!(info.interfaces[0], "com.example.test");
-        assert_eq!(info.interfaces[1], "com.example.other");
+        assert_eq!(info.interfaces[0].as_str(), "com.example.test");
+        assert_eq!(info.interfaces[1].as_str(), "com.example.other");
     }
 
     #[test]
     fn round_trip_serialization() {
         let interfaces = alloc::vec!["com.example.test", "com.example.other"];
 
-        let original = Info::new(
+        let original = Info::from_static_str_unchecked(
             "Test Vendor",
             "Test Product",
             "1.0.0",

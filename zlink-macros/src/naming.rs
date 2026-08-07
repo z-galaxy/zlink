@@ -1,4 +1,5 @@
 use syn::{Attribute, Error, Ident, LitStr};
+use zlink_names::OwnedInterfaceName;
 
 use crate::utils::skip_unknown_meta;
 
@@ -60,19 +61,20 @@ pub(crate) fn validate(
 /// Kept apart from [`validate`]: an interface name is always a literal the user wrote out (never a
 /// resolved ident), and its grammar is neither the field nor the type rule but reverse-domain
 /// notation.
-pub(crate) fn validate_interface(lit: &LitStr) -> Result<(), Error> {
+pub(crate) fn validate_interface(lit: &LitStr) -> Result<OwnedInterfaceName, Error> {
     let name = lit.value();
-    if !zlink_names::is_valid_interface_name(&name) {
+    let valid_name = OwnedInterfaceName::try_from(name.clone());
+    if let Err(_err) = valid_name {
         return Err(Error::new_spanned(
             lit,
             format!(
                 "`{name}` is not a valid Varlink interface name: it must be in reverse-domain \
-                 notation, e.g. `org.example.Foo`"
+             notation, e.g. `org.example.Foo`"
             ),
         ));
     }
 
-    Ok(())
+    Ok(valid_name.unwrap())
 }
 
 impl Grammar {

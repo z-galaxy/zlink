@@ -1687,7 +1687,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # let mut conn = zlink::Connection::new(socket);
 /// let desc = conn.get_interface_description("org.example.bank").await?.unwrap();
 /// let interface = desc.parse()?;
-/// assert_eq!(interface.name(), "org.example.bank");
+/// assert_eq!(interface.name().as_str(), "org.example.bank");
 ///
 /// // Verify methods are present.
 /// let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();

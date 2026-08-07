@@ -13,7 +13,7 @@ use winnow::{
 
 mod error;
 pub use error::Error;
-use zlink_names::{parse_field_name, parse_interface_name, parse_type_name};
+use zlink_names::{InterfaceName, parse_field_name, parse_interface_name, parse_type_name};
 
 use super::{
     Comment, CustomEnum, CustomObject, CustomType, EnumVariant, Field, Interface, List, Method,
@@ -319,12 +319,17 @@ enum InterfaceMember<'a> {
 }
 
 /// Parse an interface definition.
-fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputError<&'a [u8]>> {
-    let comments = parse_preceding_comments(input)?;
+fn interface_def<'a>(input: &mut &'a [u8]) -> Result<Interface<'a>, Error> {
+    let comments = parse_preceding_comments(input).map_err(to_parse_error)?;
 
-    literal("interface").parse_next(input)?;
-    take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
-    let name = parse_interface_name(input)?;
+    literal("interface")
+        .parse_next(input)
+        .map_err(to_parse_error)?;
+    take_while(1.., |c: u8| c.is_ascii_whitespace())
+        .parse_next(input)
+        .map_err(to_parse_error)?;
+    let name_str = parse_interface_name(input).map_err(to_parse_error)?;
+    let name = InterfaceName::try_from(name_str).map_err(|err| Error::Parse(err.to_string()))?;
 
     let members: Vec<InterfaceMember<'a>> = repeat(
         0..,
@@ -337,7 +342,8 @@ fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputEr
             )),
         ),
     )
-    .parse_next(input)?;
+    .parse_next(input)
+    .map_err(to_parse_error)?;
 
     let mut methods = Vec::new();
     let mut custom_types = Vec::new();
@@ -359,15 +365,19 @@ fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputEr
     ))
 }
 
+fn to_parse_error(err: ErrMode<InputError<&[u8]>>) -> Error {
+    Error::Parse(err.to_string())
+}
+
 /// Parse an interface from a string.
 pub(super) fn parse_interface(input: &str) -> Result<Interface<'_>, Error> {
     parse_from_str(input, interface_def)
 }
 
 /// Helper function to parse from string using byte-based parsers.
-fn parse_from_str<'a, T>(
+fn parse_from_str<'a, T, E: core::fmt::Display>(
     input: &'a str,
-    parser: impl Fn(&mut &'a [u8]) -> ModalResult<T, InputError<&'a [u8]>>,
+    parser: impl Fn(&mut &'a [u8]) -> Result<T, E>,
 ) -> Result<T, Error> {
     let input_bytes = input.trim().as_bytes();
     if input_bytes.is_empty() {

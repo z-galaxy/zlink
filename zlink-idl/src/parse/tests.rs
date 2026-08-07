@@ -319,7 +319,7 @@ error NotFound(id: int)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
     assert_eq!(interface.custom_types().count(), 1);
     assert_eq!(interface.methods().count(), 1);
     assert_eq!(interface.errors().count(), 1);
@@ -380,7 +380,7 @@ error NotFound(id: int)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
 
     // Check that we have the expected number of each type of member
     assert_eq!(interface.custom_types().count(), 1);
@@ -523,7 +523,7 @@ error SimpleError()
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test",);
 
     // Should have: method + error = 2 members (comments attached to them)
     assert_eq!(interface.methods().count(), 1);
@@ -620,7 +620,7 @@ method GetStatus() -> (status: string)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.comprehensive");
+    assert_eq!(interface.name().as_str(), "org.example.comprehensive");
 
     // Check that we have the expected number of each type of member
     assert_eq!(interface.custom_types().count(), 1);
@@ -806,7 +806,7 @@ method GetData() -> (items: []any, map: [string]any)
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.anytest");
+    assert_eq!(interface.name().as_str(), "org.example.anytest");
     assert_eq!(interface.custom_types().count(), 1);
     assert_eq!(interface.methods().count(), 2);
 
@@ -1185,7 +1185,7 @@ method SimpleMethod() -> ()
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
 
     // Check interface comments
     let comments: Vec<_> = interface.comments().collect();
@@ -1251,7 +1251,7 @@ method GetUser(id: int) -> (user: User)
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.core");
+    assert_eq!(interface.name().as_str(), "org.example.core",);
 
     // Check interface comments
     let interface_comments: Vec<_> = interface.comments().collect();

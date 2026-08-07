@@ -59,7 +59,7 @@ async fn introspect_machined() {
         let interface = interface.parse().unwrap();
 
         // Verify interface details
-        assert_eq!(interface.name(), "io.systemd.Machine");
+        assert_eq!(interface.name().as_str(), "io.systemd.Machine");
         assert!(!interface.is_empty());
 
         // Check for expected methods
