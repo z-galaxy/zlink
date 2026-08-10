@@ -9,7 +9,7 @@ mod tests {
 
     #[test]
     fn field_names() {
-        let valid = ["a", "Z", "user_name", "user0", "a_0_b", "type", "x__"];
+        let valid = ["a", "Z", "user_name", "user0", "a_0_b", "type"];
         for name in valid {
             assert!(is_valid_field_name(name), "`{name}` must be valid");
         }
@@ -24,6 +24,9 @@ mod tests {
             "user!",
             "üser",
             "user\u{e9}",
+            "a_",
+            "x__",
+            "a__b",
         ];
         for name in invalid {
             assert!(!is_valid_field_name(name), "`{name}` must be invalid");

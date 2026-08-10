@@ -15,6 +15,8 @@ mod pattern;
 mod type_name;
 
 pub use error::TryFromError;
+pub use field_name::{FieldName, OwnedFieldName};
+#[deprecated(note = "Use OwnedFieldName or FieldName in zlink-names instead")]
 pub use field_name::{is_valid_field_name, parse_field_name};
 #[deprecated(note = "Use OwnedInterfaceName or InterfaceName in zlink-names instead")]
 pub use interface_name::is_valid_interface_name;
