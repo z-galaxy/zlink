@@ -5,6 +5,10 @@ This file provides guidance to AI coding agents when working with code in this r
 For contribution conventions — commit-message format, atomic commits, code layout, and
 more — follow the guidelines in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+- **Changelog-skip trailer**: end a commit message with a `Changelog: skip` git trailer to
+  keep it out of the user-facing changelog (use for AI-workflow artifacts such as design docs
+  and implementation plans).
+
 ## Development Commands
 
 ### Testing
