@@ -58,7 +58,7 @@ protect_breaking_commits = true
 # Categorize commits based on gimoji emojis.
 # See: https://zeenix.github.io/gimoji/
 commit_parsers = [
-    # Skip commits carrying a "Changelog: skip" trailer (see the preprocessor above).
+    # Skip commits carrying a "Changelog: skip" trailer (see the preprocessor below).
     { message = "^changelog-skip$", skip = true },
     # Skip merge commits, release commits, and empty commits (just emojis).
     { message = "^[Mm]erge", skip = true },
