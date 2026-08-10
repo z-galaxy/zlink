@@ -22,4 +22,6 @@ pub use field_name::{is_valid_field_name, parse_field_name};
 pub use interface_name::is_valid_interface_name;
 pub use interface_name::{InterfaceName, OwnedInterfaceName, parse_interface_name};
 pub use pattern::FromPattern;
-pub use type_name::{is_valid_type_name, parse_type_name};
+#[deprecated(note = "Use OwnedTypeName or TypeName in zlink-names instead")]
+pub use type_name::is_valid_type_name;
+pub use type_name::{OwnedTypeName, TypeName, parse_type_name};
