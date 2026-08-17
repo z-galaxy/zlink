@@ -106,13 +106,18 @@ impl<'a> fmt::Display for Type<'a> {
                 if has_variant_comments {
                     // Multi-line format when any variant has comments
                     writeln!(f, "(")?;
-                    for variant in variants.iter() {
+                    let last = variants.len().saturating_sub(1);
+                    for (i, variant) in variants.iter().enumerate() {
                         // Write comments first
                         for comment in variant.comments() {
                             writeln!(f, "\t{}", comment)?;
                         }
-                        // Then write the variant name
-                        writeln!(f, "\t{}", variant.name())?;
+                        // Then write the variant name, comma-separated
+                        if i == last {
+                            writeln!(f, "\t{}", variant.name())?;
+                        } else {
+                            writeln!(f, "\t{},", variant.name())?;
+                        }
                     }
                     write!(f, ")")
                 } else {
@@ -271,6 +276,6 @@ mod tests {
 
         let mut buf = String::new();
         write!(buf, "{}", enum_with_comments).unwrap();
-        assert_eq!(buf, "(\n\t# Primary color\n\tred\n\tgreen\n\tblue\n)");
+        assert_eq!(buf, "(\n\t# Primary color\n\tred,\n\tgreen,\n\tblue\n)");
     }
 }

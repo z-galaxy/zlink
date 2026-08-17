@@ -1018,6 +1018,45 @@ method M (
 }
 
 #[test]
+fn nested_enum_variant_comments_round_trip() {
+    // The multi-line format used for inline enums with variant comments
+    // must be valid IDL: variants comma-separated, so it parses back.
+    let input = r#"
+interface a.b
+
+method M (
+    x: (
+        # the no variant
+        no,
+        # the yes variant
+        yes
+    )
+) -> ()
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    let displayed = interface.to_string();
+    assert!(
+        displayed.contains("(\n\t# the no variant\n\tno,\n\t# the yes variant\n\tyes\n)"),
+        "unexpected inline enum format:\n{displayed}"
+    );
+
+    let reparsed = parse_interface(&displayed).unwrap();
+    let methods: Vec<_> = reparsed.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    let Type::Enum(variants) = inputs[0].ty() else {
+        panic!("Expected x to be an inline enum, got: {:?}", inputs[0].ty());
+    };
+    let names: Vec<_> = variants.iter().map(|v| v.name()).collect();
+    assert_eq!(names, ["no", "yes"]);
+    let comments: Vec<_> = variants
+        .iter()
+        .flat_map(|v| v.comments().map(|c| c.text()))
+        .collect();
+    assert_eq!(comments, ["the no variant", "the yes variant"]);
+}
+
+#[test]
 fn method_with_parameter_comments() {
     let input = r#"
 interface org.example.test
