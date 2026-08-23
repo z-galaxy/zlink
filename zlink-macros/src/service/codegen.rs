@@ -306,7 +306,7 @@ fn generate_method_call_enum(
         .iter()
         .filter_map(|method| {
             let full_path = method.full_method_path()?;
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
 
             // Only include serialized params (exclude connection params).
             let serialized_params: Vec<_> = method.serialized_params().collect();
@@ -781,7 +781,7 @@ fn generate_reply_stream_enum(
     let variants: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
             let stream_type = method.stream_return_type.as_ref().unwrap();
             quote! {
                 #variant_name { #[pin] stream: #stream_type }
@@ -800,7 +800,7 @@ fn generate_reply_stream_enum(
     let poll_arms: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
             let item_type = method.stream_item_type.as_ref().unwrap();
             let type_str = item_type.to_token_stream().to_string();
             let params_variant = stream_item_type_map
@@ -977,6 +977,7 @@ fn generate_interface_descriptions<'name>(
             .map(|(idx, method)| {
                 let method_const_name = format_ident!("__METHOD_{}", idx);
                 let method_name = &method.varlink_name;
+                let method_name_str = method_name.as_str();
 
                 // Input parameters (excluding connection params).
                 let in_params: Vec<TokenStream> = method
@@ -1079,7 +1080,7 @@ fn generate_interface_descriptions<'name>(
                             );
                         };
                         #crate_path::idl::Method::new(
-                            #method_name,
+                            #method_name_str,
                             __IN_PARAMS,
                             __OUT_PARAMS,
                             &[#(#comment_objects),*],
@@ -1259,7 +1260,7 @@ fn generate_handle_body(
             continue;
         };
 
-        let enum_variant_name = format_ident!("{}", method.varlink_name);
+        let enum_variant_name = format_ident!("{}", method.varlink_name.as_str());
         let method_name = &method.name;
 
         // Only include serialized params in the pattern (exclude connection params).
@@ -1374,7 +1375,7 @@ fn generate_handle_body(
                 .unwrap_or_else(|| format_ident!("__Unknown"));
 
             // Use the method's varlink name for the enum variant.
-            let method_variant_name = format_ident!("{}", method.varlink_name);
+            let method_variant_name = format_ident!("{}", method.varlink_name.as_str());
 
             let streaming_reply = if *needs_stream_boxing {
                 // Use boxing when any streaming method uses `impl Trait`.

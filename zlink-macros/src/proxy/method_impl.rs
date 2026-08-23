@@ -333,13 +333,14 @@ fn generate_method_params(
                 let ty = &info.ty_for_params;
 
                 let serde_attrs = if let Some(ref renamed) = info.serialized_name {
+                    let renamed_str = renamed.as_str();
                     if info.is_optional {
                         quote! {
-                            #[serde(rename = #renamed, skip_serializing_if = "Option::is_none")]
+                            #[serde(rename = #renamed_str, skip_serializing_if = "Option::is_none")]
                         }
                     } else {
                         quote! {
-                            #[serde(rename = #renamed)]
+                            #[serde(rename = #renamed_str)]
                         }
                     }
                 } else if info.is_optional {

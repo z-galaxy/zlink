@@ -105,7 +105,8 @@ pub(super) fn generate_chain_extension_method<'name>(
             let name = info.name;
             let ty = &info.ty_for_params;
             let serde_attrs = if let Some(ref renamed) = info.serialized_name {
-                quote! { #[serde(rename = #renamed)] }
+                let renamed_str = renamed.as_str();
+                quote! { #[serde(rename = #renamed_str)] }
             } else {
                 quote! {}
             };

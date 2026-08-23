@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed, parse_quote};
+use zlink_names::OwnedFieldName;
 
 use crate::{
     naming::{self, RenameAll},
@@ -131,7 +132,7 @@ fn generate_serialize_impl(
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
 
-    let rename_all = naming::parse_rename_all(input_attrs, naming::Grammar::Type)?;
+    let rename_all = naming::RenameAllParser::new(input_attrs).try_for_type_name()?;
     // Generate match arms for each variant (empty for empty enums).
     let variant_arms = data_enum
         .variants
@@ -171,7 +172,7 @@ fn generate_serialize_variant_arm(
     let variant_name = &variant.ident;
     let resolved = naming::error_name(&variant.attrs, variant_name, rename_all)?;
     let qualified_name = format!("{interface}.{resolved}");
-    let field_rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
+    let field_rename_all = naming::RenameAllParser::new(&variant.attrs).try_for_field_name()?;
 
     match &variant.fields {
         // Unit variant - serialize as tagged enum with just error field.
@@ -186,10 +187,14 @@ fn generate_serialize_variant_arm(
         Fields::Named(fields) => {
             // Named fields - serialize as tagged enum with parameters.
             let field_info = FieldInfo::extract(fields, field_rename_all)?;
-            let field_count = field_info.names.len();
-            let field_names = &field_info.names;
+            let field_count = field_info.token_names.len();
+            let field_names = &field_info.token_names;
             let field_types = &field_info.types;
-            let field_name_strs = &field_info.name_strings;
+            let field_name_strs = &field_info
+                .field_names
+                .iter()
+                .map(|n| n.as_str())
+                .collect::<Vec<_>>();
 
             // Convert field types to use synthetic lifetime for ParametersSerializer
             // only if enum has lifetimes.
@@ -260,7 +265,8 @@ fn generate_deserialize_with_derive(
         .iter()
         .map(|variant| match &variant.fields {
             Fields::Named(fields) => {
-                let rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
+                let rename_all =
+                    naming::RenameAllParser::new(&variant.attrs).try_for_field_name()?;
                 FieldInfo::extract(fields, rename_all).map(Some)
             }
             _ => Ok(None),
@@ -270,7 +276,7 @@ fn generate_deserialize_with_derive(
     // Clone and modify the enum to add serde attributes.
     let mut modified_enum = data_enum.clone();
 
-    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Type)?;
+    let rename_all = naming::RenameAllParser::new(&input.attrs).try_for_type_name()?;
 
     // Now modify the variants.
     for (i, variant) in modified_enum.variants.iter_mut().enumerate() {
@@ -290,11 +296,12 @@ fn generate_deserialize_with_derive(
             let iter = fields
                 .named
                 .iter_mut()
-                .zip(&field_info.name_strings)
+                .zip(&field_info.field_names)
                 .zip(&field_info.borrow_flags);
-            for ((field, name_str), &borrow) in iter {
+            for ((field, field_name), &borrow) in iter {
                 // Remove zlink attributes and add serde equivalents.
                 field.attrs.retain(|attr| !attr.path().is_ident("zlink"));
+                let name_str = field_name.as_str();
                 field.attrs.push(parse_quote!(#[serde(rename = #name_str)]));
                 if borrow {
                     field.attrs.push(parse_quote!(#[serde(borrow)]));
@@ -384,18 +391,18 @@ fn generate_deserialize_with_derive(
 /// Field information extracted from named fields for reuse across
 /// serialization/deserialization.
 struct FieldInfo<'a> {
-    names: Vec<&'a syn::Ident>,
+    token_names: Vec<&'a syn::Ident>,
     types: Vec<&'a syn::Type>,
-    name_strings: Vec<String>,
+    field_names: Vec<OwnedFieldName>,
     borrow_flags: Vec<bool>,
 }
 
 impl<'a> FieldInfo<'a> {
     /// Extract field information from named fields to avoid duplication.
     fn extract(fields: &'a FieldsNamed, rename_all: Option<RenameAll>) -> Result<Self, Error> {
-        let mut names = Vec::new();
+        let mut token_names = Vec::new();
         let mut types = Vec::new();
-        let mut name_strings = Vec::new();
+        let mut field_names = Vec::new();
         let mut borrow_flags = Vec::new();
 
         for field in &fields.named {
@@ -403,16 +410,16 @@ impl<'a> FieldInfo<'a> {
                 continue;
             };
 
-            names.push(name);
+            token_names.push(name);
             types.push(&field.ty);
-            name_strings.push(naming::field_name(&field.attrs, name, rename_all)?);
+            field_names.push(naming::field_name(&field.attrs, name, rename_all)?);
             borrow_flags.push(has_zlink_bool_attr(&field.attrs, "borrow"));
         }
 
         Ok(Self {
-            names,
+            token_names,
             types,
-            name_strings,
+            field_names,
             borrow_flags,
         })
     }

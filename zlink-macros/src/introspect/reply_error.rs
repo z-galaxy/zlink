@@ -27,7 +27,7 @@ fn derive_reply_error_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
         "`#[zlink(rename)]` has no effect on the `ReplyError` derive: error names are qualified \
          by `#[zlink(interface)]`. Rename individual variants instead.",
     )?;
-    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Type)?;
+    let rename_all = naming::RenameAllParser::new(&input.attrs).try_for_type_name()?;
 
     let expanded = match &input.data {
         Data::Enum(data_enum) => {
@@ -71,14 +71,15 @@ fn generate_error_definitions(
         // rule above, which governs variant names instead. Parsed unconditionally (even for unit
         // variants, which have no fields to apply it to) so a bogus value is always rejected,
         // matching the wire derive's `generate_serialize_variant_arm`.
-        let field_rename_all = naming::parse_rename_all(&variant.attrs, naming::Grammar::Field)?;
+        let field_rename_all = naming::RenameAllParser::new(&variant.attrs).try_for_field_name()?;
 
         match &variant.fields {
             Fields::Unit => {
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = shared::generate_comment_objects(&comments, crate_path);
+                let variant_name_str = variant_name.as_str();
                 let error_variant = quote! {
-                    &#crate_path::idl::Error::new(#variant_name, &[], &[#(#comment_objects),*])
+                    &#crate_path::idl::Error::new(#variant_name_str, &[], &[#(#comment_objects),*])
                 };
                 error_variants.push(error_variant);
             }
@@ -109,13 +110,14 @@ fn generate_error_definitions(
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = shared::generate_comment_objects(&comments, crate_path);
 
+                let variant_name_str = variant_name.as_str();
                 let error_variant = quote! {
                     &{
                         #(#field_statics)*
 
                         static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = #field_refs_init;
 
-                        #crate_path::idl::Error::new(#variant_name, FIELD_REFS, &[#(#comment_objects),*])
+                        #crate_path::idl::Error::new(#variant_name_str, FIELD_REFS, &[#(#comment_objects),*])
                     }
                 };
                 error_variants.push(error_variant);
@@ -132,6 +134,7 @@ fn generate_error_definitions(
                     utils::remove_lifetimes_from_type(&fields.unnamed.first().unwrap().ty);
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = shared::generate_comment_objects(&comments, crate_path);
+                let variant_name_str = variant_name.as_str();
                 let error_variant = quote! {
                     &{
                         match <#field_type as #crate_path::introspect::Type>::TYPE {
@@ -139,7 +142,7 @@ fn generate_error_definitions(
                                 let #crate_path::idl::List::Borrowed(field_slice) = fields else {
                                     panic!("Owned List not supported in const context")
                                 };
-                                #crate_path::idl::Error::new(#variant_name, field_slice, &[#(#comment_objects),*])
+                                #crate_path::idl::Error::new(#variant_name_str, field_slice, &[#(#comment_objects),*])
                             }
                             _ => panic!("Tuple variant field type must have Type::Object"),
                         }

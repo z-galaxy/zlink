@@ -7,8 +7,7 @@ use syn::{
     ReturnType, Type, parse::Parse,
 };
 
-use crate::naming::Grammar;
-use zlink_names::OwnedInterfaceName;
+use zlink_names::{FieldName, OwnedInterfaceName, OwnedTypeName};
 
 use super::types::ParamInfo;
 
@@ -17,7 +16,7 @@ pub(super) struct MethodInfo {
     /// The original method name (snake_case).
     pub name: Ident,
     /// The Varlink method name (PascalCase or renamed).
-    pub varlink_name: String,
+    pub varlink_name: OwnedTypeName,
     /// The interface name for this method.
     pub interface: Option<OwnedInterfaceName>,
     /// Custom types scoped to this method's interface (from `#[zlink(types = [...])]`).
@@ -79,7 +78,8 @@ impl MethodInfo {
             ),
         };
         // A method is named like a type, so it must be expressible as one.
-        naming::validate(&varlink_name, Grammar::Type, "method name", name_source)?;
+        let varlink_name: OwnedTypeName =
+            naming::validate(&varlink_name, "method name", name_source)?;
 
         // Check if this is a streaming method.
         let is_streaming = method_attrs.is_streaming;
@@ -135,7 +135,7 @@ impl MethodInfo {
                 Some(lit) => (lit.value(), NameSource::Rename(lit)),
                 None => (naming::unraw(&param.name), NameSource::Ident(&param.name)),
             };
-            naming::validate(&wire_name, Grammar::Field, "parameter name", source)?;
+            let _: FieldName<'_> = naming::validate(&wire_name, "parameter name", source)?;
         }
 
         // Validate FD attributes.

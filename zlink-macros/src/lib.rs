@@ -554,8 +554,9 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///   `kebab-case`, `SCREAMING-KEBAB-CASE`. systemd's Varlink APIs, for instance, use `camelCase`
 ///   argument names (with `PascalCase` where a name mirrors a documented option name), so a proxy
 ///   for one typically wants `rename_all_arguments = "camelCase"`. Per-argument `#[zlink(rename =
-///   "...")]` takes precedence over `rename_all_arguments`. Every produced name must still fit the
-///   Varlink field-name grammar (`[A-Za-z][A-Za-z0-9_]*`), so a convention that steps outside it --
+///   "...")]` takes precedence over `rename_all_arguments`. Every argument name must fit the
+///   Varlink field-name grammar (`[A-Za-z][A-Za-z0-9_]*`) -- whether it's produced by a convention,
+///   given explicitly, or just left as the Rust ident -- so a convention that steps outside it --
 ///   `kebab-case` on a multi-word argument, say -- is rejected at compile time:
 ///
 /// ```rust,compile_fail
@@ -564,6 +565,20 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// trait ConfigProxy {
 ///     // `dry_run` would become `dry-run`, which Varlink cannot express.
 ///     async fn set_config(&mut self, dry_run: bool) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
+/// ```
+///
+/// and an argument left unrenamed still has to be a name Varlink can express:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy(interface = "org.example.Config")]
+/// trait ConfigProxy {
+///     // A leading underscore marks "unused" in Rust, but Varlink field names can't start with
+///     // `_`, and there's no rename here to give it a wire-safe name instead.
+///     async fn set_config(&mut self, _dry_run: bool) -> zlink::Result<Result<(), MyError>>;
 /// }
 /// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// # enum MyError {}

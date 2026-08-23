@@ -247,7 +247,8 @@ fn generate_method_call_creation(
                 let name = info.name;
                 let ty = &info.ty_for_params;
                 let serde_attrs = if let Some(ref renamed) = info.serialized_name {
-                    quote! { #[serde(rename = #renamed)] }
+                    let rename_str = renamed.as_str();
+                    quote! { #[serde(rename = #rename_str)] }
                 } else {
                     quote! {}
                 };
