@@ -395,4 +395,110 @@ mod tests {
         let deserialized: Error<'_> = serde_json::from_str(&json).unwrap();
         assert_eq!(*original, deserialized);
     }
+
+    // ---- Method deserialization tests (fix for GitHub issue #233) ----
+
+    use crate::Call;
+
+    /// Deserialize a [`Call`] of `Method` the way the server actually does.
+    ///
+    /// Going through `Call`'s deserializer is what makes an empty/`null` `parameters` object
+    /// behave like an absent one for no-argument methods (the serde#2045 workaround). The
+    /// `Method` enum itself keeps a plain derived `Deserialize`.
+    fn deserialize_method(json: &str) -> Call<Method<'_>> {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn method_deserialize_get_info_variants() {
+        // Exact varlinkctl payload: parameters present as empty object.
+        let m = deserialize_method(r#"{"method":"org.varlink.service.GetInfo","parameters":{}}"#);
+        assert!(
+            matches!(m.method(), Method::GetInfo),
+            "parameters:{{}} should yield GetInfo"
+        );
+
+        // No parameters key at all.
+        let m = deserialize_method(r#"{"method":"org.varlink.service.GetInfo"}"#);
+        assert!(
+            matches!(m.method(), Method::GetInfo),
+            "absent parameters should yield GetInfo"
+        );
+
+        // parameters: null.
+        let m = deserialize_method(r#"{"method":"org.varlink.service.GetInfo","parameters":null}"#);
+        assert!(
+            matches!(m.method(), Method::GetInfo),
+            "parameters:null should yield GetInfo"
+        );
+
+        // Reversed key order: parameters before method.
+        let m = deserialize_method(r#"{"parameters":{},"method":"org.varlink.service.GetInfo"}"#);
+        assert!(
+            matches!(m.method(), Method::GetInfo),
+            "reversed key order should still yield GetInfo"
+        );
+    }
+
+    #[test]
+    fn method_deserialize_get_interface_description() {
+        // Normal key order.
+        let m = deserialize_method(
+            r#"{"method":"org.varlink.service.GetInterfaceDescription","parameters":{"interface":"org.example.Foo"}}"#,
+        );
+        assert!(
+            matches!(
+                m.method(),
+                Method::GetInterfaceDescription {
+                    interface: "org.example.Foo"
+                }
+            ),
+            "should deserialize GetInterfaceDescription with correct interface"
+        );
+
+        // Reversed key order: parameters before method.
+        let m = deserialize_method(
+            r#"{"parameters":{"interface":"org.example.Bar"},"method":"org.varlink.service.GetInterfaceDescription"}"#,
+        );
+        assert!(
+            matches!(
+                m.method(),
+                Method::GetInterfaceDescription {
+                    interface: "org.example.Bar"
+                }
+            ),
+            "reversed key order should still deserialize GetInterfaceDescription correctly"
+        );
+    }
+
+    #[test]
+    fn method_deserialize_unknown_tag_errors() {
+        let result: core::result::Result<Call<Method<'_>>, _> =
+            serde_json::from_str(r#"{"method":"org.varlink.service.NonExistent","parameters":{}}"#);
+        assert!(result.is_err(), "unknown method tag should return an error");
+    }
+
+    #[test]
+    fn method_serialize_wire_format() {
+        // GetInfo must serialize WITHOUT a `parameters` key (existing wire behavior).
+        let json = serde_json::to_string(&Method::GetInfo).unwrap();
+        assert_eq!(
+            json, r#"{"method":"org.varlink.service.GetInfo"}"#,
+            "GetInfo must serialize without a parameters key"
+        );
+
+        // GetInterfaceDescription must include parameters.
+        let json = serde_json::to_string(&Method::GetInterfaceDescription {
+            interface: "org.example.Foo",
+        })
+        .unwrap();
+        assert!(
+            json.contains(r#""parameters""#),
+            "GetInterfaceDescription must serialize with a parameters key"
+        );
+        assert!(
+            json.contains("org.example.Foo"),
+            "GetInterfaceDescription parameters must contain the interface name"
+        );
+    }
 }
