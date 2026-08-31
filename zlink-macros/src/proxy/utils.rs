@@ -1,5 +1,5 @@
 use crate::{
-    naming::{self, Grammar, NameSource, RenameAll},
+    naming::{self, NameSource, RenameAll},
     utils::*,
 };
 use std::collections::HashSet;
@@ -7,6 +7,7 @@ use syn::{
     Attribute, Error, Expr, GenericArgument, Ident, Lit, Meta, PathArguments, ReturnType, Type,
     punctuated::Punctuated,
 };
+use zlink_names::{FieldName, OwnedFieldName};
 
 /// Convert snake_case to PascalCase.
 pub(super) fn snake_case_to_pascal_case(input: &str) -> String {
@@ -177,24 +178,32 @@ pub(super) fn resolve_serialized_name(
     ident: &Ident,
     param_attrs: Option<&ParamAttrs>,
     rename_all: Option<RenameAll>,
-) -> Result<Option<String>, Error> {
+) -> Result<Option<OwnedFieldName>, Error> {
     if let Some(rename) = param_attrs.and_then(|attrs| attrs.rename.clone()) {
-        return Ok(Some(rename));
+        return Ok(Some(naming::validate(
+            &rename,
+            "renamed parameter name",
+            NameSource::Ident(ident),
+        )?));
     }
 
     let Some(rule) = rename_all else {
+        // Not renamed, so nothing to emit `#[serde(rename = ...)]` for -- but the ident's own
+        // name still has to be a name Varlink can express.
+        let _: FieldName<'_> = naming::validate(
+            &naming::unraw(ident),
+            "parameter name",
+            NameSource::Ident(ident),
+        )?;
         return Ok(None);
     };
 
     let name = rule.apply_to_field(&naming::unraw(ident));
-    naming::validate(
+    Ok(Some(naming::validate(
         &name,
-        Grammar::Field,
         "parameter name",
         NameSource::Ident(ident),
-    )?;
-
-    Ok(Some(name))
+    )?))
 }
 
 /// Extract parameter attributes from zlink attributes and remove processed attributes.
@@ -690,7 +699,7 @@ mod tests {
         let ident: Ident = parse_quote!(r#type);
         let name = resolve_serialized_name(&ident, None, Some(RenameAll::Pascal)).unwrap();
 
-        assert_eq!(name.as_deref(), Some("Type"));
+        assert_eq!(name.as_deref().map(|n| n.as_str()), Some("Type"));
     }
 
     #[test]
@@ -702,7 +711,7 @@ mod tests {
         };
         let name = resolve_serialized_name(&ident, Some(&attrs), Some(RenameAll::Pascal)).unwrap();
 
-        assert_eq!(name.as_deref(), Some("customName"));
+        assert_eq!(name.as_deref().map(|n| n.as_str()), Some("customName"));
     }
 
     #[test]
@@ -722,5 +731,19 @@ mod tests {
             .to_string();
 
         assert!(err.contains("`dry-run`"), "must name the bad name: {err}");
+    }
+
+    /// Rust idents that the Varlink field grammar rejects must fail even with no rename rule at
+    /// all -- `None` is not a license to skip validation.
+    #[test]
+    fn unrenamed_ident_still_validated() {
+        for bad in ["_foo", "foo_", "foo__bar"] {
+            let ident: Ident = syn::parse_str(bad).unwrap();
+            let err = resolve_serialized_name(&ident, None, None)
+                .unwrap_err()
+                .to_string();
+
+            assert!(err.contains(&format!("`{bad}`")), "for {bad}: {err}");
+        }
     }
 }

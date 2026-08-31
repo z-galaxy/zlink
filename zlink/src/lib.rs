@@ -42,6 +42,11 @@ mod doctests {
 }
 
 pub use zlink_core::*;
+/// API for working with Varlink names
+pub mod names {
+    #[doc(inline)]
+    pub use zlink_names::*;
+}
 
 /// API specific to the [tokio](https://tokio.rs/) runtime.
 #[cfg(feature = "tokio")]

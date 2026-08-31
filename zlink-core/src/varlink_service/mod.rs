@@ -24,6 +24,8 @@ pub const INTERFACE_NAME: &str = "org.varlink.service";
 /// The description of the `org.varlink.service` interface.
 #[cfg(feature = "introspection")]
 pub const DESCRIPTION: &crate::idl::Interface<'static> = &{
+    use crate::names::InterfaceName;
+
     use crate::{
         idl::{Comment, Interface, Method, Parameter},
         introspect::{ReplyError, Type},
@@ -52,7 +54,7 @@ pub const DESCRIPTION: &crate::idl::Interface<'static> = &{
     ];
 
     Interface::new(
-        INTERFACE_NAME,
+        InterfaceName::from_static_str_unchecked(INTERFACE_NAME),
         METHODS,
         &[],
         Error::VARIANTS,

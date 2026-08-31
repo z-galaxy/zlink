@@ -98,3 +98,11 @@ impl Type for core::net::SocketAddrV4 {
 impl Type for core::net::SocketAddrV6 {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
+
+// ============================================================================
+// Varlink name types
+// ============================================================================
+
+impl Type for zlink_names::InterfaceName<'_> {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}

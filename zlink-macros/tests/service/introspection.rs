@@ -47,7 +47,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
     // Parse the interface and verify the name.
     let interface = desc.parse()?;
     assert_eq!(
-        interface.name(),
+        interface.name().as_str(),
         "org.example.bank",
         "Expected org.example.bank interface"
     );
@@ -168,7 +168,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         .unwrap();
     let interface = desc.parse()?;
     assert_eq!(
-        interface.name(),
+        interface.name().as_str(),
         "org.varlink.service",
         "Expected org.varlink.service interface"
     );

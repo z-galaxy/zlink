@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
 use syn::{Error, FnArg, ItemTrait, Lit, Pat, TraitItem, parse::Parser, parse2};
+use zlink_names::OwnedInterfaceName;
 
 mod chain_extension;
 mod chain_method;
@@ -136,7 +137,7 @@ fn parse_proxy_attributes(
     trait_def: &ItemTrait,
 ) -> Result<
     (
-        String,
+        OwnedInterfaceName,
         TokenStream,
         Option<syn::Ident>,
         Option<crate::naming::RenameAll>,
@@ -153,7 +154,13 @@ fn parse_proxy_attributes(
 
     // Try parsing as a simple string literal first (backward compatibility)
     if let Ok(Lit::Str(lit_str)) = parse2::<Lit>(attr.clone()) {
-        return Ok((lit_str.value(), quote! { ::zlink }, None, None));
+        return Ok((
+            OwnedInterfaceName::try_from(lit_str.value())
+                .map_err(|e| Error::new_spanned(&lit_str, e))?,
+            quote! { ::zlink },
+            None,
+            None,
+        ));
     }
 
     // Parse as name-value pairs
@@ -165,8 +172,8 @@ fn parse_proxy_attributes(
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("interface") {
             let value: syn::LitStr = meta.value()?.parse()?;
-            crate::naming::validate_interface(&value)?;
-            interface_name = Some(value.value());
+            let validated_name = crate::naming::validate_interface(&value)?;
+            interface_name = Some(validated_name);
         } else if meta.path.is_ident("crate") {
             let value: syn::LitStr = meta.value()?.parse()?;
             let path_str = value.value();

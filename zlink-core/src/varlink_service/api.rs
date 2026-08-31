@@ -1,5 +1,6 @@
 use alloc::borrow::Cow;
 use serde::{Deserialize, Serialize};
+use zlink_names::InterfaceName;
 
 #[cfg(feature = "introspection")]
 use crate::introspect;
@@ -21,7 +22,8 @@ pub enum Method<'a> {
     #[serde(rename = "org.varlink.service.GetInterfaceDescription")]
     GetInterfaceDescription {
         /// The interface to get the description for.
-        interface: &'a str,
+        #[serde(borrow)]
+        interface: InterfaceName<'a>,
     },
 }
 

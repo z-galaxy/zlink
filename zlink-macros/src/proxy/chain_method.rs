@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Error, FnArg, Pat};
+use zlink_names::InterfaceName;
 
 use super::{
     types::{ArgInfo, MethodAttrs},
@@ -15,9 +16,9 @@ type MethodCallResult = (TokenStream, TokenStream);
 #[cfg(not(feature = "std"))]
 type MethodCallResult = TokenStream;
 
-pub(super) fn generate_chain_method(
+pub(super) fn generate_chain_method<'name>(
     method: &mut syn::TraitItemFn,
-    interface_name: &str,
+    interface_name: &InterfaceName<'name>,
     _trait_generics: &syn::Generics,
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
@@ -246,7 +247,8 @@ fn generate_method_call_creation(
                 let name = info.name;
                 let ty = &info.ty_for_params;
                 let serde_attrs = if let Some(ref renamed) = info.serialized_name {
-                    quote! { #[serde(rename = #renamed)] }
+                    let rename_str = renamed.as_str();
+                    quote! { #[serde(rename = #rename_str)] }
                 } else {
                     quote! {}
                 };

@@ -1,12 +1,13 @@
 //! Method information extraction for service macro.
 
+use crate::naming::{self, NameSource};
 use proc_macro2::TokenStream;
 use syn::{
     Attribute, Error, Expr, GenericArgument, Ident, ImplItemFn, Lit, LitStr, Meta, PathArguments,
     ReturnType, Type, parse::Parse,
 };
 
-use crate::naming::{self, Grammar, NameSource};
+use zlink_names::{FieldName, OwnedInterfaceName, OwnedTypeName};
 
 use super::types::ParamInfo;
 
@@ -15,9 +16,9 @@ pub(super) struct MethodInfo {
     /// The original method name (snake_case).
     pub name: Ident,
     /// The Varlink method name (PascalCase or renamed).
-    pub varlink_name: String,
+    pub varlink_name: OwnedTypeName,
     /// The interface name for this method.
-    pub interface: Option<String>,
+    pub interface: Option<OwnedInterfaceName>,
     /// Custom types scoped to this method's interface (from `#[zlink(types = [...])]`).
     pub custom_types: Vec<Type>,
     /// Parameters for this method (excluding self).
@@ -52,7 +53,7 @@ impl MethodInfo {
     /// interface attribute is found.
     pub(super) fn extract(
         method: &mut ImplItemFn,
-        current_interface: &mut Option<String>,
+        current_interface: &mut Option<OwnedInterfaceName>,
     ) -> Result<Self, Error> {
         let name = method.sig.ident.clone();
 
@@ -77,7 +78,8 @@ impl MethodInfo {
             ),
         };
         // A method is named like a type, so it must be expressible as one.
-        naming::validate(&varlink_name, Grammar::Type, "method name", name_source)?;
+        let varlink_name: OwnedTypeName =
+            naming::validate(&varlink_name, "method name", name_source)?;
 
         // Check if this is a streaming method.
         let is_streaming = method_attrs.is_streaming;
@@ -133,7 +135,7 @@ impl MethodInfo {
                 Some(lit) => (lit.value(), NameSource::Rename(lit)),
                 None => (naming::unraw(&param.name), NameSource::Ident(&param.name)),
             };
-            naming::validate(&wire_name, Grammar::Field, "parameter name", source)?;
+            let _: FieldName<'_> = naming::validate(&wire_name, "parameter name", source)?;
         }
 
         // Validate FD attributes.
@@ -359,7 +361,7 @@ impl MethodInfo {
 #[derive(Default)]
 struct MethodAttrs {
     /// The interface name for this method.
-    interface: Option<String>,
+    interface: Option<OwnedInterfaceName>,
     /// Custom types scoped to this method's interface.
     custom_types: Vec<Type>,
     /// Custom method name.
@@ -396,8 +398,8 @@ impl MethodAttrs {
             let parser = syn::meta::parser(|meta| {
                 if meta.path.is_ident("interface") {
                     let value: syn::LitStr = meta.value()?.parse()?;
-                    naming::validate_interface(&value)?;
-                    result.interface = Some(value.value());
+                    let validated = naming::validate_interface(&value)?;
+                    result.interface = Some(validated);
                 } else if meta.path.is_ident("rename") {
                     let value: syn::LitStr = meta.value()?.parse()?;
                     result.rename = Some(value);
@@ -697,7 +699,7 @@ mod tests {
             let mut method: ImplItemFn = parse_quote! {
                 async fn probe(&self, #param) -> Result<Reply, Error> { todo!() }
             };
-            let mut interface = Some("org.example.probe".to_owned());
+            let mut interface = Some(OwnedInterfaceName::try_from("org.example.probe").unwrap());
 
             let Err(err) = MethodInfo::extract(&mut method, &mut interface) else {
                 panic!("`{src}` must be rejected: it reaches the IDL as `_foo`");

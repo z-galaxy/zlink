@@ -4,7 +4,7 @@
 //! Code generation for Varlink interfaces.
 
 use std::{fs, path::PathBuf};
-use zlink::idl::Interface;
+use zlink::{idl::Interface, names::InterfaceName};
 
 #[cfg(doctest)]
 mod doctests {
@@ -228,7 +228,7 @@ pub fn generate_files(config: &CodegenOptions) -> Result<(), Error> {
 /// The filename is converted to lowercase to comply with Rust's naming conventions.
 ///
 /// For example: `"org.example.Interface"` → `"org_example_interface.rs"`
-fn interface_to_filename(interface_name: &str) -> String {
+fn interface_to_filename(interface_name: &InterfaceName) -> String {
     format!("{}.rs", interface_name.replace('.', "_").to_lowercase())
 }
 
@@ -239,19 +239,19 @@ mod tests {
     #[test]
     fn test_interface_to_filename() {
         assert_eq!(
-            interface_to_filename("org.example.Interface"),
+            interface_to_filename(&InterfaceName::try_from("org.example.Interface").unwrap()),
             "org_example_interface.rs"
         );
         assert_eq!(
-            interface_to_filename("com.example.MyService"),
+            interface_to_filename(&InterfaceName::try_from("com.example.MyService").unwrap()),
             "com_example_myservice.rs"
         );
         assert_eq!(
-            interface_to_filename("SimpleInterface"),
-            "simpleinterface.rs"
+            interface_to_filename(&InterfaceName::try_from("org.varlink-rs.service").unwrap()),
+            "org_varlink-rs_service.rs"
         );
         assert_eq!(
-            interface_to_filename("org.varlink.service"),
+            interface_to_filename(&InterfaceName::try_from("org.varlink.service").unwrap()),
             "org_varlink_service.rs"
         );
     }

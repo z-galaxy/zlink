@@ -89,7 +89,8 @@ pub(super) fn generate_field_definitions(
             }
             crate::attr_mode::FieldMode::Normal => {
                 let field_type = utils::remove_lifetimes_from_type(&field.ty);
-                let field_name_str = naming::field_name(&field.attrs, field_name, rename_all)?;
+                let field_named = naming::field_name(&field.attrs, field_name, rename_all)?;
+                let field_name_str = field_named.as_str();
 
                 let static_name = if let Some(variant_ident) = variant_prefix {
                     quote::format_ident!(
@@ -160,11 +161,12 @@ pub(super) fn generate_enum_variant_definitions(
             Fields::Unit => {
                 let variant_name =
                     naming::enum_variant_name(&variant.attrs, &variant.ident, rename_all)?;
+                let variant_name_str = variant_name.as_str();
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = generate_comment_objects(&comments, crate_path);
                 let variant_ref = quote! {
                     &#crate_path::idl::EnumVariant::new(
-                        #variant_name,
+                        #variant_name_str,
                         &[#(#comment_objects),*]
                     )
                 };

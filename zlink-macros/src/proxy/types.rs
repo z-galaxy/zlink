@@ -1,4 +1,5 @@
 use syn::{Attribute, Error, Meta};
+use zlink_names::OwnedFieldName;
 
 use super::utils::{extract_zlink_attrs, parse_rename_value};
 
@@ -65,6 +66,6 @@ pub(super) struct ArgInfo<'a> {
     pub ty_for_params: syn::Type,
     pub has_lifetime: bool,
     pub is_optional: bool,
-    pub serialized_name: Option<String>,
+    pub serialized_name: Option<OwnedFieldName>,
     pub is_fds: bool,
 }

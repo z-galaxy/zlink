@@ -6,6 +6,7 @@ use syn::{
     Error, ItemImpl,
     parse::{Parse, Parser},
 };
+use zlink_names::OwnedInterfaceName;
 
 /// Attributes parsed from the `#[service(...)]` macro invocation.
 pub(super) struct ServiceAttrs {
@@ -14,7 +15,7 @@ pub(super) struct ServiceAttrs {
     /// Custom types for introspection.
     pub custom_types: Vec<syn::Type>,
     /// Default interface name for all methods.
-    pub interface: Option<String>,
+    pub interface: Option<OwnedInterfaceName>,
     /// Service vendor name.
     pub vendor: Option<syn::Expr>,
     /// Service product name.
@@ -51,8 +52,8 @@ impl ServiceAttrs {
                     custom_types = types.into_iter().collect();
                 } else if meta.path.is_ident("interface") {
                     let value: syn::LitStr = meta.value()?.parse()?;
-                    crate::naming::validate_interface(&value)?;
-                    interface = Some(value.value());
+                    let validated = crate::naming::validate_interface(&value)?;
+                    interface = Some(validated);
                 } else if meta.path.is_ident("vendor") {
                     let value: syn::Expr = meta.value()?.parse()?;
                     vendor = Some(value);

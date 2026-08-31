@@ -92,7 +92,7 @@ async fn run_client(
             .await?
             .map_err(|e| e.to_string())?;
         let interface = interface.parse().unwrap();
-        assert_eq!(interface.name(), "org.example.ftl");
+        assert_eq!(interface.name().as_str(), "org.example.ftl");
         // Verify methods are present.
         let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
         assert!(method_names.contains(&"GetDriveCondition"));

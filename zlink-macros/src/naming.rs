@@ -1,18 +1,9 @@
-use syn::{Attribute, Error, Ident, LitStr};
-
 use crate::utils::skip_unknown_meta;
-
-/// The grammar a resolved Varlink name must follow.
-///
-/// Varlink names fields, parameters and enum variants one way, and types, methods and errors
-/// another, so every name falls under one of these two rules.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Grammar {
-    /// The field-name rule, `[A-Za-z][A-Za-z0-9_]*`. Fields, parameters and enum variants.
-    Field,
-    /// The type-name rule, `[A-Z][A-Za-z0-9]*`. Types, methods and errors.
-    Type,
-}
+use std::fmt::Debug;
+use syn::{Attribute, Error, Ident, LitStr};
+use zlink_names::{
+    FieldName, FromPattern, OwnedFieldName, OwnedInterfaceName, OwnedTypeName, TypeName,
+};
 
 /// Where a resolved name came from, which decides what a rejection points at and suggests.
 #[derive(Debug, Clone, Copy)]
@@ -28,13 +19,14 @@ pub(crate) enum NameSource<'a> {
 /// Only ever called on a *resolved* name: unrawing and `rename`/`rename_all` decide what a thing is
 /// called, and this decides whether that answer is sayable. Checking any earlier would reject
 /// perfectly good Rust, e.g. `r#type`, which resolves to the valid `type`.
-pub(crate) fn validate(
-    name: &str,
-    grammar: Grammar,
-    what: &str,
-    source: NameSource<'_>,
-) -> Result<(), Error> {
-    if !grammar.accepts(name) {
+pub(crate) fn validate<'a, T>(name: &'a str, what: &str, source: NameSource<'_>) -> Result<T, Error>
+where
+    T: TryFrom<&'a str>,
+    T: FromPattern,
+    <T as TryFrom<&'a str>>::Error: Debug,
+{
+    let validation_result = T::try_from(name);
+    if validation_result.is_err() {
         // Pointing at the rename literal is precise enough on its own; suggesting a rename to
         // someone who just wrote one would only be noise.
         let hint = match source {
@@ -43,7 +35,7 @@ pub(crate) fn validate(
         };
         let msg = format!(
             "`{name}` is not a valid Varlink {what}: it must match `{}`{hint}",
-            grammar.pattern(),
+            T::from_pattern(),
         );
 
         return Err(match source {
@@ -52,7 +44,7 @@ pub(crate) fn validate(
         });
     }
 
-    Ok(())
+    Ok(validation_result.unwrap())
 }
 
 /// Reject an interface name Varlink cannot express, reporting against `lit`'s span.
@@ -60,37 +52,20 @@ pub(crate) fn validate(
 /// Kept apart from [`validate`]: an interface name is always a literal the user wrote out (never a
 /// resolved ident), and its grammar is neither the field nor the type rule but reverse-domain
 /// notation.
-pub(crate) fn validate_interface(lit: &LitStr) -> Result<(), Error> {
+pub(crate) fn validate_interface(lit: &LitStr) -> Result<OwnedInterfaceName, Error> {
     let name = lit.value();
-    if !zlink_idl::is_valid_interface_name(&name) {
+    let valid_name = OwnedInterfaceName::try_from(name.clone());
+    if let Err(_err) = valid_name {
         return Err(Error::new_spanned(
             lit,
             format!(
                 "`{name}` is not a valid Varlink interface name: it must be in reverse-domain \
-                 notation, e.g. `org.example.Foo`"
+             notation, e.g. `org.example.Foo`"
             ),
         ));
     }
 
-    Ok(())
-}
-
-impl Grammar {
-    /// Whether Varlink can express `name` under this rule.
-    fn accepts(self, name: &str) -> bool {
-        match self {
-            Self::Field => zlink_idl::is_valid_field_name(name),
-            Self::Type => zlink_idl::is_valid_type_name(name),
-        }
-    }
-
-    /// The rule as it reads in the Varlink specification.
-    fn pattern(self) -> &'static str {
-        match self {
-            Self::Field => "[A-Za-z][A-Za-z0-9_]*",
-            Self::Type => "[A-Z][A-Za-z0-9]*",
-        }
-    }
+    Ok(valid_name.unwrap())
 }
 
 /// The case convention requested by `#[zlink(rename_all = "...")]`.
@@ -171,21 +146,6 @@ impl RenameAll {
         }
     }
 
-    /// Whether this convention could ever produce a name valid under `grammar`.
-    ///
-    /// Some conventions can satisfy a grammar for no input at all: `snake_case`, say, always
-    /// lowercases the first character, which the type-name rule (uppercase-first) rejects for
-    /// every possible name. Offering such a pairing is a footgun, so it is refused up front rather
-    /// than left for the per-name check to reject one produced name at a time.
-    ///
-    /// Probing a single-word sample rather than re-encoding that reasoning keeps the parser the one
-    /// authority on the grammar: a word carries the first-character and character-set rules without
-    /// the separators that only longer names introduce, so if a convention cannot make even this
-    /// fit, no name ever will.
-    fn can_produce(self, grammar: Grammar) -> bool {
-        grammar.accepts(&self.apply_to_variant("Word"))
-    }
-
     pub(crate) fn parse(lit: &LitStr) -> Result<Self, Error> {
         let rule = match lit.value().as_str() {
             "lowercase" => Self::Lower,
@@ -218,13 +178,12 @@ pub(crate) fn field_name(
     attrs: &[Attribute],
     ident: &Ident,
     rename_all: Option<RenameAll>,
-) -> Result<String, Error> {
+) -> Result<OwnedFieldName, Error> {
     resolve(
         attrs,
         ident,
         rename_all,
         RenameAll::apply_to_field,
-        Grammar::Field,
         "field name",
     )
 }
@@ -237,13 +196,12 @@ pub(crate) fn enum_variant_name(
     attrs: &[Attribute],
     ident: &Ident,
     rename_all: Option<RenameAll>,
-) -> Result<String, Error> {
+) -> Result<OwnedFieldName, Error> {
     resolve(
         attrs,
         ident,
         rename_all,
         RenameAll::apply_to_variant,
-        Grammar::Field,
         "enum variant name",
     )
 }
@@ -259,13 +217,12 @@ pub(crate) fn error_name(
     attrs: &[Attribute],
     ident: &Ident,
     rename_all: Option<RenameAll>,
-) -> Result<String, Error> {
+) -> Result<OwnedTypeName, Error> {
     resolve(
         attrs,
         ident,
         rename_all,
         RenameAll::apply_to_variant,
-        Grammar::Type,
         "error name",
     )
 }
@@ -280,34 +237,81 @@ pub(crate) fn reject_container_rename(attrs: &[Attribute], msg: &str) -> Result<
     }
 }
 
-/// The container's `#[zlink(rename_all = "...")]`, if any, checked against `grammar`.
+/// The container's `#[zlink(rename_all = "...")]`, if any, checked against a grammar picked by
+/// whichever terminal method is called.
 ///
-/// A convention that could never produce a name valid under `grammar` -- `snake_case` where a type
-/// name is wanted, say -- is rejected here, against the attribute's own span, rather than left for
-/// the per-name check to reject one produced name at a time.
-pub(crate) fn parse_rename_all(
-    attrs: &[Attribute],
-    grammar: Grammar,
-) -> Result<Option<RenameAll>, Error> {
-    let Some(lit) = parse_zlink_lit_str(attrs, "rename_all")? else {
-        return Ok(None);
-    };
+/// Only two grammars ever apply -- field/variant names and type names -- so rather than a generic
+/// parameter callers would have to turbofish (it never appears in the return type, so it can never
+/// be inferred), the grammar is hardcoded by which terminal method is called.
+pub(crate) struct RenameAllParser<'a> {
+    attrs: &'a [Attribute],
+}
 
-    let rule = RenameAll::parse(&lit)?;
-    if !rule.can_produce(grammar) {
-        return Err(Error::new_spanned(
-            &lit,
-            format!(
-                "`{}` can never produce a name matching the Varlink grammar `{}`, so it cannot \
-                 apply here. Drop `rename_all`, use a convention that fits (e.g. `UPPERCASE` or \
-                 `PascalCase`), or name items individually with `#[zlink(rename = \"...\")]`",
-                lit.value(),
-                grammar.pattern(),
-            ),
-        ));
+impl<'a> RenameAllParser<'a> {
+    pub(crate) fn new(attrs: &'a [Attribute]) -> Self {
+        Self { attrs }
     }
 
-    Ok(Some(rule))
+    /// Checked against the field/variant grammar (`snake_case`-sourced, lowercase-first).
+    pub(crate) fn try_for_field_name(self) -> Result<Option<RenameAll>, Error> {
+        self.parse(
+            |rule| FieldName::try_from(rule.apply_to_variant("Word").as_str()).is_ok(),
+            FieldName::from_pattern(),
+        )
+    }
+
+    /// Checked against the type grammar (`PascalCase`-sourced, uppercase-first).
+    pub(crate) fn try_for_type_name(self) -> Result<Option<RenameAll>, Error> {
+        self.parse(
+            |rule| TypeName::try_from(rule.apply_to_variant("Word").as_str()).is_ok(),
+            TypeName::from_pattern(),
+        )
+    }
+
+    /// A convention that could never produce a name valid under `pattern` -- `snake_case` where a
+    /// type name is wanted, say -- is rejected here, against the attribute's own span, rather than
+    /// left for the per-name check to reject one produced name at a time.
+    ///
+    /// Probing a single-word sample rather than re-encoding that reasoning keeps the parser the one
+    /// authority on the grammar: a word carries the first-character and character-set rules without
+    /// the separators that only longer names introduce, so if a convention cannot make even this
+    /// fit, no name ever will.
+    fn parse(
+        self,
+        can_produce: impl Fn(RenameAll) -> bool,
+        pattern: &'static str,
+    ) -> Result<Option<RenameAll>, Error> {
+        let Some(lit) = parse_zlink_lit_str(self.attrs, "rename_all")? else {
+            return Ok(None);
+        };
+
+        let rule = RenameAll::parse(&lit)?;
+        // Whether this convention could ever produce a name valid for the used parser.
+        //
+        // Some conventions can satisfy a grammar for no input at all: `snake_case`, say, always
+        // lowercases the first character, which the type-name rule (uppercase-first) rejects for
+        // every possible name. Offering such a pairing is a footgun, so it is refused up front
+        // rather than left for the per-name check to reject one produced name at a time.
+        //
+        // Probing a single-word sample rather than re-encoding that reasoning keeps the parser the
+        // one authority on the grammar: a word carries the first-character and
+        // character-set rules without the separators that only longer names introduce, so
+        // if a convention cannot make even this fit, no name ever will.
+        if !can_produce(rule) {
+            return Err(Error::new_spanned(
+                &lit,
+                format!(
+                    "`{}` can never produce a name matching the Varlink grammar `{pattern}`, so it \
+                     cannot apply here. Drop `rename_all`, use a convention that fits (e.g. \
+                     `UPPERCASE` or `PascalCase`), or name items individually with \
+                     `#[zlink(rename = \"...\")]`",
+                    lit.value(),
+                ),
+            ));
+        }
+
+        Ok(Some(rule))
+    }
 }
 
 /// The item's `#[zlink(rename = "...")]`, if any.
@@ -328,24 +332,24 @@ pub(crate) fn unraw(ident: &Ident) -> String {
     }
 }
 
-fn resolve<F>(
+fn resolve<'a, T, F>(
     attrs: &[Attribute],
     ident: &Ident,
     rename_all: Option<RenameAll>,
     apply: F,
-    grammar: Grammar,
-    what: &str,
-) -> Result<String, Error>
+    what: &'a str,
+) -> Result<T, Error>
 where
+    T: for<'x> TryFrom<&'x str>,
+    T: FromPattern,
     F: FnOnce(RenameAll, &str) -> String,
+    for<'x> <T as TryFrom<&'x str>>::Error: Debug,
 {
     // An explicit rename is a name the user wrote out, so it is taken verbatim -- mangling it would
     // defeat the point of the attribute -- but it still has to be a name Varlink can say.
     if let Some(lit) = parse_rename(attrs)? {
         let name = lit.value();
-        validate(&name, grammar, what, NameSource::Rename(&lit))?;
-
-        return Ok(name);
+        return validate(&name, what, NameSource::Rename(&lit));
     }
 
     let unrawed = unraw(ident);
@@ -353,9 +357,7 @@ where
         Some(rule) => apply(rule, &unrawed),
         None => unrawed,
     };
-    validate(&name, grammar, what, NameSource::Ident(ident))?;
-
-    Ok(name)
+    validate(&name, what, NameSource::Ident(ident))
 }
 
 /// The string value of `#[zlink(<key> = "...")]`, if present.
@@ -450,7 +452,7 @@ mod tests {
         let ident: Ident = parse_quote!(user_id);
         let name = field_name(&attrs, &ident, Some(RenameAll::Camel)).unwrap();
 
-        assert_eq!(name, "ID");
+        assert_eq!(name.as_ref().as_str(), "ID");
     }
 
     #[test]
@@ -459,7 +461,7 @@ mod tests {
         let ident: Ident = parse_quote!(user_id);
         let name = field_name(&attrs, &ident, Some(RenameAll::Camel)).unwrap();
 
-        assert_eq!(name, "userId");
+        assert_eq!(name.as_ref().as_str(), "userId");
     }
 
     #[test]
@@ -467,7 +469,10 @@ mod tests {
         let attrs: Vec<Attribute> = vec![];
         let ident: Ident = parse_quote!(user_id);
 
-        assert_eq!(field_name(&attrs, &ident, None).unwrap(), "user_id");
+        assert_eq!(
+            field_name(&attrs, &ident, None).unwrap().as_ref().as_str(),
+            "user_id"
+        );
     }
 
     #[test]
@@ -490,7 +495,7 @@ mod tests {
             vec![parse_quote!(#[zlink(crate = "crate", rename_all = "camelCase")])];
 
         assert_eq!(
-            parse_rename_all(&attrs, Grammar::Field).unwrap(),
+            RenameAllParser::new(&attrs).try_for_field_name().unwrap(),
             Some(RenameAll::Camel)
         );
     }
@@ -498,7 +503,8 @@ mod tests {
     #[test]
     fn unknown_rename_all_value_rejected() {
         let attrs: Vec<Attribute> = vec![parse_quote!(#[zlink(rename_all = "bogus")])];
-        let err = parse_rename_all(&attrs, Grammar::Field)
+        let err = RenameAllParser::new(&attrs)
+            .try_for_field_name()
             .unwrap_err()
             .to_string();
 
@@ -529,7 +535,10 @@ mod tests {
         let attrs: Vec<Attribute> = vec![];
         let ident: Ident = parse_quote!(r#type);
 
-        assert_eq!(field_name(&attrs, &ident, None).unwrap(), "type");
+        assert_eq!(
+            field_name(&attrs, &ident, None).unwrap().as_ref().as_str(),
+            "type"
+        );
     }
 
     /// The error-name counterpart: `r#Fn` unraws to the valid error name `Fn`.
@@ -538,7 +547,10 @@ mod tests {
         let attrs: Vec<Attribute> = vec![];
         let ident: Ident = parse_quote!(r#Fn);
 
-        assert_eq!(error_name(&attrs, &ident, None).unwrap(), "Fn");
+        assert_eq!(
+            error_name(&attrs, &ident, None).unwrap().as_ref().as_str(),
+            "Fn"
+        );
     }
 
     /// Enum variants follow field rules, which admit a lowercase first letter.
@@ -549,7 +561,10 @@ mod tests {
         let ident: Ident = parse_quote!(Active);
 
         assert_eq!(
-            enum_variant_name(&attrs, &ident, Some(RenameAll::Lower)).unwrap(),
+            enum_variant_name(&attrs, &ident, Some(RenameAll::Lower))
+                .unwrap()
+                .as_ref()
+                .as_str(),
             "active"
         );
     }
@@ -625,7 +640,7 @@ mod tests {
             vec![parse_quote!(#[zlink(rename_all = "SCREAMING_SNAKE_CASE")])];
 
         assert_eq!(
-            parse_rename_all(&attrs, Grammar::Type).unwrap(),
+            RenameAllParser::new(&attrs).try_for_type_name().unwrap(),
             Some(RenameAll::ScreamingSnake)
         );
     }
@@ -635,7 +650,8 @@ mod tests {
     #[test]
     fn rename_all_that_never_fits_the_type_grammar_is_rejected() {
         let attrs: Vec<Attribute> = vec![parse_quote!(#[zlink(rename_all = "snake_case")])];
-        let err = parse_rename_all(&attrs, Grammar::Type)
+        let err = RenameAllParser::new(&attrs)
+            .try_for_type_name()
             .unwrap_err()
             .to_string();
 
@@ -656,7 +672,10 @@ mod tests {
         for value in VALID_RENAME_ALL {
             let attr: Attribute = parse_quote!(#[zlink(rename_all = #value)]);
             assert!(
-                parse_rename_all(&[attr], Grammar::Field).unwrap().is_some(),
+                RenameAllParser::new(&[attr])
+                    .try_for_field_name()
+                    .unwrap()
+                    .is_some(),
                 "`{value}` should be accepted for a field name"
             );
         }

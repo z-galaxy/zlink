@@ -143,29 +143,6 @@ fn parse_errors() {
 }
 
 #[test]
-fn parse_interface_name() {
-    let input = b"org.example.test";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "org.example.test");
-    assert!(input_mut.is_empty());
-
-    let input = b"com.example.foo.bar";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "com.example.foo.bar");
-    assert!(input_mut.is_empty());
-
-    // Invalid: no dot
-    let mut input_mut = b"example".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-
-    // Invalid: starts with number
-    let mut input_mut = b"1example.test".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-}
-
-#[test]
 fn test_parse_method() {
     let input = "method GetInfo() -> (info: string)";
     let method = parse_method(input).unwrap();
@@ -342,7 +319,7 @@ error NotFound(id: int)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
     assert_eq!(interface.custom_types().count(), 1);
     assert_eq!(interface.methods().count(), 1);
     assert_eq!(interface.errors().count(), 1);
@@ -403,7 +380,7 @@ error NotFound(id: int)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
 
     // Check that we have the expected number of each type of member
     assert_eq!(interface.custom_types().count(), 1);
@@ -546,7 +523,7 @@ error SimpleError()
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test",);
 
     // Should have: method + error = 2 members (comments attached to them)
     assert_eq!(interface.methods().count(), 1);
@@ -643,7 +620,7 @@ method GetStatus() -> (status: string)
         "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.comprehensive");
+    assert_eq!(interface.name().as_str(), "org.example.comprehensive");
 
     // Check that we have the expected number of each type of member
     assert_eq!(interface.custom_types().count(), 1);
@@ -829,7 +806,7 @@ method GetData() -> (items: []any, map: [string]any)
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.anytest");
+    assert_eq!(interface.name().as_str(), "org.example.anytest");
     assert_eq!(interface.custom_types().count(), 1);
     assert_eq!(interface.methods().count(), 2);
 
@@ -1208,7 +1185,7 @@ method SimpleMethod() -> ()
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.test");
+    assert_eq!(interface.name().as_str(), "org.example.test");
 
     // Check interface comments
     let comments: Vec<_> = interface.comments().collect();
@@ -1274,7 +1251,7 @@ method GetUser(id: int) -> (user: User)
     "#;
 
     let interface = parse_interface(input).unwrap();
-    assert_eq!(interface.name(), "org.example.core");
+    assert_eq!(interface.name().as_str(), "org.example.core",);
 
     // Check interface comments
     let interface_comments: Vec<_> = interface.comments().collect();

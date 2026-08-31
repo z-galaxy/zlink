@@ -36,8 +36,7 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
 
     // Process methods and collect method information.
     let mut methods_info = Vec::new();
-    let mut current_interface: Option<String> = service_attrs.interface.clone();
-
+    let mut current_interface = service_attrs.interface.clone();
     for item in &mut item_impl.items {
         let ImplItem::Fn(method) = item else {
             continue;

@@ -29,7 +29,7 @@ fn derive_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
         "`#[zlink(rename)]` has no effect on the `Type` derive, which generates an anonymous \
          object type. Derive `CustomType` instead if the type needs a name in the IDL.",
     )?;
-    let rename_all = naming::parse_rename_all(&input.attrs, naming::Grammar::Field)?;
+    let rename_all = naming::RenameAllParser::new(&input.attrs).try_for_field_name()?;
 
     let expanded = match &input.data {
         Data::Struct(data_struct) => {

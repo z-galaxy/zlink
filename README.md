@@ -41,6 +41,7 @@ The zlink project consists of several subcrates:
 - **[`zlink`]**: The main unified API crate that re-exports functionality based on enabled features.
   This is the only crate you will want to use directly in your application and services.
 - **[`zlink-core`]**: Core no-std foundation providing essential Varlink types and traits.
+- **[`zlink-names`]**: Varlink name types and validation (field, type and interface names).
 - **[`zlink-macros`]**: Contains the attribute and derive macros.
 - **[`zlink-tokio`]**: `Tokio`-based transport implementations and runtime integration.
 - **[`zlink-smol`]**: `smol`-based transport implementations and runtime integration.
@@ -425,6 +426,7 @@ This project is licensed under the [MIT License][license].
 [license]: ./LICENSE
 [`zlink`]: https://docs.rs/zlink
 [`zlink-core`]: https://docs.rs/zlink-core
+[`zlink-names`]: https://docs.rs/zlink-names
 [`zlink-tokio`]: https://docs.rs/zlink-tokio
 [`zlink-smol`]: https://docs.rs/zlink-smol
 [`zlink-codegen`]: https://docs.rs/zlink-codegen

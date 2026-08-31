@@ -33,6 +33,7 @@ defmt = ["zlink-core/defmt", "zlink-tokio?/defmt", "zlink-smol?/defmt"]
 
 [dependencies]
 zlink-core = { path = "../zlink-core", version = "=0.7.0", default-features = false }
+zlink-names = { path = "../zlink-names", version = "=0.7.0", default-features = false }
 zlink-tokio = { path = "../zlink-tokio", version = "=0.7.0", default-features = false, optional = true }
 zlink-smol = { path = "../zlink-smol", version = "=0.7.0", default-features = false, optional = true }
 

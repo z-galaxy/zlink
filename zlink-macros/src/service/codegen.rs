@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Error, GenericParam, ItemImpl, Type};
+use zlink_names::{InterfaceName, OwnedInterfaceName};
 
 use super::{attrs::ServiceAttrs, method::MethodInfo};
 use crate::utils::convert_type_lifetimes;
@@ -23,7 +24,7 @@ struct HandleBodyContext<'a> {
     reply_stream_name: &'a Ident,
     error_type_map: &'a HashMap<String, usize>,
     stream_item_type_map: &'a HashMap<String, Ident>,
-    interfaces: &'a [String],
+    interfaces: &'a [InterfaceName<'a>],
     type_name: &'a str,
     /// Whether streaming methods require boxing (any uses `impl Trait`).
     needs_stream_boxing: bool,
@@ -42,7 +43,7 @@ fn extract_type_name(ty: &Type) -> Option<String> {
 }
 
 /// Collect all unique interfaces from methods.
-fn collect_interfaces(methods_info: &[MethodInfo]) -> Vec<String> {
+fn collect_interfaces(methods_info: &[MethodInfo]) -> Vec<OwnedInterfaceName> {
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for method in methods_info {
@@ -77,7 +78,7 @@ pub(super) fn generate_service_impl(
     let reply_stream_name = format_ident!("__{}ReplyStream", type_name);
 
     // Collect interfaces for introspection.
-    let interfaces = collect_interfaces(methods_info);
+    let owned_interface_names = collect_interfaces(methods_info);
 
     // Generate the MethodCall enum (outer untagged wrapper + inner user methods).
     let method_call_enum = generate_method_call_enum(
@@ -102,6 +103,11 @@ pub(super) fn generate_service_impl(
     // Error type is always the reply error enum (includes varlink_service::Error).
     // The lifetime 'ser is used in the Service trait definition.
     let error_type: syn::Type = syn::parse_quote!(#reply_error_name<'ser>);
+
+    let interfaces: Vec<InterfaceName<'_>> = owned_interface_names
+        .iter()
+        .map(|owned| owned.as_ref())
+        .collect();
 
     // Generate interface description constants.
     let interface_descriptions = generate_interface_descriptions(
@@ -300,7 +306,7 @@ fn generate_method_call_enum(
         .iter()
         .filter_map(|method| {
             let full_path = method.full_method_path()?;
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
 
             // Only include serialized params (exclude connection params).
             let serialized_params: Vec<_> = method.serialized_params().collect();
@@ -775,7 +781,7 @@ fn generate_reply_stream_enum(
     let variants: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
             let stream_type = method.stream_return_type.as_ref().unwrap();
             quote! {
                 #variant_name { #[pin] stream: #stream_type }
@@ -794,7 +800,7 @@ fn generate_reply_stream_enum(
     let poll_arms: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
-            let variant_name = format_ident!("{}", method.varlink_name);
+            let variant_name = format_ident!("{}", method.varlink_name.as_str());
             let item_type = method.stream_item_type.as_ref().unwrap();
             let type_str = item_type.to_token_stream().to_string();
             let params_variant = stream_item_type_map
@@ -906,10 +912,10 @@ fn generate_reply_params_enum(
 }
 
 /// Generate interface description constants for each interface.
-fn generate_interface_descriptions(
+fn generate_interface_descriptions<'name>(
     methods_info: &[MethodInfo],
     service_attrs: &ServiceAttrs,
-    interfaces: &[String],
+    interfaces: &[InterfaceName<'name>],
     crate_path: &TokenStream,
     type_name: &str,
     impl_comments: &[String],
@@ -917,16 +923,12 @@ fn generate_interface_descriptions(
     let mut descriptions: Vec<TokenStream> = Vec::new();
 
     for interface in interfaces {
-        let const_name = format_ident!(
-            "__{}_INTERFACE_{}",
-            type_name.to_uppercase(),
-            interface.replace('.', "_").to_uppercase()
-        );
+        let const_name = interface_name_to_ident(type_name, interface);
 
         // Collect methods for this interface.
         let interface_methods: Vec<&MethodInfo> = methods_info
             .iter()
-            .filter(|m| m.interface.as_ref() == Some(interface))
+            .filter(|m| m.interface.as_ref().map(|i| i.inner()) == Some(interface))
             .collect();
 
         // Collect custom types scoped to this interface from method-level `types = [...]`,
@@ -934,7 +936,7 @@ fn generate_interface_descriptions(
         let mut seen_custom_types = HashSet::new();
         let per_interface_types: Vec<&Type> = methods_info
             .iter()
-            .filter(|m| m.interface.as_ref() == Some(interface))
+            .filter(|m| m.interface.as_ref().map(|i| i.inner()) == Some(interface))
             .flat_map(|m| m.custom_types.iter())
             .filter(|ty| {
                 let type_str = ty.to_token_stream().to_string();
@@ -975,6 +977,7 @@ fn generate_interface_descriptions(
             .map(|(idx, method)| {
                 let method_const_name = format_ident!("__METHOD_{}", idx);
                 let method_name = &method.varlink_name;
+                let method_name_str = method_name.as_str();
 
                 // Input parameters (excluding connection params).
                 let in_params: Vec<TokenStream> = method
@@ -1077,7 +1080,7 @@ fn generate_interface_descriptions(
                             );
                         };
                         #crate_path::idl::Method::new(
-                            #method_name,
+                            #method_name_str,
                             __IN_PARAMS,
                             __OUT_PARAMS,
                             &[#(#comment_objects),*],
@@ -1109,7 +1112,7 @@ fn generate_interface_descriptions(
         let mut seen_error_types = HashSet::new();
         let error_types: Vec<TokenStream> = methods_info
             .iter()
-            .filter(|m| m.interface.as_ref() == Some(interface))
+            .filter(|m| m.interface.as_ref().map(|i| i.inner()) == Some(interface))
             .flat_map(|m| {
                 m.error_type
                     .as_ref()
@@ -1162,12 +1165,13 @@ fn generate_interface_descriptions(
         let interface_comment_objects =
             crate::introspect::shared::generate_comment_objects(impl_comments, crate_path);
 
+        let interface_str = interface.as_str();
         descriptions.push(quote! {
             #[doc(hidden)]
             const #const_name: &#crate_path::idl::Interface<'static> = &{
                 #(#method_consts)*
                 #crate_path::idl::Interface::new(
-                    #interface,
+                    #crate_path::names::InterfaceName::from_static_str_unchecked(#interface_str),
                     &[#(#method_refs),*],
                     &[#(#custom_types),*],
                     #error_variants_expr,
@@ -1256,7 +1260,7 @@ fn generate_handle_body(
             continue;
         };
 
-        let enum_variant_name = format_ident!("{}", method.varlink_name);
+        let enum_variant_name = format_ident!("{}", method.varlink_name.as_str());
         let method_name = &method.name;
 
         // Only include serialized params in the pattern (exclude connection params).
@@ -1371,7 +1375,7 @@ fn generate_handle_body(
                 .unwrap_or_else(|| format_ident!("__Unknown"));
 
             // Use the method's varlink name for the enum variant.
-            let method_variant_name = format_ident!("{}", method.varlink_name);
+            let method_variant_name = format_ident!("{}", method.varlink_name.as_str());
 
             let streaming_reply = if *needs_stream_boxing {
                 // Use boxing when any streaming method uses `impl Trait`.
@@ -1613,11 +1617,7 @@ fn generate_handle_body(
     let interface_match_arms: Vec<TokenStream> = interfaces
         .iter()
         .map(|interface| {
-            let const_name = format_ident!(
-                "__{}_INTERFACE_{}",
-                type_name.to_uppercase(),
-                interface.replace('.', "_").to_uppercase()
-            );
+            let const_name = interface_name_to_ident(type_name, interface);
             let desc_reply = wrap_handle_result_no_fds(quote! {
                 #crate_path::service::MethodReply::Single(Some(
                     #reply_params_name::#varlink_reply_variant(
@@ -1625,8 +1625,9 @@ fn generate_handle_body(
                     )
                 ))
             });
+            let interface_str = interface.as_str();
             quote! {
-                #interface => {
+                #interface_str => {
                     let desc =
                         #crate_path::varlink_service::InterfaceDescription::from(#const_name);
                     #desc_reply
@@ -1636,8 +1637,13 @@ fn generate_handle_body(
         .collect();
 
     // Build the interfaces list for GetInfo.
-    let interfaces_list: Vec<TokenStream> =
-        interfaces.iter().map(|iface| quote! { #iface }).collect();
+    let interfaces_list: Vec<TokenStream> = interfaces
+        .iter()
+        .map(|iface| {
+            let iface_str = iface.as_str();
+            quote! { #iface_str }
+        })
+        .collect();
 
     // Service metadata.
     let vendor = service_attrs
@@ -1689,7 +1695,7 @@ fn generate_handle_body(
         #method_call_name::__VarlinkService(__varlink_method) => {
             match __varlink_method {
                 #crate_path::varlink_service::Method::GetInfo => {
-                    let info = #crate_path::varlink_service::Info::new(
+                    let info = #crate_path::varlink_service::Info::from_static_str_unchecked(
                         #vendor,
                         #product,
                         #version,
@@ -1702,7 +1708,7 @@ fn generate_handle_body(
                     #get_info_reply
                 }
                 #crate_path::varlink_service::Method::GetInterfaceDescription { interface } => {
-                    match *interface {
+                    match interface.as_str() {
                         #(#interface_match_arms)*
                         #crate_path::varlink_service::INTERFACE_NAME => {
                             let desc =
@@ -1738,4 +1744,17 @@ fn generate_handle_body(
             #user_methods_match
         }
     })
+}
+
+/// Replaces . and - with _ and uppercases the interface name
+fn interface_name_to_ident<'name>(type_name: &str, interface: &InterfaceName<'name>) -> Ident {
+    format_ident!(
+        "__{}_INTERFACE_{}",
+        type_name.to_uppercase(),
+        interface
+            .chars()
+            .map(|c| if matches!(c, '.' | '-') { '_' } else { c })
+            .flat_map(char::to_uppercase)
+            .collect::<String>()
+    )
 }
