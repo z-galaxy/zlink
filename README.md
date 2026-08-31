@@ -29,6 +29,9 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Unix domain sockets**: Communicate over Unix domain socket transports.
 - **Runtime choice**: Use either the Tokio or smol async runtime.
 - **Code generation**: Generate Rust code from Varlink IDL files.
+- **File descriptor passing**: Pass file descriptors alongside messages over Unix sockets,
+  wire-compatible with systemd's `sd-varlink` (the de-facto convention for FD passing over
+  Varlink). See the [`connection` module docs] for details.
 
 📖 To learn all about using zlink (and Varlink) step by step, check out
 [the zlink book](https://z-galaxy.github.io/zlink/). Its sources are in the
@@ -430,3 +433,4 @@ This project is licensed under the [MIT License][license].
 [`zlink-codegen`]: https://docs.rs/zlink-codegen
 [`zlink-macros`]: https://docs.rs/zlink-macros
 [`Server::run` docs]: https://docs.rs/zlink/latest/zlink/struct.Server.html#method.run
+[`connection` module docs]: https://docs.rs/zlink-core/latest/zlink_core/connection/index.html#file-descriptor-passing
