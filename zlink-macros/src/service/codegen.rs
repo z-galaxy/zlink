@@ -1,6 +1,6 @@
 //! Code generation for the service macro.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, format_ident, quote};
@@ -22,7 +22,7 @@ struct HandleBodyContext<'a> {
     reply_stream_error_ty: &'a TokenStream,
     reply_stream_name: &'a Ident,
     error_type_map: &'a HashMap<String, usize>,
-    stream_item_type_map: &'a HashMap<String, Ident>,
+    stream_item_type_map: &'a BTreeMap<String, Ident>,
     interfaces: &'a [String],
     type_name: &'a str,
     /// Whether streaming methods require boxing (any uses `impl Trait`).
@@ -461,8 +461,8 @@ fn build_stream_error_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<S
 
 /// Build a mapping from stream item type string representation to variant name.
 /// This ensures consistent variant naming for the stream params enum.
-fn build_stream_item_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, Ident> {
-    let mut type_to_variant: HashMap<String, Ident> = HashMap::new();
+fn build_stream_item_type_variant_map(methods_info: &[MethodInfo]) -> BTreeMap<String, Ident> {
+    let mut type_to_variant: BTreeMap<String, Ident> = BTreeMap::new();
 
     for method in methods_info {
         if !method.is_streaming {
@@ -475,7 +475,7 @@ fn build_stream_item_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<St
 
         // Use a simple string representation to check for duplicates.
         let type_str = stream_item_type.to_token_stream().to_string();
-        if let std::collections::hash_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
+        if let std::collections::btree_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
             // Use the type name as the variant name.
             let variant_name = extract_type_name(stream_item_type)
                 .map(|name| format_ident!("{}", name))
@@ -620,7 +620,7 @@ fn generate_reply_stream_error_enum(
 fn generate_reply_stream_params_enum(
     methods_info: &[MethodInfo],
     enum_name: &Ident,
-) -> (TokenStream, HashMap<String, Ident>) {
+) -> (TokenStream, BTreeMap<String, Ident>) {
     let type_map = build_stream_item_type_variant_map(methods_info);
 
     let mut variants: Vec<TokenStream> = Vec::new();
@@ -756,7 +756,7 @@ fn generate_reply_stream_enum(
     enum_name: &Ident,
     reply_stream_params_name: &Ident,
     reply_stream_error_ty: &TokenStream,
-    stream_item_type_map: &HashMap<String, Ident>,
+    stream_item_type_map: &BTreeMap<String, Ident>,
     crate_path: &TokenStream,
 ) -> TokenStream {
     let projection_name = format_ident!("{}Proj", enum_name);
