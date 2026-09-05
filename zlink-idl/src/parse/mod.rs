@@ -190,31 +190,42 @@ fn varlink_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'
 /// Parse an interface name: reverse domain notation like `org.example.test`.
 ///
 /// Grammar:
-///   first segment      = [A-Za-z][A-Za-z0-9-]*
-///   subsequent segment = "." [A-Za-z0-9][A-Za-z0-9-]*
-///   name               = first_segment subsequent_segment+
+///   first_character    = [A-Za-z]
+///   first segment      = [-]*[A-Za-z0-9]
+///   subsequent segment = "." [A-Za-z0-9]([-]*[A-Za-z0-9])*
+///   name               = first_character first_segment* subsequent_segment+
 pub(crate) fn interface_name<'a>(
     input: &mut &'a [u8],
 ) -> ModalResult<&'a str, InputError<&'a [u8]>> {
     (
-        // First segment.
-        (
-            one_of(|c: u8| c.is_ascii_alphabetic()),
-            take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
-        ),
+        // First character.
+        one_of(|c: u8| c.is_ascii_alphabetic()),
+        // Zero or more first segments.
+        repeat::<_, _, (), _, _>(0.., segment_tail),
         // One or more dotted segments (so the name has at least one `.`).
         repeat::<_, _, (), _, _>(
             1..,
             (
                 literal("."),
                 one_of(|c: u8| c.is_ascii_alphanumeric()),
-                take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
+                repeat::<_, _, (), _, _>(0.., segment_tail),
             )
                 .void(),
         ),
     )
         .take()
         .map(bytes_to_str)
+        .parse_next(input)
+}
+
+/// Parse a `[-]*[A-Za-z0-9]` segment tail: zero or more hyphens followed by one
+/// alphanumeric character, so hyphens can never trail without a following alnum.
+fn segment_tail<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
+    (
+        take_while(0.., |c: u8| c == b'-'),
+        one_of(|c: u8| c.is_ascii_alphanumeric()),
+    )
+        .void()
         .parse_next(input)
 }
 

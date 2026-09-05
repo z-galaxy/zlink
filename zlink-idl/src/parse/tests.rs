@@ -163,6 +163,37 @@ fn parse_interface_name() {
     // Invalid: starts with number
     let mut input_mut = b"1example.test".as_slice();
     assert!(interface_name(&mut input_mut).is_err());
+
+    // Valid: hyphen inside a segment.
+    let input = b"org.exam-ple.test";
+    let mut input_mut = input.as_slice();
+    let result = interface_name(&mut input_mut).unwrap();
+    assert_eq!(result, "org.exam-ple.test");
+    assert!(input_mut.is_empty());
+
+    // Valid: a dotted segment may start with a digit.
+    let input = b"org.0example";
+    let mut input_mut = input.as_slice();
+    let result = interface_name(&mut input_mut).unwrap();
+    assert_eq!(result, "org.0example");
+    assert!(input_mut.is_empty());
+
+    // Invalid: first segment ends with a trailing hyphen (not followed by an alnum).
+    let mut input_mut = b"org-.example".as_slice();
+    assert!(!full_interface_name_is_valid(&mut input_mut));
+
+    // Invalid: dotted segment ends with a trailing hyphen (not followed by an alnum).
+    let mut input_mut = b"org.example-".as_slice();
+    assert!(!full_interface_name_is_valid(&mut input_mut));
+
+    // Invalid: dotted segment starts with a hyphen (must start with an alnum).
+    let mut input_mut = b"org.-example".as_slice();
+    assert!(!full_interface_name_is_valid(&mut input_mut));
+}
+
+/// Parse `input` as an interface name and return whether it is valid *and* fully consumed.
+fn full_interface_name_is_valid(input: &mut &[u8]) -> bool {
+    matches!(interface_name(input), Ok(_) if input.is_empty())
 }
 
 #[test]
