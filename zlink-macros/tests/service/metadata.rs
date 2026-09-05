@@ -30,13 +30,13 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
             let interfaces: Vec<&str> = info.interfaces.iter().map(|s| s.as_ref()).collect();
             assert_eq!(
                 interfaces.as_slice(),
-                ["org.example.metadata", "org.varlink.service"],
+                ["org.example.metadata-hyphen", "org.varlink.service"],
                 "Unexpected interfaces"
             );
 
             // Test GetInterfaceDescription - verify both methods are exposed.
             // This tests that the macro-level interface attribute applies to all methods.
-            let desc = conn.get_interface_description("org.example.metadata").await?.unwrap();
+            let desc = conn.get_interface_description("org.example.metadata-hyphen").await?.unwrap();
             let interface = desc.parse()?;
             let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
             assert_eq!(
@@ -57,8 +57,9 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
 pub struct MetadataService;
 
 // Test the interface attribute at the macro level instead of on each method.
+// The interface name also exercises a `-` character in a segment.
 #[zlink::service(
-    interface = "org.example.metadata",
+    interface = "org.example.metadata-hyphen",
     vendor = "Test Vendor",
     product = "Test Product",
     version = env!("CARGO_PKG_VERSION"),

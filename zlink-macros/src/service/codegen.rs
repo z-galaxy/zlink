@@ -920,7 +920,7 @@ fn generate_interface_descriptions(
         let const_name = format_ident!(
             "__{}_INTERFACE_{}",
             type_name.to_uppercase(),
-            interface.replace('.', "_").to_uppercase()
+            crate::utils::to_ident(interface).to_uppercase()
         );
 
         // Collect methods for this interface.
@@ -1616,7 +1616,7 @@ fn generate_handle_body(
             let const_name = format_ident!(
                 "__{}_INTERFACE_{}",
                 type_name.to_uppercase(),
-                interface.replace('.', "_").to_uppercase()
+                crate::utils::to_ident(interface).to_uppercase()
             );
             let desc_reply = wrap_handle_result_no_fds(quote! {
                 #crate_path::service::MethodReply::Single(Some(

@@ -44,6 +44,28 @@ pub(crate) fn parse_crate_path(attrs: &[Attribute]) -> Result<TokenStream2, Erro
     Ok(quote! { ::zlink })
 }
 
+/// Sanitize a string for use inside a generated identifier.
+///
+/// ASCII alphanumeric characters pass through unchanged; every other character (including
+/// `_` itself, so it can never be mistaken for an escape delimiter) is replaced with its code
+/// point in hex, wrapped in `_.._`. This keeps the mapping injective, so distinct inputs (e.g.
+/// interface names differing only in whether they use `.` or `-`) can never collide on the same
+/// generated identifier.
+#[cfg(feature = "service")]
+pub(crate) fn to_ident(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            out.push('_');
+            out.push_str(&format!("{:x}", c as u32));
+            out.push('_');
+        }
+    }
+    out
+}
+
 /// Consume an unknown `#[zlink(..)]` key's payload so the surrounding walk can continue.
 ///
 /// Keys come in three shapes: bare (`borrow`), name-value (`crate = "x"`) and list (`foo(..)`).
