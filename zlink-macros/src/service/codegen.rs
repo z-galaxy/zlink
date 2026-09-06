@@ -916,12 +916,9 @@ fn generate_interface_descriptions(
 ) -> Result<TokenStream, Error> {
     let mut descriptions: Vec<TokenStream> = Vec::new();
 
-    for interface in interfaces {
-        let const_name = format_ident!(
-            "__{}_INTERFACE_{}",
-            type_name.to_uppercase(),
-            interface.replace('.', "_").to_uppercase()
-        );
+    for (idx, interface) in interfaces.iter().enumerate() {
+        // Indexed, not name-derived: names can collide after case/punctuation folding.
+        let const_name = format_ident!("__{}_INTERFACE_{}", type_name.to_uppercase(), idx);
 
         // Collect methods for this interface.
         let interface_methods: Vec<&MethodInfo> = methods_info
@@ -1612,12 +1609,9 @@ fn generate_handle_body(
     // Generate interface description match arms for GetInterfaceDescription.
     let interface_match_arms: Vec<TokenStream> = interfaces
         .iter()
-        .map(|interface| {
-            let const_name = format_ident!(
-                "__{}_INTERFACE_{}",
-                type_name.to_uppercase(),
-                interface.replace('.', "_").to_uppercase()
-            );
+        .enumerate()
+        .map(|(idx, interface)| {
+            let const_name = format_ident!("__{}_INTERFACE_{}", type_name.to_uppercase(), idx);
             let desc_reply = wrap_handle_result_no_fds(quote! {
                 #crate_path::service::MethodReply::Single(Some(
                     #reply_params_name::#varlink_reply_variant(
