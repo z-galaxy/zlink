@@ -184,3 +184,56 @@ trait StorageProxy {
     async fn get_item(&mut self, index: usize) -> zlink::Result<Result<Item, StorageError>>;
     async fn add_item(&mut self, item: String) -> zlink::Result<Result<(), StorageError>>;
 }
+
+// Regression test: interface names differing only in `.` vs `-` used to sanitize to the same
+// generated identifier (both mapped to `_`), causing a duplicate const definition.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn colliding_interface_names() -> Result<(), Box<dyn std::error::Error>> {
+    use zlink::varlink_service::Proxy as VarlinkProxy;
+
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
+
+    let listener = bind(&socket_path).unwrap();
+    let service = CollidingInterfaceService;
+    let server = Server::new(listener, service);
+    tokio::select! {
+        res = server.run() => res?,
+        res = async {
+            let mut conn = connect(&socket_path).await?;
+
+            let dot_desc = conn
+                .get_interface_description("org.example.foo.bar")
+                .await?
+                .unwrap();
+            let dot_interface = dot_desc.parse()?;
+            let dot_methods: Vec<_> = dot_interface.methods().map(|m| m.name()).collect();
+            assert_eq!(dot_methods.as_slice(), ["DotMethod"]);
+
+            let hyphen_desc = conn
+                .get_interface_description("org.example.foo-bar")
+                .await?
+                .unwrap();
+            let hyphen_interface = hyphen_desc.parse()?;
+            let hyphen_methods: Vec<_> = hyphen_interface.methods().map(|m| m.name()).collect();
+            assert_eq!(hyphen_methods.as_slice(), ["HyphenMethod"]);
+
+            Ok::<(), Box<dyn std::error::Error>>(())
+        } => res?,
+    }
+
+    Ok(())
+}
+
+/// A service exercising two interface names that would collide under a naive `.`/`-` -> `_`
+/// identifier sanitization scheme.
+struct CollidingInterfaceService;
+
+#[zlink::service]
+impl CollidingInterfaceService {
+    #[zlink(interface = "org.example.foo.bar")]
+    async fn dot_method(&self) {}
+
+    #[zlink(interface = "org.example.foo-bar")]
+    async fn hyphen_method(&self) {}
+}
