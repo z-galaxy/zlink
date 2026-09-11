@@ -8,7 +8,7 @@ use crate::utils::skip_unknown_meta;
 /// another, so every name falls under one of these two rules.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Grammar {
-    /// The field-name rule, `[A-Za-z][A-Za-z0-9_]*`. Fields, parameters and enum variants.
+    /// The field-name rule, `[A-Za-z](_?[A-Za-z0-9])*`. Fields, parameters and enum variants.
     Field,
     /// The type-name rule, `[A-Z][A-Za-z0-9]*`. Types, methods and errors.
     Type,
@@ -87,7 +87,7 @@ impl Grammar {
     /// The rule as it reads in the Varlink specification.
     fn pattern(self) -> &'static str {
         match self {
-            Self::Field => "[A-Za-z][A-Za-z0-9_]*",
+            Self::Field => "[A-Za-z](_?[A-Za-z0-9])*",
             Self::Type => "[A-Z][A-Za-z0-9]*",
         }
     }

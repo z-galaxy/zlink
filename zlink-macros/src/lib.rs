@@ -555,8 +555,8 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///   argument names (with `PascalCase` where a name mirrors a documented option name), so a proxy
 ///   for one typically wants `rename_all_arguments = "camelCase"`. Per-argument `#[zlink(rename =
 ///   "...")]` takes precedence over `rename_all_arguments`. Every produced name must still fit the
-///   Varlink field-name grammar (`[A-Za-z][A-Za-z0-9_]*`), so a convention that steps outside it --
-///   `kebab-case` on a multi-word argument, say -- is rejected at compile time:
+///   Varlink field-name grammar (`[A-Za-z](_?[A-Za-z0-9])*`), so a convention that steps outside it
+///   -- `kebab-case` on a multi-word argument, say -- is rejected at compile time:
 ///
 /// ```rust,compile_fail
 /// # use zlink::proxy;

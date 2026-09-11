@@ -50,11 +50,19 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
     core::str::from_utf8(bytes).unwrap()
 }
 
-/// Parse a field name: starts with letter, continues with alphanumeric and underscores.
+/// Parse a field name: starts with a letter, continues with alphanumerics, each optionally
+/// preceded by a single underscore (no leading, trailing or doubled underscores).
 pub(crate) fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
     (
         one_of(|c: u8| c.is_ascii_alphabetic()),
-        take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'_'),
+        repeat::<_, _, (), _, _>(
+            0..,
+            (
+                opt(one_of(|c: u8| c == b'_')),
+                one_of(|c: u8| c.is_ascii_alphanumeric()),
+            )
+                .void(),
+        ),
     )
         .take()
         .map(bytes_to_str)
