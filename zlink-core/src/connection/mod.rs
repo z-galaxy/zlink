@@ -38,9 +38,35 @@
 //! to message sending and receiving via methods like [`Connection::send_call`],
 //! [`Connection::receive_reply`], and [`Connection::chain_call`] for pipelining.
 //!
+//! # File descriptor passing
+//!
+//! On transports that support it (Unix domain sockets, `std` only), zlink can pass file
+//! descriptors alongside messages. FD passing is not part of the Varlink protocol itself; it is
+//! an `AF_UNIX` transport feature (`SCM_RIGHTS` ancillary data). A transport advertises the
+//! capability via [`Socket::CAN_TRANSFER_FDS`] (`true` for Unix domain sockets). It is unavailable
+//! under `no_std`.
+//!
+//! Because the Varlink spec does not define FD passing, there is no formal standard for it.
+//! systemd's `sd-varlink` has implemented it over `AF_UNIX` since 2023 and ships it across many
+//! system services, making its design the de-facto convention for "FD passing over Varlink".
+//! zlink deliberately follows that convention so the two interoperate (verified against a live
+//! systemd service). Its rules:
+//!
+//! * **First-byte association.** FDs belong to the message on whose **first byte** they arrive.
+//!   zlink attaches a message's FDs to the write carrying its first byte, and on receive hands each
+//!   batch of received FDs to the next message in arrival order.
+//! * **At most 253 FDs per message** — the Linux `SCM_RIGHTS` kernel limit, which `sd-varlink` also
+//!   enforces (along with a cap of 16384 incoming FDs per connection).
+//! * **`SO_PASSRIGHTS` opt-in (Linux >= 6.16).** Recent `sd-varlink` only *receives* FDs if it has
+//!   opted in; a peer that has not may have FDs it is sent silently dropped by the kernel.
+//! * **No in-band negotiation.** Varlink has no handshake for FD passing; both peers must opt in
+//!   out of band (zlink by using an FD-capable [`Socket`]).
+//!
 //! [`proxy`]: macro@crate::proxy
 //! [`service`]: macro@crate::service
 //! [`Service`]: crate::service::Service
+//! [`Socket`]: socket::Socket
+//! [`Socket::CAN_TRANSFER_FDS`]: socket::Socket::CAN_TRANSFER_FDS
 
 #[cfg(feature = "std")]
 mod credentials;

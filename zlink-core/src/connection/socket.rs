@@ -27,7 +27,15 @@ pub trait Socket: core::fmt::Debug {
 pub trait ReadHalf: core::fmt::Debug {
     /// Read from a socket.
     ///
-    /// On completion, the number of bytes read and any file descriptors received are returned.
+    /// On completion, the number of bytes read and any file descriptors received are returned
+    /// (see [`ReadResult`]).
+    ///
+    /// Any file descriptors returned here are taken to belong to the message whose first byte
+    /// arrives in this read. The [`connection`](crate::connection#file-descriptor-passing) module
+    /// docs describe the full FD-to-message association contract; in short, implementers must
+    /// return the FDs received by a given `recvmsg` together with the bytes received by that same
+    /// `recvmsg`, so the positional association upheld by [`ReadConnection`](super::ReadConnection)
+    /// is correct.
     ///
     /// Notes for implementers:
     ///
@@ -44,7 +52,12 @@ pub trait ReadHalf: core::fmt::Debug {
 pub trait WriteHalf: core::fmt::Debug {
     /// Write to the socket.
     ///
-    /// The `fds` parameter contains file descriptors to send along with the data (std only).
+    /// The `fds` parameter contains file descriptors to send along with the data (std only). The
+    /// implementation must attach the given `fds` to the `sendmsg` that carries the first byte of
+    /// `buf` (e.g. via `SCM_RIGHTS`), so that the receiver can associate them with the message
+    /// starting at that byte. [`WriteConnection`](super::WriteConnection) only ever calls this with
+    /// `fds` for a `buf` that begins at a message boundary; see the
+    /// [`connection`](crate::connection#file-descriptor-passing) module docs for the full contract.
     ///
     /// The returned future has the same requirements as that of [`ReadHalf::read`].
     fn write(
