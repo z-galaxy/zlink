@@ -14,6 +14,7 @@ mod utils;
 
 mod naming;
 
+#[cfg(feature = "introspection")]
 mod attr_mode;
 
 #[cfg(feature = "introspection")]
