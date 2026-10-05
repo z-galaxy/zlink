@@ -1,17 +1,21 @@
+//! What pipelining saves a client: making calls one at a time, each sent once the reply to the one
+//! before it is in, and all at once, ahead of their replies, to a server that sleeps before it
+//! replies to a call, or to a batch of calls received together. The server is a task on another
+//! thread of a multi-threaded runtime, and its sleep is on a timer, which only the clock can
+//! measure. What receiving calls costs a server, which waits on no timer or other thread, is in
+//! `server_receiving.rs`.
+
+use common::{BiPipeSocket, NUM_CALLS, TestMethod};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures_util::{StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
-use std::{hint::black_box, time::Duration};
+use std::time::Duration;
 use tokio::{runtime::Runtime, time::sleep};
-use zlink_core::{
-    Call, Reply,
-    connection::{
-        Connection,
-        socket::{ReadHalf, Socket, WriteHalf},
-    },
-};
+use zlink_core::{Call, Reply, connection::Connection};
 
-criterion_group!(benches, client_sending, server_receiving);
+mod common;
+
+criterion_group!(benches, client_sending);
 criterion_main!(benches);
 
 // Client-side benchmarks: Sequential vs Pipelined sending
@@ -175,276 +179,8 @@ fn client_sending(c: &mut Criterion) {
     group.finish();
 }
 
-// Server-side benchmarks: Sequential vs Batched receiving
-fn server_receiving(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let mut group = c.benchmark_group("server_receiving");
-    group.measurement_time(Duration::from_secs(10));
-    group.throughput(Throughput::Elements(NUM_CALLS as u64));
-
-    group.bench_function("sequential", |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                // Setup: Create sockets and spawn client.
-                let (client_socket, server_socket) = BiPipeSocket::new_pair();
-
-                // Spawn client that sends calls one by one.
-                tokio::spawn(async move {
-                    let mut client_conn = Connection::new(client_socket);
-                    for i in 0..NUM_CALLS {
-                        let call = Call::new(TestMethod::Compute {
-                            values: vec![i as u32; 10],
-                        });
-                        #[cfg(feature = "std")]
-                        client_conn.send_call(&call, vec![]).await.unwrap();
-                        #[cfg(not(feature = "std"))]
-                        client_conn.send_call(&call).await.unwrap();
-
-                        // Wait for reply before sending next (sequential pattern).
-                        #[derive(Debug, Deserialize)]
-                        struct DummyError;
-                        #[cfg(feature = "std")]
-                        let (_reply, _fds): (
-                            zlink_core::reply::Result<ComputeReply, DummyError>,
-                            _,
-                        ) = client_conn.receive_reply().await.unwrap();
-                        #[cfg(not(feature = "std"))]
-                        let _reply: zlink_core::reply::Result<
-                            ComputeReply,
-                            DummyError,
-                        > = client_conn.receive_reply().await.unwrap();
-                    }
-                });
-
-                Connection::new(server_socket)
-            },
-            |mut server_conn| async move {
-                // Benchmark: Server receives calls one at a time.
-                for _ in 0..NUM_CALLS {
-                    // Measure the time to receive and deserialize each call.
-                    #[cfg(feature = "std")]
-                    let (call, _fds): (Call<TestMethod>, _) =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    #[cfg(not(feature = "std"))]
-                    let call: Call<TestMethod> =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    black_box(call);
-
-                    // Send reply so client can continue.
-                    let reply = Reply::new(Some(ComputeReply { result: 42 }));
-                    #[cfg(feature = "std")]
-                    server_conn
-                        .write_mut()
-                        .send_reply(&reply, vec![])
-                        .await
-                        .unwrap();
-                    #[cfg(not(feature = "std"))]
-                    server_conn.write_mut().send_reply(&reply).await.unwrap();
-                }
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("batched", |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                // Setup: Create sockets and spawn client.
-                let (client_socket, server_socket) = BiPipeSocket::new_pair();
-
-                // Spawn client that pipelines all calls at once.
-                tokio::spawn(async move {
-                    let mut client_conn = Connection::new(client_socket);
-
-                    // Send all calls in a batch using pipelining.
-                    for i in 0..NUM_CALLS {
-                        let call = Call::new(TestMethod::Compute {
-                            values: vec![i as u32; 10],
-                        });
-                        #[cfg(feature = "std")]
-                        client_conn.write_mut().enqueue_call(&call, vec![]).unwrap();
-                        #[cfg(not(feature = "std"))]
-                        client_conn.write_mut().enqueue_call(&call).unwrap();
-                    }
-                    // Flush all at once.
-                    client_conn.write_mut().flush().await.unwrap();
-
-                    // Collect replies.
-                    for _ in 0..NUM_CALLS {
-                        #[derive(Debug, Deserialize)]
-                        struct DummyError;
-                        #[cfg(feature = "std")]
-                        let (_reply, _fds): (
-                            zlink_core::reply::Result<ComputeReply, DummyError>,
-                            _,
-                        ) = client_conn.receive_reply().await.unwrap();
-                        #[cfg(not(feature = "std"))]
-                        let _reply: zlink_core::reply::Result<
-                            ComputeReply,
-                            DummyError,
-                        > = client_conn.receive_reply().await.unwrap();
-                    }
-                });
-
-                Connection::new(server_socket)
-            },
-            |mut server_conn| async move {
-                // Benchmark: Server receives all calls from the batch.
-                // This implicitly tests zero-byte detection as messages arrive together.
-                let mut calls = Vec::new();
-
-                // Receive all calls - they're already in the buffer.
-                for _ in 0..NUM_CALLS {
-                    #[cfg(feature = "std")]
-                    let (call, _fds): (Call<TestMethod>, _) =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    #[cfg(not(feature = "std"))]
-                    let call: Call<TestMethod> =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    calls.push(call);
-                }
-                black_box(&calls);
-
-                // Send replies.
-                for _ in 0..NUM_CALLS {
-                    let reply = Reply::new(Some(ComputeReply { result: 42 }));
-                    #[cfg(feature = "std")]
-                    server_conn
-                        .write_mut()
-                        .send_reply(&reply, vec![])
-                        .await
-                        .unwrap();
-                    #[cfg(not(feature = "std"))]
-                    server_conn.write_mut().send_reply(&reply).await.unwrap();
-                }
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-
-    group.finish();
-}
-
-const NUM_CALLS: usize = 20;
-
-// Method definitions for benchmarking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method", content = "parameters")]
-enum TestMethod {
-    Ping { id: u32 },
-    Compute { values: Vec<u32> },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PingReply {
     id: u32,
     timestamp: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ComputeReply {
-    result: u64,
-}
-
-// Bidirectional mock socket for in-memory communication.
-#[derive(Debug)]
-struct BiPipeSocket {
-    client_to_server: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-    server_to_client: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
-}
-
-impl BiPipeSocket {
-    fn new_pair() -> (Self, Self) {
-        let (c2s_tx, c2s_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (s2c_tx, s2c_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let client = BiPipeSocket {
-            client_to_server: c2s_tx,
-            server_to_client: s2c_rx,
-        };
-
-        let server = BiPipeSocket {
-            client_to_server: s2c_tx,
-            server_to_client: c2s_rx,
-        };
-
-        (client, server)
-    }
-}
-
-impl Socket for BiPipeSocket {
-    type ReadHalf = BiPipeReadHalf;
-    type WriteHalf = BiPipeWriteHalf;
-
-    fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
-        (
-            BiPipeReadHalf {
-                receiver: self.server_to_client,
-                buffer: Vec::new(),
-                pos: 0,
-            },
-            BiPipeWriteHalf {
-                sender: self.client_to_server,
-            },
-        )
-    }
-}
-
-#[derive(Debug)]
-struct BiPipeReadHalf {
-    receiver: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
-    buffer: Vec<u8>,
-    pos: usize,
-}
-
-impl ReadHalf for BiPipeReadHalf {
-    async fn read(
-        &mut self,
-        buf: &mut [u8],
-    ) -> zlink_core::Result<zlink_core::connection::socket::ReadResult> {
-        // If we have buffered data, return it.
-        if self.pos < self.buffer.len() {
-            let to_read = (self.buffer.len() - self.pos).min(buf.len());
-            buf[..to_read].copy_from_slice(&self.buffer[self.pos..self.pos + to_read]);
-            self.pos += to_read;
-            return Ok(zlink_core::connection::socket::ReadResult::new(to_read));
-        }
-
-        // Otherwise, wait for new data.
-        match self.receiver.recv().await {
-            Some(data) => {
-                self.buffer = data;
-                self.pos = 0;
-                let to_read = self.buffer.len().min(buf.len());
-                buf[..to_read].copy_from_slice(&self.buffer[..to_read]);
-                self.pos = to_read;
-                Ok(zlink_core::connection::socket::ReadResult::new(to_read))
-            }
-            None => {
-                // Connection closed.
-                Ok(zlink_core::connection::socket::ReadResult::new(0))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-struct BiPipeWriteHalf {
-    sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-}
-
-impl WriteHalf for BiPipeWriteHalf {
-    async fn write(
-        &mut self,
-        buf: &[u8],
-        #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
-        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
-            &zlink_core::connection::PassedCredentials,
-        >,
-    ) -> zlink_core::Result<()> {
-        self.sender
-            .send(buf.to_vec())
-            .map_err(|_| zlink_core::Error::UnexpectedEof)?;
-        Ok(())
-    }
 }

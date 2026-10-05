@@ -72,6 +72,10 @@ tempfile = "3.14"
 name = "benchmarks"
 harness = false
 
+[[bench]]
+name = "server_receiving"
+harness = false
+
 [package.metadata.docs.rs]
 all-features = true
 targets = [
