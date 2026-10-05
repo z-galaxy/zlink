@@ -68,6 +68,8 @@ tokio = { version = "1.44.0", features = [
 criterion = { version = "4.0.4", package = "codspeed-criterion-compat", features = ["async_tokio"] }
 tempfile = "3.14"
 
+# Each bench target is measured on CodSpeed by one of the two jobs of
+# `.github/workflows/bench.yml`, which lists it: by CPU simulation, or by the clock.
 [[bench]]
 name = "benchmarks"
 harness = false

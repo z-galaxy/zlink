@@ -11,8 +11,28 @@ on:
 
 jobs:
   benchmarks:
-    name: Run benchmarks
-    runs-on: codspeed-macro
+    name: Run benchmarks (${{ matrix.mode }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        # Every bench target of the workspace goes in exactly one of the two lists: CodSpeed puts
+        # the results of the two jobs together into one report, and takes each benchmark's from
+        # one.
+        include:
+          # What runs on one thread and waits on no timer or socket: measured by simulating the
+          # CPU it runs on, which counts the same instructions and cache misses on every run, on
+          # any runner, so a GitHub-hosted one does.
+          - mode: simulation
+            runner: ubuntu-latest
+            benches: --bench server_receiving
+          # What waits on timers, sockets or other threads: in the kernel, which the simulation
+          # leaves out, so measured by the clock. On a bare-metal CodSpeed macro runner, given to
+          # this job alone, so that the numbers move with the code rather than with the load of
+          # whoever shares a hosted runner's host. Keep the job on this one label: two runs are only
+          # comparable when measured on the same machine.
+          - mode: walltime
+            runner: codspeed-macro
+            benches: --bench benchmarks
     steps:
       - uses: actions/checkout@v5
       - name: Setup rust toolchain, cache and cargo-codspeed binary
@@ -20,12 +40,16 @@ jobs:
         with:
           channel: stable
           cache-target: release
+          # setup-rust's cache key leaves the architecture out: without this, the arm64 job would
+          # find the cache the x86_64 one saved under the same key, and never save its own.
+          cache-extra-identifier: ${{ runner.arch }}
           bins: cargo-codspeed
+      # Each job builds its own targets only.
       - name: Build the benchmark target(s)
-        run: cargo codspeed build -m walltime
+        run: cargo codspeed build -m ${{ matrix.mode }} ${{ matrix.benches }}
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          mode: walltime
-          run: cargo codspeed run
+          mode: ${{ matrix.mode }}
+          run: cargo codspeed run -m ${{ matrix.mode }} ${{ matrix.benches }}
           token: ${{ secrets.CODSPEED_TOKEN }} # optional for public repos
