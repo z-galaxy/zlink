@@ -363,6 +363,412 @@ mod std {
         }
     }
 
+    /// Regression test: untagged outer enum wrapping adjacently-tagged inner enum,
+    /// where the matching variant has ALL-OPTIONAL fields and non-empty parameters.
+    ///
+    /// This reproduces the `machine_proxy` e2e failure:
+    /// `{"method":"io.systemd.Machine.List","parameters":{"name":".host"}}`
+    /// was failing with deserialization error due to a bug in EmptyParamsDeserializer.
+    #[test]
+    fn untagged_outer_all_optional_struct_variant_with_params() {
+        // Outer untagged enum (what `service` macro generates)
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(untagged)]
+        enum OuterEnum {
+            VarlinkService(VarlinkServiceMethods),
+            UserMethods(UserMethods),
+        }
+
+        // First inner: adjacently-tagged with some methods
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(tag = "method", content = "parameters")]
+        enum VarlinkServiceMethods {
+            #[serde(rename = "org.varlink.service.GetInfo")]
+            GetInfo,
+            #[serde(rename = "org.varlink.service.GetInterfaceDescription")]
+            GetInterfaceDescription { interface: String },
+        }
+
+        // Second inner: multiple struct variants, several with ALL-OPTIONAL fields
+        // (mirrors mock_machined_service structure)
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(tag = "method", content = "parameters")]
+        enum UserMethods {
+            #[serde(rename = "X.Register")]
+            Register { name: String, class: String },
+            #[serde(rename = "X.Unregister")]
+            Unregister {
+                name: Option<String>,
+                pid: Option<i64>,
+            },
+            #[serde(rename = "X.Terminate")]
+            Terminate {
+                name: Option<String>,
+                pid: Option<i64>,
+            },
+            #[serde(rename = "X.Kill")]
+            Kill {
+                name: Option<String>,
+                pid: Option<i64>,
+                whom: Option<String>,
+                signal: Option<i64>,
+            },
+            #[serde(rename = "X.List")]
+            List {
+                name: Option<String>,
+                pid: Option<i64>,
+            },
+            #[serde(rename = "X.Open")]
+            Open {
+                name: Option<String>,
+                pid: Option<i64>,
+                mode: String,
+                user: Option<String>,
+            },
+        }
+
+        // Case 1: unit variant with empty params (serde#2045 case — must still pass)
+        let json = r#"{"method":"org.varlink.service.GetInfo","parameters":{}}"#;
+        let result: Result<Call<OuterEnum>, _> = serde_json::from_str(json);
+        let call: Call<OuterEnum> =
+            result.unwrap_or_else(|e| panic!("unit+empty params failed: {e}"));
+        assert!(
+            matches!(
+                call.method(),
+                OuterEnum::VarlinkService(VarlinkServiceMethods::GetInfo)
+            ),
+            "expected GetInfo, got {:?}",
+            call.method()
+        );
+
+        // Case 2: all-optional struct variant with non-empty params — THIS IS THE BUG
+        let json = r#"{"method":"X.List","parameters":{"name":".host"}}"#;
+        let call: Call<OuterEnum> = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("all-opt struct variant with params failed: {e}"));
+        assert!(
+            matches!(
+                call.method(),
+                OuterEnum::UserMethods(UserMethods::List {
+                    name: Some(_),
+                    pid: None
+                })
+            ),
+            "expected List{{name: Some(\".host\")}}, got {:?}",
+            call.method()
+        );
+        if let OuterEnum::UserMethods(UserMethods::List { name: Some(n), .. }) = call.method() {
+            assert_eq!(n, ".host", "name field should be .host");
+        }
+
+        // Case 3: all-optional struct variant with EMPTY params (all None)
+        let json = r#"{"method":"X.List","parameters":{}}"#;
+        let call: Call<OuterEnum> = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("all-opt struct variant with empty params failed: {e}"));
+        assert!(
+            matches!(
+                call.method(),
+                OuterEnum::UserMethods(UserMethods::List {
+                    name: None,
+                    pid: None,
+                })
+            ),
+            "expected List{{name: None, pid: None}}, got {:?}",
+            call.method()
+        );
+
+        // Case 4: struct variant with required field still works
+        let json = r#"{"method":"X.Register","parameters":{"name":"vm1","class":"container"}}"#;
+        let call: Call<OuterEnum> = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("required-field struct variant failed: {e}"));
+        assert!(
+            matches!(
+                call.method(),
+                OuterEnum::UserMethods(UserMethods::Register { name, class })
+                if name == "vm1" && class == "container"
+            ),
+            "expected Register{{name:\"vm1\"}}, got {:?}",
+            call.method()
+        );
+
+        // Case 5 (regression): empty params on a struct variant, followed by `more:true`.
+        // Attempt 1 aborts when the empty map is forwarded as a unit to the struct visitor;
+        // the retry must still recover `more` from the outer map and leave the stream clean.
+        let json = r#"{"method":"X.List","parameters":{},"more":true}"#;
+        let call: Call<OuterEnum> = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("empty params then `more` flag failed: {e}"));
+        assert!(
+            matches!(
+                call.method(),
+                OuterEnum::UserMethods(UserMethods::List {
+                    name: None,
+                    pid: None,
+                })
+            ),
+            "expected List{{None,None}}, got {:?}",
+            call.method()
+        );
+        assert!(
+            call.more(),
+            "`more` flag after empty params must be preserved"
+        );
+    }
+
+    /// Direct (non-untagged) adjacently-tagged enum: empty params on a struct variant followed
+    /// by `more:true`. Unlike the untagged path (which buffers the whole map first), here the
+    /// `FilterMap` streams the outer map, so this guards against the empty-params retry losing a
+    /// trailing flag or corrupting the stream.
+    #[test]
+    fn direct_struct_variant_empty_params_then_flag() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(tag = "method", content = "parameters")]
+        enum Method {
+            #[serde(rename = "Ping")]
+            Ping,
+            #[serde(rename = "List")]
+            List {
+                name: Option<String>,
+                pid: Option<i64>,
+            },
+        }
+
+        // No-arg variant, empty params, trailing flag.
+        let call: Call<Method> =
+            serde_json::from_str(r#"{"method":"Ping","parameters":{},"more":true}"#)
+                .expect("Ping with empty params and flag");
+        assert!(matches!(call.method(), Method::Ping));
+        assert!(call.more());
+
+        // All-optional struct variant, empty params, trailing flag.
+        let call: Call<Method> =
+            serde_json::from_str(r#"{"method":"List","parameters":{},"oneway":true}"#)
+                .expect("List with empty params and flag");
+        assert!(matches!(
+            call.method(),
+            Method::List {
+                name: None,
+                pid: None
+            }
+        ));
+        assert!(call.oneway());
+    }
+
+    /// A method enum exercising the three shapes that interact with the empty-`parameters`
+    /// workaround (serde#2045): a no-argument unit variant, an all-optional struct variant,
+    /// and a struct variant with a required field.
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(tag = "method", content = "parameters")]
+    enum WireMethod {
+        #[serde(rename = "org.example.Ping")]
+        Ping,
+        #[serde(rename = "org.example.List")]
+        List {
+            name: Option<String>,
+            limit: Option<u32>,
+        },
+        #[serde(rename = "org.example.Get")]
+        Get { id: u32 },
+    }
+
+    /// What a parsed [`WireMethod`] call is expected to look like, kept simple so the test
+    /// table below reads as plain data.
+    #[derive(Debug, PartialEq)]
+    struct Expected {
+        method: WireMethod,
+        oneway: bool,
+        more: bool,
+        upgrade: bool,
+    }
+
+    impl Expected {
+        const fn new(method: WireMethod) -> Self {
+            Self {
+                method,
+                oneway: false,
+                more: false,
+                upgrade: false,
+            }
+        }
+        const fn oneway(mut self) -> Self {
+            self.oneway = true;
+            self
+        }
+        const fn more(mut self) -> Self {
+            self.more = true;
+            self
+        }
+        const fn upgrade(mut self) -> Self {
+            self.upgrade = true;
+            self
+        }
+    }
+
+    /// Comprehensive table of concrete incoming JSON wire strings that MUST deserialize, paired
+    /// with the exact `Call` they should produce. This is the canonical specification of how zlink
+    /// accepts method calls — especially the empty/absent/null `parameters` matrix that motivated
+    /// the serde#2045 workaround.
+    #[test]
+    fn parse_incoming_method_calls() {
+        use WireMethod::*;
+
+        let list_none = || List {
+            name: None,
+            limit: None,
+        };
+
+        let cases: &[(&str, Expected)] = &[
+            // --- No-argument unit variant: parameters absent / empty / null all map to the unit.
+            // ---
+            (r#"{"method":"org.example.Ping"}"#, Expected::new(Ping)),
+            (
+                r#"{"method":"org.example.Ping","parameters":{}}"#,
+                Expected::new(Ping),
+            ),
+            (
+                r#"{"method":"org.example.Ping","parameters":null}"#,
+                Expected::new(Ping),
+            ),
+            // Unit variant with trailing flags, including empty params before the flag.
+            (
+                r#"{"method":"org.example.Ping","oneway":true}"#,
+                Expected::new(Ping).oneway(),
+            ),
+            (
+                r#"{"method":"org.example.Ping","parameters":{},"more":true}"#,
+                Expected::new(Ping).more(),
+            ),
+            (
+                r#"{"method":"org.example.Ping","parameters":{},"upgrade":true}"#,
+                Expected::new(Ping).upgrade(),
+            ),
+            // Flag before an empty-params unit variant (key order independence).
+            (
+                r#"{"oneway":true,"method":"org.example.Ping","parameters":{}}"#,
+                Expected::new(Ping).oneway(),
+            ),
+            // --- All-optional struct variant: empty/absent/null => all fields None. ---
+            (
+                r#"{"method":"org.example.List","parameters":{}}"#,
+                Expected::new(list_none()),
+            ),
+            (
+                r#"{"method":"org.example.List","parameters":null}"#,
+                Expected::new(list_none()),
+            ),
+            (
+                r#"{"method":"org.example.List"}"#,
+                Expected::new(list_none()),
+            ),
+            // Absent parameters on a struct variant, followed by a flag (retry path with no
+            // mid-stream drain; the flag is captured during Attempt 1's full map walk).
+            (
+                r#"{"method":"org.example.List","oneway":true}"#,
+                Expected::new(list_none()).oneway(),
+            ),
+            // All-optional struct variant with actual values.
+            (
+                r#"{"method":"org.example.List","parameters":{"name":".host"}}"#,
+                Expected::new(List {
+                    name: Some(".host".into()),
+                    limit: None,
+                }),
+            ),
+            (
+                r#"{"method":"org.example.List","parameters":{"name":"vm1","limit":10}}"#,
+                Expected::new(List {
+                    name: Some("vm1".into()),
+                    limit: Some(10),
+                }),
+            ),
+            // Empty params on a struct variant, followed by each flag (the stream-drain
+            // regression).
+            (
+                r#"{"method":"org.example.List","parameters":{},"oneway":true}"#,
+                Expected::new(list_none()).oneway(),
+            ),
+            (
+                r#"{"method":"org.example.List","parameters":{},"more":true}"#,
+                Expected::new(list_none()).more(),
+            ),
+            (
+                r#"{"method":"org.example.List","parameters":{},"upgrade":true}"#,
+                Expected::new(list_none()).upgrade(),
+            ),
+            // Populated struct variant with all flags, in a shuffled key order.
+            (
+                r#"{"upgrade":true,"parameters":{"name":"x","limit":3},"method":"org.example.List","oneway":true}"#,
+                Expected::new(List {
+                    name: Some("x".into()),
+                    limit: Some(3),
+                })
+                .oneway()
+                .upgrade(),
+            ),
+            // --- Struct variant with a required field: normal path, unaffected by the workaround.
+            // ---
+            (
+                r#"{"method":"org.example.Get","parameters":{"id":42}}"#,
+                Expected::new(Get { id: 42 }),
+            ),
+            (
+                r#"{"method":"org.example.Get","parameters":{"id":7},"more":true}"#,
+                Expected::new(Get { id: 7 }).more(),
+            ),
+            // Unknown extra top-level fields are ignored.
+            (
+                r#"{"method":"org.example.Ping","extra":"ignored","trailing":[1,2,3]}"#,
+                Expected::new(Ping),
+            ),
+        ];
+
+        for (json, expected) in cases {
+            let call: Call<WireMethod> = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("failed to parse {json}: {e}"));
+            let actual = Expected {
+                method: match call.method() {
+                    Ping => Ping,
+                    List { name, limit } => List {
+                        name: name.clone(),
+                        limit: *limit,
+                    },
+                    Get { id } => Get { id: *id },
+                },
+                oneway: call.oneway(),
+                more: call.more(),
+                upgrade: call.upgrade(),
+            };
+            assert_eq!(&actual, expected, "mismatch parsing {json}");
+        }
+    }
+
+    /// Wire strings that MUST be rejected: a missing required field, an unknown method, a
+    /// non-empty `parameters` on a no-argument method, and malformed flag values. These guard
+    /// against the empty-params workaround becoming overly permissive or masking real errors.
+    #[test]
+    fn reject_invalid_method_calls() {
+        let cases: &[&str] = &[
+            // Missing required field `id`.
+            r#"{"method":"org.example.Get","parameters":{}}"#,
+            r#"{"method":"org.example.Get"}"#,
+            // Unknown method name.
+            r#"{"method":"org.example.Nope","parameters":{}}"#,
+            // No-argument method given real parameters.
+            r#"{"method":"org.example.Ping","parameters":{"unexpected":1}}"#,
+            // Malformed flag values must not be silently swallowed by the empty-params retry.
+            r#"{"method":"org.example.List","more":"not-a-bool"}"#,
+            r#"{"method":"org.example.List","parameters":null,"more":123}"#,
+            r#"{"method":"org.example.Ping","oneway":123}"#,
+        ];
+
+        for json in cases {
+            let result: Result<Call<WireMethod>, _> = serde_json::from_str(json);
+            assert!(
+                result.is_err(),
+                "expected {json} to be rejected, but it parsed as {:?}",
+                result.unwrap().method()
+            );
+        }
+    }
+
     #[test]
     fn serde_flatten_in_variant() {
         // Test serialization with multiple layers of flattened parameters.
