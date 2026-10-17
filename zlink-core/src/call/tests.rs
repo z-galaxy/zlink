@@ -1,6 +1,7 @@
 //! Unit tests for `Call` serialization and deserialization.
 
 use super::Call;
+use crate::OptionalParams;
 use serde::{Deserialize, Serialize};
 
 mod std {
@@ -220,6 +221,84 @@ mod std {
         assert!(call.oneway());
         assert!(!call.more());
         assert!(!call.upgrade());
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct AllOptional<'a> {
+        name: Option<&'a str>,
+        value: Option<i32>,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Required<'a> {
+        name: &'a str,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct NoParams {}
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    #[serde(tag = "method", content = "parameters")]
+    enum OptionalMethods<'a> {
+        #[serde(rename = "org.example.test.NoParams")]
+        NoParams(OptionalParams<NoParams>),
+        #[serde(rename = "org.example.test.AllOptional")]
+        AllOptional(#[serde(borrow)] OptionalParams<AllOptional<'a>>),
+        #[serde(rename = "org.example.test.Required")]
+        Required(#[serde(borrow)] OptionalParams<Required<'a>>),
+    }
+
+    fn all_optional(name: Option<&str>, value: Option<i32>) -> OptionalMethods<'_> {
+        OptionalMethods::AllOptional(OptionalParams(AllOptional { name, value }))
+    }
+
+    #[test]
+    fn deserialize_call_without_parameters() {
+        // `parameters` is optional, e.g. `varlinkctl` leaves it out when it has nothing to pass.
+        let json = r#"{"method":"org.example.test.AllOptional"}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(call.method(), &all_optional(None, None));
+
+        let json = r#"{"oneway":true,"method":"org.example.test.AllOptional","more":true}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(call.method(), &all_optional(None, None));
+        assert!(call.oneway());
+        assert!(call.more());
+
+        let json = r#"{"method":"org.example.test.NoParams"}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            call.method(),
+            &OptionalMethods::NoParams(OptionalParams(NoParams {}))
+        );
+    }
+
+    #[test]
+    fn deserialize_call_with_empty_parameters() {
+        let json = r#"{"method":"org.example.test.AllOptional","parameters":{}}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(call.method(), &all_optional(None, None));
+
+        let json = r#"{"method":"org.example.test.NoParams","parameters":{}}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            call.method(),
+            &OptionalMethods::NoParams(OptionalParams(NoParams {}))
+        );
+    }
+
+    #[test]
+    fn deserialize_call_with_some_parameters() {
+        let json = r#"{"method":"org.example.test.AllOptional","parameters":{"value":7}}"#;
+        let call: Call<OptionalMethods<'_>> = serde_json::from_str(json).unwrap();
+        assert_eq!(call.method(), &all_optional(None, Some(7)));
+    }
+
+    #[test]
+    fn deserialize_call_without_required_parameters() {
+        let json = r#"{"method":"org.example.test.Required"}"#;
+        let err = serde_json::from_str::<Call<OptionalMethods<'_>>>(json).unwrap_err();
+        assert!(err.to_string().contains("name"), "{err}");
     }
 
     #[test]

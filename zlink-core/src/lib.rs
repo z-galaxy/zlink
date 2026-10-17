@@ -47,6 +47,8 @@ mod call;
 #[cfg(feature = "server")]
 pub mod notified;
 pub use call::Call;
+#[doc(hidden)]
+pub use call::OptionalParams;
 pub mod reply;
 pub use reply::Reply;
 #[cfg(feature = "idl")]

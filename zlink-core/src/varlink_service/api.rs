@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "introspection")]
 use crate::introspect;
 
-use crate::ReplyError;
+use crate::{OptionalParams, ReplyError};
 
 #[cfg(feature = "idl")]
 use super::InterfaceDescription;
 use super::{Info, OwnedInfo};
 
 /// `org.varlink.service` interface methods.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(tag = "method", content = "parameters")]
 pub enum Method<'a> {
     /// Get information about the Varlink service.
@@ -23,6 +23,39 @@ pub enum Method<'a> {
         /// The interface to get the description for.
         interface: &'a str,
     },
+}
+
+// Mirror of `Method` for deserialization only. The `parameters` can be omitted altogether or be an
+// empty object for methods that take none, which a unit variant doesn't allow for both.
+#[derive(Deserialize)]
+#[serde(tag = "method", content = "parameters")]
+enum MethodDe<'a> {
+    #[serde(rename = "org.varlink.service.GetInfo")]
+    GetInfo(OptionalParams<NoParams>),
+    #[serde(rename = "org.varlink.service.GetInterfaceDescription")]
+    GetInterfaceDescription(#[serde(borrow)] OptionalParams<InterfaceParams<'a>>),
+}
+
+#[derive(Deserialize)]
+struct NoParams {}
+
+#[derive(Deserialize)]
+struct InterfaceParams<'a> {
+    interface: &'a str,
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for Method<'a> {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match MethodDe::deserialize(deserializer)? {
+            MethodDe::GetInfo(_) => Self::GetInfo,
+            MethodDe::GetInterfaceDescription(OptionalParams(InterfaceParams { interface })) => {
+                Self::GetInterfaceDescription { interface }
+            }
+        })
+    }
 }
 
 /// `org.varlink.service` interface replies.
