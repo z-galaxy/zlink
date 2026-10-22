@@ -296,6 +296,8 @@ fn generate_method_call_enum(
     user_methods_name: &Ident,
     crate_path: &TokenStream,
 ) -> Result<TokenStream, Error> {
+    let none_path = format!("{}::parameters::none", crate_path).replace(' ', "");
+    let mut params_structs = Vec::new();
     let variants: Vec<TokenStream> = methods_info
         .iter()
         .filter_map(|method| {
@@ -305,39 +307,51 @@ fn generate_method_call_enum(
             // Only include serialized params (exclude connection params).
             let serialized_params: Vec<_> = method.serialized_params().collect();
 
-            let fields = if serialized_params.is_empty() {
-                quote! {}
-            } else {
-                let field_defs: Vec<TokenStream> = serialized_params
-                    .iter()
-                    .map(|param| {
-                        let name = &param.name;
-                        let converted_ty = convert_type_lifetimes(&param.ty, "'__de");
+            // A client may leave `parameters` out, or send `{}`, when it has none to pass.
+            if serialized_params.is_empty() {
+                return Some(quote! {
+                    #[serde(rename = #full_path, deserialize_with = #none_path)]
+                    #variant_name
+                });
+            }
 
-                        // Rename whenever the wire name differs from the Rust name, so that
-                        // dispatch stays consistent with the introspection data.
-                        let wire_name = param.wire_name();
-                        let serde_attr = if *name != wire_name {
-                            quote! { #[serde(rename = #wire_name)] }
-                        } else {
-                            quote! {}
-                        };
+            let field_defs: Vec<TokenStream> = serialized_params
+                .iter()
+                .map(|param| {
+                    let name = &param.name;
+                    let converted_ty = convert_type_lifetimes(&param.ty, "'__de");
 
-                        quote! {
-                            #serde_attr
-                            #name: #converted_ty
-                        }
-                    })
-                    .collect();
+                    // Rename whenever the wire name differs from the Rust name, so that
+                    // dispatch stays consistent with the introspection data.
+                    let wire_name = param.wire_name();
+                    let serde_attr = if *name != wire_name {
+                        quote! { #[serde(rename = #wire_name)] }
+                    } else {
+                        quote! {}
+                    };
 
-                quote! {
-                    { #(#field_defs),* }
+                    quote! {
+                        #serde_attr
+                        #name: #converted_ty
+                    }
+                })
+                .collect();
+            let params_name = params_struct_name(user_methods_name, method);
+            params_structs.push(quote! {
+                #[allow(private_interfaces, non_camel_case_types)]
+                #[derive(::core::fmt::Debug, ::serde::Deserialize)]
+                pub struct #params_name<'__de> {
+                    #(#field_defs,)*
+                    #[serde(skip)]
+                    __phantom: ::core::marker::PhantomData<&'__de ()>,
                 }
-            };
+            });
 
             Some(quote! {
                 #[serde(rename = #full_path)]
-                #variant_name #fields
+                #variant_name(
+                    #[serde(borrow)] #crate_path::parameters::Parameters<#params_name<'__de>>
+                )
             })
         })
         .collect();
@@ -384,10 +398,17 @@ fn generate_method_call_enum(
     };
 
     Ok(quote! {
+        #(#params_structs)*
+
         #user_methods_enum
 
         #outer_enum
     })
+}
+
+/// The struct that a method's parameters deserialize into.
+fn params_struct_name(user_methods_name: &Ident, method: &MethodInfo) -> Ident {
+    format_ident!("{}{}Parameters", user_methods_name, method.varlink_name)
 }
 
 /// Build a mapping from return type string representation to variant index.
@@ -1267,7 +1288,12 @@ fn generate_handle_body(
             quote! { #user_methods_name::#enum_variant_name }
         } else {
             let param_names: Vec<_> = serialized_params.iter().map(|p| &p.name).collect();
-            quote! { #user_methods_name::#enum_variant_name { #(#param_names),* } }
+            let params_name = params_struct_name(user_methods_name, method);
+            quote! {
+                #user_methods_name::#enum_variant_name(#crate_path::parameters::Parameters(
+                    #params_name { #(#param_names,)* .. }
+                ))
+            }
         };
 
         // Build the method call expression.
