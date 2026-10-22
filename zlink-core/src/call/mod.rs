@@ -2,6 +2,8 @@
 // `method` field and `serde` requires `alloc` for both serialization and deserialization when
 // using the `flatten` attribute.
 mod de;
+#[doc(hidden)]
+pub mod parameters;
 mod ser;
 
 #[cfg(test)]

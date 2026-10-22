@@ -15,7 +15,10 @@ use super::{Info, OwnedInfo};
 #[serde(tag = "method", content = "parameters")]
 pub enum Method<'a> {
     /// Get information about the Varlink service.
-    #[serde(rename = "org.varlink.service.GetInfo")]
+    #[serde(
+        rename = "org.varlink.service.GetInfo",
+        deserialize_with = "crate::parameters::none"
+    )]
     GetInfo,
     /// Get the description of the specified interface.
     #[serde(rename = "org.varlink.service.GetInterfaceDescription")]
