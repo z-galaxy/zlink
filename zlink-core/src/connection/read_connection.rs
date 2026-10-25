@@ -11,6 +11,7 @@ use crate::{Result, varlink_service};
 use super::{
     BUFFER_SIZE, Call, MAX_BUFFER_SIZE,
     reply::{self, Reply},
+    rewind::Rewind,
     socket::ReadHalf,
 };
 #[cfg(feature = "std")]
@@ -235,19 +236,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             // rest of it.
             self.buffer.copy_within(self.msg_pos..self.read_pos, 0);
             #[cfg(feature = "std")]
-            {
-                // The file descriptors move along with the data they came with.
-                let msg_pos = self.msg_pos;
-                self.pending_fds.retain_mut(|pending| {
-                    let Some(pos) = pending.pos.checked_sub(msg_pos) else {
-                        // Left over from a message that was received already.
-                        return false;
-                    };
-                    pending.pos = pos;
-
-                    true
-                });
-            }
+            self.move_pending_fds_to_start();
             self.read_pos -= self.msg_pos;
             self.msg_pos = 0;
             self.msgs_end = 0;
@@ -311,9 +300,47 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         }
     }
 
+    // Moves the pending file descriptors along with the data they came with, as the data that was
+    // received is dropped from the start of the buffer.
+    #[cfg(feature = "std")]
+    fn move_pending_fds_to_start(&mut self) {
+        let msg_pos = self.msg_pos;
+        self.pending_fds.retain_mut(|pending| {
+            let Some(pos) = pending.pos.checked_sub(msg_pos) else {
+                // Left over from a message that was received already.
+                return false;
+            };
+            pending.pos = pos;
+
+            true
+        });
+    }
+
     /// The underlying read half of the socket.
     pub fn read_half(&self) -> &Read {
         &self.socket
+    }
+
+    /// Consume the connection into the underlying read half of the socket.
+    ///
+    /// The connection reads from the socket in chunks, so it may have read data that the peer
+    /// sent after the last message received through it. The returned read half returns that data
+    /// first, exactly as it was read, along with the file descriptors that came with it (`std`
+    /// only). It's where the data of another protocol starts when switching the socket over to
+    /// one, e.g. after a method call that asked for an upgrade (see [`Call::upgrade`]).
+    pub fn into_read_half(mut self) -> Rewind<Read> {
+        // Reuse the buffer for the data that wasn't received.
+        self.buffer.truncate(self.read_pos);
+        self.buffer.drain(..self.msg_pos);
+        #[cfg(feature = "std")]
+        self.move_pending_fds_to_start();
+
+        Rewind::new(
+            self.socket,
+            self.buffer,
+            #[cfg(feature = "std")]
+            self.pending_fds,
+        )
     }
 
     /// The credentials passed through over the socket with the latest message (if any).
@@ -329,15 +356,15 @@ impl<Read: ReadHalf> ReadConnection<Read> {
 /// File descriptors received along with data in the buffer.
 #[cfg(feature = "std")]
 #[derive(Debug)]
-struct PendingFds {
+pub(super) struct PendingFds {
     /// Buffer position of a byte that came with the file descriptors.
     ///
     /// The file descriptors belong to the message this byte is part of. That's only known once the
     /// message is read, as what follows a message isn't necessarily another message, e.g. after a
     /// protocol upgrade.
-    pos: usize,
+    pub(super) pos: usize,
     /// The file descriptors.
-    fds: Vec<OwnedFd>,
+    pub(super) fds: Vec<OwnedFd>,
 }
 
 /// Take the file descriptors received for the message spanning `msg` in the buffer, terminator

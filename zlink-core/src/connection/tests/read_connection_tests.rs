@@ -652,6 +652,74 @@ async fn empty_message() {
     assert_eq!(call.method, TestMethod::Test { value: 1 });
 }
 
+#[tokio::test]
+async fn into_read_half_returns_unreceived_data() {
+    // A reply followed by the start of the data of another protocol, which can begin with NUL
+    // bytes.
+    let reads: [&[u8]; 2] = [b"{\"parameters\":{\"result\":\"ok\"}}\0\0\0\x01*", b"rest"];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+
+    // The data that was read along with the reply comes first, and then what's left to read from
+    // the socket.
+    let mut read = conn.into_read_half();
+    assert_eq!(
+        read_all(&mut read, 3).await,
+        [&b"\0\0\x01"[..], b"*", b"res", b"t"]
+    );
+}
+
+#[tokio::test]
+async fn into_read_half_returns_unreceived_messages() {
+    // The messages that were read but not received are returned as they were read.
+    let reads: [&[u8]; 1] =
+        [b"{\"parameters\":{\"result\":\"1\"}}\0{\"parameters\":{\"result\":\"2\"}}\0"];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "1");
+
+    let mut read = conn.into_read_half();
+    assert_eq!(
+        read_all(&mut read, 64).await,
+        [b"{\"parameters\":{\"result\":\"2\"}}\0"]
+    );
+}
+
+#[tokio::test]
+async fn into_read_half_without_unreceived_data() {
+    let socket = MockSocket::with_responses(&[r#"{"parameters":{"result":"ok"}}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    assert!(conn.receive_reply::<TestReply, TestReply>().await.is_ok());
+
+    let mut read = conn.into_read_half();
+    assert!(read_all(&mut read, 64).await.is_empty());
+}
+
 // Deserializing a message doesn't check that the values its type ignores are valid UTF-8, so a
 // message can be received even if it isn't valid UTF-8. It must be logged nonetheless.
 #[test_log::test(tokio::test)]
@@ -676,6 +744,22 @@ fn call(value: u32) -> Vec<u8> {
     call.push(b'\0');
 
     call
+}
+
+/// The data of each read from `read` with a buffer of `len` bytes, until the end of the data.
+async fn read_all<R>(read: &mut R, len: usize) -> Vec<Vec<u8>>
+where
+    R: ReadHalf,
+{
+    let mut buf = vec![0; len];
+    let mut reads = Vec::new();
+    loop {
+        let bytes_read = read.read(&mut buf).await.unwrap().bytes_read();
+        if bytes_read == 0 {
+            return reads;
+        }
+        reads.push(buf[..bytes_read].to_vec());
+    }
 }
 
 /// A read half returning the given bytes in a single read.
