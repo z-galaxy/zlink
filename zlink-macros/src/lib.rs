@@ -915,7 +915,8 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// must return `zlink::Result<()>` (just the outer Result for connection errors, no inner Result
 /// since there's no reply to process).
 ///
-/// One-way methods cannot be combined with `#[zlink(more)]` or `#[zlink(return_fds)]`.
+/// One-way methods cannot be combined with `#[zlink(more)]`, `#[zlink(upgrade)]` or
+/// `#[zlink(return_fds)]`.
 ///
 /// This attribute is particularly useful in combination with chaining method calls. When you chain
 /// oneway methods with regular methods, the oneway calls are sent but don't contribute to the reply
@@ -937,6 +938,79 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     async fn log_event(&mut self, level: &str, message: &str, timestamp: u64)
 ///         -> zlink::Result<()>;
 /// }
+/// ```
+///
+/// # Upgrade Methods
+///
+/// A method call can ask for its connection to be upgraded to another protocol, typically a binary
+/// one, e.g. to transfer large amounts of data or to pass file descriptors. Use the
+/// `#[zlink(upgrade)]` attribute for such methods. Other than the `upgrade` flag the proxy sets on
+/// the call, they are like regular methods: they take `&mut self` and return
+/// `zlink::Result<Result<ReplyType, ErrorType>>`.
+///
+/// The service confirms the upgrade with a single successful reply, after which neither side speaks
+/// Varlink on the connection anymore. So if the method returns `Ok(Ok(_))`, take the socket out of
+/// the connection using `Connection::split`, `ReadConnection::into_read_half` and
+/// `WriteConnection::into_write_half`. The data that the service sent after its reply may have been
+/// read along with it already, in which case the read half that `into_read_half` returns, returns
+/// that data first.
+///
+/// If the service replies with an error instead, it has refused the upgrade and the connection is
+/// still a Varlink one. Therefore, don't send any data of the new protocol before the reply
+/// confirms the upgrade.
+///
+/// File descriptors that arrive along with the reply are returned by the method if it's also marked
+/// with `#[zlink(return_fds)]`. The ones that arrive after the reply are returned by that read
+/// half, along with the data they arrived with.
+///
+/// Upgrade methods cannot be combined with `#[zlink(more)]` since a single reply confirms an
+/// upgrade, nor with `#[zlink(oneway)]` since an upgrade needs a reply. They don't get a `chain_`
+/// variant either.
+///
+/// ```rust
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// use serde::{Deserialize, Serialize};
+/// use zlink::{connection::socket::ReadHalf, proxy};
+///
+/// #[proxy("org.example.Blobs")]
+/// trait BlobsProxy {
+///     /// Ask for the blob to be sent over the connection once the service replies.
+///     #[zlink(upgrade)]
+///     async fn download(&mut self, name: &str) -> zlink::Result<Result<Download, BlobError>>;
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// struct Download {
+///     size: usize,
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// #[serde(tag = "error")]
+/// enum BlobError {
+///     NotFound,
+/// }
+///
+/// # use zlink::test_utils::mock_socket::MockSocket;
+/// # // The service starts sending the blob right after its reply.
+/// # let reads = [b"{\"parameters\":{\"size\":4}}\0blob".as_slice()];
+/// # let mut conn = zlink::Connection::new(MockSocket::with_reads(&reads, vec![]));
+/// let download = conn.download("blob").await?.unwrap();
+///
+/// // The upgrade is confirmed so the connection doesn't speak Varlink anymore.
+/// let (read, _write) = conn.split();
+/// let mut read = read.into_read_half();
+/// let mut blob = Vec::new();
+/// let mut buf = [0; 1024];
+/// while blob.len() < download.size {
+///     let result = read.read(&mut buf).await?;
+///     if result.bytes_read() == 0 {
+///         break;
+///     }
+///     blob.extend_from_slice(&buf[..result.bytes_read()]);
+/// }
+/// assert_eq!(blob, b"blob");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # }).unwrap();
 /// ```
 ///
 /// # File Descriptor Passing

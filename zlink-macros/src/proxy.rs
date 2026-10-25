@@ -320,3 +320,60 @@ fn build_chain_extension_trait(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_cannot_be_combined_with_more_or_oneway() {
+        for (attrs, conflict) in [
+            (
+                "upgrade, more",
+                "upgrade (`upgrade`) and streaming (`more`)",
+            ),
+            (
+                "upgrade, oneway",
+                "upgrade (`upgrade`) and oneway (`oneway`)",
+            ),
+        ] {
+            let attrs: TokenStream = attrs.parse().unwrap();
+            let err = expand(quote! {
+                trait Probe {
+                    #[zlink(#attrs)]
+                    async fn probe(&mut self) -> zlink::Result<Result<(), Error>>;
+                }
+            })
+            .unwrap_err()
+            .to_string();
+
+            assert!(err.contains(conflict), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn upgrade_methods_have_no_chain_variants() {
+        let regular = expand(quote! {
+            trait Probe {
+                async fn probe(&mut self) -> zlink::Result<Result<(), Error>>;
+            }
+        })
+        .unwrap()
+        .to_string();
+        assert!(regular.contains("chain_probe") && regular.contains("ProbeChain"));
+
+        let upgrade = expand(quote! {
+            trait Probe {
+                #[zlink(upgrade)]
+                async fn probe(&mut self) -> zlink::Result<Result<(), Error>>;
+            }
+        })
+        .unwrap()
+        .to_string();
+        assert!(!upgrade.to_lowercase().contains("chain"));
+    }
+
+    fn expand(input: TokenStream) -> Result<TokenStream, Error> {
+        proxy_impl(quote!("org.example.probe"), input)
+    }
+}

@@ -25,8 +25,8 @@ pub(super) fn generate_chain_extension_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain extension methods for streaming and return_fds methods.
-    if method_attrs.is_streaming || method_attrs.return_fds {
+    // Skip chain extension methods for streaming, return_fds and upgrade methods.
+    if method_attrs.is_streaming || method_attrs.return_fds || method_attrs.is_upgrade {
         return Ok((quote! {}, quote! {}));
     }
 

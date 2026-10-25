@@ -19,3 +19,5 @@ mod optional_params;
 mod rename;
 #[path = "proxy/streaming.rs"]
 mod streaming;
+#[path = "proxy/upgrade.rs"]
+mod upgrade;
