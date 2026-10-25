@@ -136,6 +136,35 @@ async fn receive_calls_with_fds_among_other_calls() {
     }
 }
 
+// The FDs of a call that's only partially read when the call before it is received are returned
+// with it once the rest of it is read.
+#[tokio::test]
+async fn receive_partially_read_call_with_fds() {
+    let call2 = call(2);
+    // Linux returns the FDs in the read that ends with the data written along with them, so the
+    // buffer is moved to make room for the rest of the second call while the FDs are pending.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let reads = [
+        ([call(1), call2[..10].to_vec()].concat(), vec![fd(), fd()]),
+        (call2[10..].to_vec(), vec![]),
+    ];
+    // BSD-derived kernels start the read that returns the FDs with the data written along with
+    // them.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let reads = [
+        (call(1), vec![]),
+        (call2[..10].to_vec(), vec![fd(), fd()]),
+        (call2[10..].to_vec(), vec![]),
+    ];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    for (value, fd_count) in [(1, 0), (2, 2)] {
+        let (call, fds) = conn.receive_call::<TestMethod>().await.unwrap();
+        assert_eq!(call.method(), &TestMethod::Test { value });
+        assert_eq!(fds.len(), fd_count, "FDs received with call {value}");
+    }
+}
+
 #[tokio::test]
 async fn receive_reply_with_single_fd() {
     let (r_fd, _w_fd) = UnixStream::pair().unwrap();

@@ -37,8 +37,12 @@ type RecvResult<T> = T;
 #[derive(Debug)]
 pub struct ReadConnection<Read: ReadHalf> {
     socket: Read,
+    // The data read from the socket but not received yet is `buffer[msg_pos..read_pos]`:
+    // `buffer[msg_pos..msgs_end]` holds complete messages, each terminated by a NUL byte, and
+    // `buffer[msgs_end..read_pos]` the start of a message that wasn't completely read yet.
     read_pos: usize,
     msg_pos: usize,
+    msgs_end: usize,
     buffer: Vec<u8>,
     id: usize,
     // File descriptors received for messages in `buffer` that haven't been returned yet.
@@ -59,6 +63,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             socket,
             read_pos: 0,
             msg_pos: 0,
+            msgs_end: 0,
             id,
             buffer: alloc::vec![0; BUFFER_SIZE],
             #[cfg(feature = "std")]
@@ -157,64 +162,109 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         self.read_message::<Call<Method>>().await
     }
 
-    // Reads at least one full message from the socket and return a single message bytes.
+    // Receives the next message, reading from the socket first if no complete one is buffered.
     async fn read_message<'m, M>(&'m mut self) -> Result<RecvResult<M>>
     where
         M: Deserialize<'m> + Debug,
     {
-        self.read_from_socket().await?;
+        if self.msg_pos == self.msgs_end {
+            self.read_from_socket().await?;
+        }
 
         #[cfg(feature = "std")]
         let fds = self.take_fds();
 
-        let mut stream = Deserializer::from_slice(&self.buffer[self.msg_pos..]).into_iter::<M>();
+        let start = self.msg_pos;
+        let mut stream =
+            Deserializer::from_slice(&self.buffer[start..self.msgs_end]).into_iter::<M>();
         let msg = stream.next();
-        let null_index = self.msg_pos + stream.byte_offset();
-        let buffer = &self.buffer[self.msg_pos..null_index];
-        if self.buffer[null_index + 1] == b'\0' {
-            // This means we're reading the last message and can now reset the indices.
+        // The deserializer tells where the JSON value ends, so the NUL byte terminating a
+        // well-formed message is found right away.
+        let json_end = start + stream.byte_offset();
+        let null_index = self.null_index_from(json_end);
+        self.msg_pos = null_index + 1;
+        if self.msg_pos == self.read_pos {
+            // Everything read was received, so the buffer can be reused from its start.
             self.read_pos = 0;
             self.msg_pos = 0;
+            self.msgs_end = 0;
             // Nothing is left for the remaining file descriptors, if any, to belong to.
             #[cfg(feature = "std")]
             self.pending_fds.clear();
-        } else {
-            self.msg_pos = null_index + 1;
         }
 
-        match msg {
-            Some(Ok(msg)) => {
-                // The message isn't necessarily valid UTF-8 even though it was deserialized: the
-                // deserializer doesn't check the values that the message type ignores.
-                trace!(
-                    "connection {}: received a message: {}",
-                    self.id,
-                    from_utf8(buffer).unwrap_or("<invalid UTF-8>")
-                );
-
-                #[cfg(feature = "std")]
-                {
-                    Ok((msg, fds))
-                }
-                #[cfg(not(feature = "std"))]
-                Ok(msg)
+        let msg = match msg {
+            Some(Ok(msg)) if is_json_whitespace(&self.buffer[json_end..null_index]) => msg,
+            Some(Ok(_)) => {
+                return Err(crate::Error::Json(serde::de::Error::custom(
+                    "trailing characters after the message",
+                )));
             }
-            Some(Err(e)) => Err(e.into()),
-            None => Err(crate::Error::UnexpectedEof),
+            Some(Err(e)) => return Err(e.into()),
+            None => return Err(crate::Error::UnexpectedEof),
+        };
+        let buffer = &self.buffer[start..null_index];
+        // The message isn't necessarily valid UTF-8 even though it was deserialized: the
+        // deserializer doesn't check the values that the message type ignores.
+        trace!(
+            "connection {}: received a message: {}",
+            self.id,
+            from_utf8(buffer).unwrap_or("<invalid UTF-8>")
+        );
+
+        #[cfg(feature = "std")]
+        {
+            Ok((msg, fds))
         }
+        #[cfg(not(feature = "std"))]
+        Ok(msg)
     }
 
-    // Reads at least one full message from the socket.
+    // The index of the NUL byte terminating the message that `pos` is in.
+    fn null_index_from(&self, pos: usize) -> usize {
+        // The complete messages end with a NUL byte.
+        self.buffer[pos..self.msgs_end]
+            .iter()
+            .position(|b| *b == b'\0')
+            .map_or(self.msgs_end - 1, |i| pos + i)
+    }
+
+    // Reads from the socket until at least one complete message is buffered.
     async fn read_from_socket(&mut self) -> Result<()> {
         if self.msg_pos > 0 {
-            // This means we already have at least one message in the buffer so no need to read.
-            return Ok(());
+            // Move the start of the next message to the start of the buffer, making room for the
+            // rest of it.
+            self.buffer.copy_within(self.msg_pos..self.read_pos, 0);
+            #[cfg(feature = "std")]
+            {
+                // The file descriptors move along with the messages they belong to.
+                let msg_pos = self.msg_pos;
+                self.pending_fds.retain_mut(|pending| {
+                    let Some(pos) = pending.msg_pos.checked_sub(msg_pos) else {
+                        // Left over from a message that was received already.
+                        return false;
+                    };
+                    pending.msg_pos = pos;
+
+                    true
+                });
+            }
+            self.read_pos -= self.msg_pos;
+            self.msg_pos = 0;
+            self.msgs_end = 0;
         }
 
         loop {
-            #[cfg(feature = "std")]
+            if self.read_pos == self.buffer.len() {
+                if self.read_pos >= MAX_BUFFER_SIZE {
+                    return Err(crate::Error::BufferOverflow);
+                }
+
+                self.buffer.extend(core::iter::repeat_n(0, BUFFER_SIZE));
+            }
+
             let read_start = self.read_pos;
-            let result = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            let result = self.socket.read(&mut self.buffer[read_start..]).await?;
             #[cfg(all(feature = "std", target_os = "linux"))]
             let mut result = result;
 
@@ -240,26 +290,16 @@ impl<Read: ReadHalf> ReadConnection<Read> {
                 }
             }
 
-            if self.read_pos == self.buffer.len() {
-                if self.read_pos >= MAX_BUFFER_SIZE {
-                    return Err(crate::Error::BufferOverflow);
-                }
+            // The last NUL byte read terminates the last message read completely, if any.
+            if let Some(i) = self.buffer[read_start..self.read_pos]
+                .iter()
+                .rposition(|b| *b == b'\0')
+            {
+                self.msgs_end = read_start + i + 1;
 
-                self.buffer.extend(core::iter::repeat_n(0, BUFFER_SIZE));
-            }
-
-            // This marks end of all messages. After this loop is finished, we'll have 2 consecutive
-            // null bytes at the end. This is then used by the callers to determine that they've
-            // read all messages and can now reset the `read_pos`.
-            self.buffer[self.read_pos] = b'\0';
-
-            if self.buffer[self.read_pos - 1] == b'\0' {
-                // One or more full messages were read.
-                break;
+                return Ok(());
             }
         }
-
-        Ok(())
     }
 
     /// The position of the message, in `buffer`, that the file descriptors received by the latest
@@ -330,4 +370,11 @@ struct PendingFds {
     msg_pos: usize,
     /// The file descriptors.
     fds: Vec<OwnedFd>,
+}
+
+// Whether `bytes` is only JSON whitespace.
+fn is_json_whitespace(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
 }

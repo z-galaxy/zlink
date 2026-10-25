@@ -23,7 +23,7 @@ use rustix::fd::{BorrowedFd, OwnedFd};
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockSocket {
-    /// Each message stored separately with null terminator.
+    /// The data returned by each read.
     messages: Vec<Vec<u8>>,
     #[cfg(feature = "std")]
     fds: Vec<Vec<OwnedFd>>,
@@ -33,12 +33,12 @@ impl MockSocket {
     /// Create a new mock socket with pre-configured responses.
     ///
     /// Each response string will be null-terminated. Messages are stored separately and
-    /// returned one at a time, with a trailing null added after the last message.
+    /// returned one at a time.
     ///
     /// In std mode, the `fds` parameter specifies which FDs to return with each message.
     /// The i-th FD vec is returned with the i-th message.
     pub fn new(responses: &[&str], #[cfg(feature = "std")] fds: Vec<Vec<OwnedFd>>) -> Self {
-        let mut messages: Vec<Vec<u8>> = responses
+        let messages = responses
             .iter()
             .map(|r| {
                 let mut msg = r.as_bytes().to_vec();
@@ -47,13 +47,22 @@ impl MockSocket {
             })
             .collect();
 
-        // Add trailing null after last message for double-null end detection.
-        if let Some(last) = messages.last_mut() {
-            last.push(b'\0');
-        }
-
         Self {
             messages,
+            #[cfg(feature = "std")]
+            fds,
+        }
+    }
+
+    /// Create a mock socket whose read half returns each of `reads` verbatim, in a read of its own.
+    ///
+    /// Unlike [`MockSocket::new`], nothing is added to the data, so the reads can be split at any
+    /// point and end with anything.
+    ///
+    /// In std mode, the i-th FD vec is returned with the i-th read.
+    pub fn with_reads(reads: &[&[u8]], #[cfg(feature = "std")] fds: Vec<Vec<OwnedFd>>) -> Self {
+        Self {
+            messages: reads.iter().map(|r| r.to_vec()).collect(),
             #[cfg(feature = "std")]
             fds,
         }
@@ -108,7 +117,7 @@ pub struct MockReadHalf {
 }
 
 impl MockReadHalf {
-    /// Get the number of messages remaining.
+    /// Get the number of messages (or reads, see [`MockSocket::with_reads`]) remaining.
     pub fn messages_remaining(&self) -> usize {
         self.messages.len().saturating_sub(self.msg_index)
     }
