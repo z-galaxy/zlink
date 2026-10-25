@@ -165,6 +165,24 @@ async fn receive_partially_read_call_with_fds() {
     }
 }
 
+// What follows a message isn't necessarily another message, e.g. after a protocol upgrade. Linux
+// returns the FDs in the read that ends with the data written along with them, so they're received
+// with the reply here, but they're not the reply's. That holds even when the data is only NUL
+// bytes, like the single byte commonly sent along with FDs.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[tokio::test]
+async fn receive_reply_followed_by_nul_with_fds() {
+    let reads = [(
+        [&br#"{"parameters":{"result":"ok"}}"#[..], b"\0\0"].concat(),
+        vec![fd()],
+    )];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    let (reply, fds) = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+    assert!(fds.is_empty());
+}
+
 #[tokio::test]
 async fn receive_reply_with_single_fd() {
     let (r_fd, _w_fd) = UnixStream::pair().unwrap();
