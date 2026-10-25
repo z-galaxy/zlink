@@ -1361,6 +1361,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///   generated at compile time from the method signatures and types.
 /// - **Unknown methods**: Return `MethodNotFound` error with the method name.
 /// - **Unknown interfaces** (in `GetInterfaceDescription`): Return `InterfaceNotFound` error.
+/// - **Protocol upgrades**: Calls asking for their connection to be upgraded to another protocol
+///   (the `upgrade` flag) get an `InvalidParameter` error naming `upgrade`, without the method
+///   being called.
 ///
 /// # Supported Attributes
 ///

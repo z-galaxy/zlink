@@ -1297,6 +1297,19 @@ fn generate_handle_body(
 
     let mut user_match_arms: Vec<TokenStream> = Vec::new();
     let type_to_variant = build_return_type_variant_map(methods_info);
+    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
+
+    // A successful reply confirms an upgrade (see `Call::upgrade`), so the calls asking for one are
+    // refused by the methods that don't support upgrades.
+    let refuse_upgrade = wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Error(
+            #reply_error_name::#varlink_error_variant(
+                #crate_path::varlink_service::Error::InvalidParameter {
+                    parameter: ::core::convert::From::from("upgrade"),
+                }
+            )
+        )
+    });
 
     for method in methods_info {
         let Some(_full_path) = method.full_method_path() else {
@@ -1612,14 +1625,17 @@ fn generate_handle_body(
 
         user_match_arms.push(quote! {
             #pattern => {
-                #return_expr
+                if __zlink_call.upgrade() {
+                    #refuse_upgrade
+                } else {
+                    #return_expr
+                }
             }
         });
     }
 
     let unused_variant = format_ident!("__{}Unused", user_methods_name);
     let unknown_variant = format_ident!("__{}Unknown", user_methods_name);
-    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
     let varlink_reply_variant = format_ident!("__{}VarlinkService", reply_params_name);
 
     // Add the unused variant arm first (to match enum order).
@@ -1738,6 +1754,9 @@ fn generate_handle_body(
     // `Info::new` converts the interface names it is given. They are `InterfaceName`s already, so
     // the conversion can't fail, which makes the `Result` pattern in the `GetInfo` arm irrefutable.
     let varlink_service_match = quote! {
+        #method_call_name::__VarlinkService(_) if __zlink_call.upgrade() => {
+            #refuse_upgrade
+        }
         #method_call_name::__VarlinkService(__varlink_method) => {
             match __varlink_method {
                 #crate_path::varlink_service::Method::GetInfo => {

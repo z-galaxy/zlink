@@ -33,3 +33,5 @@ mod streaming_errors;
 mod streaming_fds;
 #[path = "service/underscore_params.rs"]
 mod underscore_params;
+#[path = "service/upgrade.rs"]
+mod upgrade;
