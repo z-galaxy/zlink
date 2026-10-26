@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use crate::{
-    connection::{read_connection::ReadConnection, socket::Socket},
+    connection::{
+        read_connection::ReadConnection,
+        socket::{ReadHalf, ReadResult, Socket},
+    },
     test_utils::mock_socket::MockSocket,
 };
 use serde::{Deserialize, Serialize};
@@ -474,4 +477,35 @@ async fn partial_message_at_buffer_boundary() {
     // Second read should fail with UnexpectedEof.
     let result = conn.receive_call::<TestMethod>().await;
     assert!(matches!(result, Err(crate::Error::UnexpectedEof)));
+}
+
+// Deserializing a message doesn't check that the values its type ignores are valid UTF-8, so a
+// message can be received even if it isn't valid UTF-8. It must be logged nonetheless.
+#[test_log::test(tokio::test)]
+#[test_log(default_log_filter = "trace")]
+async fn receive_message_with_invalid_utf8_in_ignored_value() {
+    let msg =
+        b"{\"method\":\"org.example.Test\",\"parameters\":{\"value\":42,\"note\":\"\xff\"}}\0";
+    let mut conn = ReadConnection::new(BytesReadHalf(msg), 0);
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method(), &TestMethod::Test { value: 42 });
+}
+
+/// A read half returning the given bytes in a single read.
+#[derive(Debug)]
+struct BytesReadHalf(&'static [u8]);
+
+impl ReadHalf for BytesReadHalf {
+    async fn read(&mut self, buf: &mut [u8]) -> crate::Result<ReadResult> {
+        let len = self.0.len();
+        buf[..len].copy_from_slice(self.0);
+        self.0 = &[];
+
+        Ok(ReadResult::new(len))
+    }
 }

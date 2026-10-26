@@ -2,7 +2,7 @@
 
 #[cfg(feature = "std")]
 use core::cmp::Ordering;
-use core::{fmt::Debug, str::from_utf8_unchecked};
+use core::{fmt::Debug, str::from_utf8};
 
 #[cfg(all(feature = "std", target_os = "linux"))]
 use crate::connection::PassedCredentials;
@@ -184,11 +184,13 @@ impl<Read: ReadHalf> ReadConnection<Read> {
 
         match msg {
             Some(Ok(msg)) => {
-                // SAFETY: Since the parsing from JSON already succeeded, we can be sure that the
-                // buffer contains a valid UTF-8 string.
-                trace!("connection {}: received a message: {}", self.id, unsafe {
-                    from_utf8_unchecked(buffer)
-                });
+                // The message isn't necessarily valid UTF-8 even though it was deserialized: the
+                // deserializer doesn't check the values that the message type ignores.
+                trace!(
+                    "connection {}: received a message: {}",
+                    self.id,
+                    from_utf8(buffer).unwrap_or("<invalid UTF-8>")
+                );
 
                 #[cfg(feature = "std")]
                 {
