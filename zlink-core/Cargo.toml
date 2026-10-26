@@ -57,6 +57,7 @@ serde-prefix-all = "0.1.0"
 test-log = { version = "0.2.17", default-features = false, features = [
     "trace",
     "color",
+    "unstable",
 ] }
 tokio = { version = "1.44.0", features = [
     "macros",
