@@ -214,16 +214,14 @@ pub fn read_lxattr(path: impl AsRef<Path>, name: &str) -> io::Result<Vec<u8>> {
 /// Whether the running kernel allows `user.*` extended attributes on socket inodes.
 ///
 /// Linux 7.1 introduced this; older kernels fail with `EPERM`. The probe runs once and its
-/// verdict is cached for the lifetime of the process; transient failures to probe are not
-/// cached.
+/// verdict is cached for the lifetime of the process. Only a failure that may be over by the next
+/// call, such as a shortage of resources, leaves the question open. Any other failure, such as a
+/// security policy denying the probe, would recur on every call and is therefore taken as a lack
+/// of support.
 #[cfg(target_os = "linux")]
 #[doc(hidden)]
 pub fn socket_xattr_supported() -> bool {
-    use rustix::{
-        fs::{XattrFlags, fsetxattr},
-        io::Errno,
-        net::{AddressFamily, SocketFlags, SocketType, socket_with},
-    };
+    use rustix::io::Errno;
     use std::sync::OnceLock;
 
     static SUPPORTED: OnceLock<bool> = OnceLock::new();
@@ -232,33 +230,25 @@ pub fn socket_xattr_supported() -> bool {
         return *supported;
     }
 
-    let fd = match socket_with(
-        AddressFamily::UNIX,
-        SocketType::DGRAM,
-        SocketFlags::CLOEXEC,
-        None,
-    ) {
-        Ok(fd) => fd,
-        Err(e) => {
+    let supported = match probe_socket_xattr() {
+        Ok(supported) => supported,
+        // Linux keeps the attributes of all sockets in one hash table, and setting one can fail
+        // with `EBUSY` while that table is being resized.
+        Err(e @ (Errno::MFILE | Errno::NFILE | Errno::NOBUFS | Errno::NOMEM | Errno::BUSY)) => {
             debug!(
-                "Failed to create probe socket for xattr support (errno {})",
+                "Failed to probe socket xattr support (errno {}), will retry",
                 e.raw_os_error()
             );
 
             return false;
         }
-    };
-
-    let supported = match fsetxattr(&fd, "user.zlink.probe", b"1", XattrFlags::empty()) {
-        Ok(()) => true,
-        Err(Errno::PERM | Errno::OPNOTSUPP | Errno::NOSYS) => false,
         Err(e) => {
             debug!(
-                "Failed to probe socket xattr support (errno {})",
+                "Failed to probe socket xattr support (errno {}), assuming none",
                 e.raw_os_error()
             );
 
-            return false;
+            false
         }
     };
 
@@ -574,6 +564,37 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
             io::ErrorKind::Unsupported,
             "peer credentials not supported on this platform",
         ))
+    }
+}
+
+/// Probe whether `user.*` extended attributes can be set on a fresh socket.
+///
+/// Errors known to mean that the kernel lacks support yield `Ok(false)`; any other error is
+/// returned for the caller to judge.
+///
+/// The probe uses a socket of the same kind as the Varlink sockets that get tagged, since a
+/// security policy confining the process grants permissions per kind of socket. A process allowed
+/// to use Varlink sockets is then usually allowed to create the probe too, and setting the
+/// attribute on it succeeds or fails as tagging them would.
+#[cfg(target_os = "linux")]
+fn probe_socket_xattr() -> rustix::io::Result<bool> {
+    use rustix::{
+        fs::{XattrFlags, fsetxattr},
+        io::Errno,
+        net::{AddressFamily, SocketFlags, SocketType, socket_with},
+    };
+
+    let fd = socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        SocketFlags::CLOEXEC,
+        None,
+    )?;
+
+    match fsetxattr(&fd, "user.zlink.probe", b"1", XattrFlags::empty()) {
+        Ok(()) => Ok(true),
+        Err(Errno::PERM | Errno::OPNOTSUPP | Errno::NOSYS) => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
