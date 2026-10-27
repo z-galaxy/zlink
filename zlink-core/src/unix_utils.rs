@@ -571,6 +571,11 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
 ///
 /// Errors known to mean that the kernel lacks support yield `Ok(false)`; any other error is
 /// returned for the caller to judge.
+///
+/// The probe uses a socket of the same kind as the Varlink sockets that get tagged, since a
+/// security policy confining the process grants permissions per kind of socket. A process allowed
+/// to use Varlink sockets is then usually allowed to create the probe too, and setting the
+/// attribute on it succeeds or fails as tagging them would.
 #[cfg(target_os = "linux")]
 fn probe_socket_xattr() -> rustix::io::Result<bool> {
     use rustix::{
@@ -581,7 +586,7 @@ fn probe_socket_xattr() -> rustix::io::Result<bool> {
 
     let fd = socket_with(
         AddressFamily::UNIX,
-        SocketType::DGRAM,
+        SocketType::STREAM,
         SocketFlags::CLOEXEC,
         None,
     )?;
