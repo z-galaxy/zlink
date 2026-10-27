@@ -116,6 +116,8 @@ pub enum Error<'a> {
     PermissionDenied,
     /// Method is expected to be called with 'more' set to true, but wasn't.
     ExpectedMore,
+    /// Method is expected to be called with 'upgrade' set to true, but wasn't.
+    ExpectedUpgrade,
 }
 
 impl Error<'_> {
@@ -138,6 +140,7 @@ impl Error<'_> {
             },
             Error::PermissionDenied => Error::PermissionDenied,
             Error::ExpectedMore => Error::ExpectedMore,
+            Error::ExpectedUpgrade => Error::ExpectedUpgrade,
         }
     }
 }
@@ -165,6 +168,9 @@ impl core::fmt::Display for Error<'_> {
             }
             Error::ExpectedMore => {
                 write!(f, "Expected more")
+            }
+            Error::ExpectedUpgrade => {
+                write!(f, "Expected upgrade")
             }
             Error::MethodNotImplemented { method } => {
                 write!(f, "Method not implemented: {method}")
@@ -257,6 +263,8 @@ impl<'de> Deserialize<'de> for OwnedError {
             PermissionDenied,
             #[serde(rename = "org.varlink.service.ExpectedMore")]
             ExpectedMore,
+            #[serde(rename = "org.varlink.service.ExpectedUpgrade")]
+            ExpectedUpgrade,
         }
 
         let helper = ErrorHelper::deserialize(deserializer)?;
@@ -275,6 +283,7 @@ impl<'de> Deserialize<'de> for OwnedError {
             },
             ErrorHelper::PermissionDenied => Error::PermissionDenied,
             ErrorHelper::ExpectedMore => Error::ExpectedMore,
+            ErrorHelper::ExpectedUpgrade => Error::ExpectedUpgrade,
         };
         Ok(Self(error))
     }
@@ -370,6 +379,11 @@ mod tests {
         let json = r#"{"error":"org.varlink.service.ExpectedMore"}"#;
         let err: Error<'_> = deserialize_error(json);
         assert_eq!(err, Error::ExpectedMore);
+
+        // Test ExpectedUpgrade error.
+        let json = r#"{"error":"org.varlink.service.ExpectedUpgrade"}"#;
+        let err: Error<'_> = deserialize_error(json);
+        assert_eq!(err, Error::ExpectedUpgrade);
     }
 
     #[test]
@@ -399,6 +413,13 @@ mod tests {
                 interface: Cow::Owned("test.interface".into())
             }
         );
+    }
+
+    #[test]
+    fn owned_error_deserialization() {
+        let json = r#"{"error":"org.varlink.service.ExpectedUpgrade"}"#;
+        let err: OwnedError = serde_json::from_str(json).unwrap();
+        assert_eq!(err.into_inner(), Error::ExpectedUpgrade);
     }
 
     #[test]
