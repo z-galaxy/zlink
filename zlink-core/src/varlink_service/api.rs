@@ -86,6 +86,7 @@ impl<'a> From<Reply<'a>> for OwnedReply {
 #[cfg_attr(feature = "introspection", derive(introspect::ReplyError))]
 #[zlink(interface = "org.varlink.service")]
 #[cfg_attr(feature = "introspection", zlink(crate = "crate"))]
+#[non_exhaustive]
 pub enum Error<'a> {
     /// The requested interface was not found.
     InterfaceNotFound {
