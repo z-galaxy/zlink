@@ -55,7 +55,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         use zlink::varlink_service::Proxy as VarlinkProxy;
 
         let desc = conn
-            .get_interface_description("org.example.launcher")
+            .get_interface_description("org.example.launcher".try_into().unwrap())
             .await?
             .unwrap();
         let interface = desc.parse()?;

@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Tell me about that interface.
     let description = conn
-        .get_interface_description("io.systemd.Resolve")
+        .get_interface_description("io.systemd.Resolve".try_into()?)
         .await?
         .map_err(|e| e.to_string())?;
     let interface = description.parse()?; // -> zlink::idl::Interface (needs `idl-parse`)

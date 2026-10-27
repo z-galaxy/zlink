@@ -36,7 +36,7 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
 
             // Test GetInterfaceDescription - verify both methods are exposed.
             // This tests that the macro-level interface attribute applies to all methods.
-            let desc = conn.get_interface_description("org.example.metadata-hyphen").await?.unwrap();
+            let desc = conn.get_interface_description("org.example.metadata-hyphen".try_into().unwrap()).await?.unwrap();
             let interface = desc.parse()?;
             let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
             assert_eq!(

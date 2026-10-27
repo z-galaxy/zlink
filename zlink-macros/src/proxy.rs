@@ -13,7 +13,7 @@ use chain_extension::generate_chain_extension_method;
 use chain_method::generate_chain_method;
 use method_impl::generate_method_impl;
 use types::MethodAttrs;
-use utils::{ParamAttrs, build_combined_where_clause, extract_param_attrs};
+use utils::{ParamAttrs, build_combined_where_clause, extract_param_attrs, resolve_method_path};
 
 pub(crate) fn proxy(attr: TokenStream, input: TokenStream) -> TokenStream {
     match proxy_impl(attr, input) {
@@ -45,6 +45,14 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
             // Extract attributes once to avoid multiple mutable borrows
             let method_attrs = MethodAttrs::extract(&mut method.attrs)?;
 
+            // The method's wire name is resolved and checked here, not while extracting the
+            // attributes, as the errors raised there are dropped.
+            let method_path = resolve_method_path(
+                &interface_name,
+                &method.sig.ident,
+                method_attrs.rename.as_ref(),
+            )?;
+
             // Extract parameter attributes once for all parameters
             let mut param_attrs_map: HashMap<String, ParamAttrs> = HashMap::new();
             for arg in method.sig.inputs.iter_mut().skip(1) {
@@ -61,7 +69,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
             // Generate chain extension method
             let (extension_method, extension_impl) = generate_chain_extension_method(
                 method,
-                &interface_name,
+                &method_path,
                 &trait_def.generics,
                 &method_attrs,
                 &crate_path,
@@ -78,7 +86,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
             // Generate regular method implementation
             let method_impl = generate_method_impl(
                 method,
-                &interface_name,
+                &method_path,
                 &trait_def.generics,
                 &method_attrs,
                 &crate_path,
@@ -90,7 +98,7 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
             // Generate chain method
             let (chain_trait, chain_impl) = generate_chain_method(
                 method,
-                &interface_name,
+                &method_path,
                 &trait_def.generics,
                 &method_attrs,
                 &crate_path,
@@ -153,6 +161,8 @@ fn parse_proxy_attributes(
 
     // Try parsing as a simple string literal first (backward compatibility)
     if let Ok(Lit::Str(lit_str)) = parse2::<Lit>(attr.clone()) {
+        crate::naming::validate_interface(&lit_str)?;
+
         return Ok((lit_str.value(), quote! { ::zlink }, None, None));
     }
 

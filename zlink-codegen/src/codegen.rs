@@ -188,7 +188,8 @@ impl CodeGenerator {
         };
 
         // Handle field name if it's a Rust keyword.
-        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name() {
+        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name().as_str()
+        {
             format!("#[serde(rename = \"{}\")]", field.name())
         } else {
             String::new()
@@ -285,7 +286,7 @@ impl CodeGenerator {
                         self.writeln("#[serde(borrow)]")?;
                     }
 
-                    if field_name != output.name() {
+                    if field_name != output.name().as_str() {
                         self.writeln(&format!("#[serde(rename = \"{}\")]", output.name()))?;
                     }
 
@@ -378,7 +379,7 @@ impl CodeGenerator {
 
             write!(&mut signature, ",")?;
             // Add parameter with potential rename attribute.
-            if safe_param_name != param.name() {
+            if safe_param_name != param.name().as_str() {
                 write!(&mut signature, " #[zlink(rename = \"{}\")]", param.name(),)?;
             }
 
@@ -423,7 +424,8 @@ impl CodeGenerator {
         let rust_type = self.type_to_rust(field.ty())?;
 
         // Handle field name if it's a Rust keyword.
-        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name() {
+        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name().as_str()
+        {
             format!("#[zlink(rename = \"{}\")]", field.name())
         } else {
             String::new()

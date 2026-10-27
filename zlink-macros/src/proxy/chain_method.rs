@@ -17,15 +17,15 @@ type MethodCallResult = TokenStream;
 
 pub(super) fn generate_chain_method(
     method: &mut syn::TraitItemFn,
-    interface_name: &str,
+    method_path: &str,
     _trait_generics: &syn::Generics,
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
     rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<(TokenStream, TokenStream), Error> {
-    // Only the wire name and the `chain_` ident are unraw'd; `method_ident` stays raw so the
-    // generated fn still matches the trait it implements.
+    // Only the `chain_` ident is unraw'd; `method_ident` stays raw so the generated fn still
+    // matches the trait it implements.
     let method_name_str = crate::naming::unraw(&method.sig.ident);
     let method_ident = method.sig.ident.clone();
     let method_span = method.sig.ident.span();
@@ -51,10 +51,6 @@ pub(super) fn generate_chain_method(
 
     // Generate chain method name
     let chain_method_name = syn::Ident::new(&format!("chain_{method_name_str}"), method_span);
-
-    let converted_name = snake_case_to_pascal_case(&method_name_str);
-    let actual_method_name = method_attrs.rename.as_deref().unwrap_or(&converted_name);
-    let method_path = format!("{interface_name}.{actual_method_name}");
 
     // Extract data before mutable borrow
     let method_generic_params = method.sig.generics.params.clone();
@@ -116,7 +112,7 @@ pub(super) fn generate_chain_method(
     let ret = generate_method_call_creation(
         &arg_infos,
         &method_ident,
-        &method_path,
+        method_path,
         &method_generic_params,
         &method_where_clause,
         has_any_lifetime,

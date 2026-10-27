@@ -163,6 +163,20 @@ fn net_types() {
     assert_eq!(*<SocketAddrV6>::TYPE, idl::Type::String);
 }
 
+#[test]
+fn name_types() {
+    use crate::names::{
+        FieldName, InterfaceName, OwnedFieldName, OwnedInterfaceName, OwnedTypeName, TypeName,
+    };
+    // Names are strings on the wire.
+    assert_eq!(*<FieldName<'_>>::TYPE, idl::Type::String);
+    assert_eq!(*<OwnedFieldName>::TYPE, idl::Type::String);
+    assert_eq!(*<TypeName<'_>>::TYPE, idl::Type::String);
+    assert_eq!(*<OwnedTypeName>::TYPE, idl::Type::String);
+    assert_eq!(*<InterfaceName<'_>>::TYPE, idl::Type::String);
+    assert_eq!(*<OwnedInterfaceName>::TYPE, idl::Type::String);
+}
+
 #[cfg(feature = "uuid")]
 #[test]
 fn uuid_type() {

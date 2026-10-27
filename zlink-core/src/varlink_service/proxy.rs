@@ -6,6 +6,7 @@
 use crate::proxy;
 
 use super::{Error, Info, InterfaceDescription, OwnedError, OwnedInfo};
+use crate::names::InterfaceName;
 
 /// Client-side proxy for the `org.varlink.service` interface.
 ///
@@ -38,7 +39,7 @@ use super::{Error, Info, InterfaceDescription, OwnedError, OwnedInfo};
 ///
 /// // Get interface description.
 /// let desc = conn
-///     .get_interface_description("org.varlink.service")
+///     .get_interface_description("org.varlink.service".try_into()?)
 ///     .await?
 ///     .map_err(|e| e.to_string())?;
 /// println!("Interface description: {}", desc.as_raw().unwrap());
@@ -61,7 +62,7 @@ use super::{Error, Info, InterfaceDescription, OwnedError, OwnedInfo};
 /// // Chain multiple calls using owned methods (required for pipelining).
 /// let chain = conn
 ///     .chain_owned_get_info()?
-///     .owned_get_interface_description("org.example.interface")?
+///     .owned_get_interface_description("org.example.interface".try_into()?)?
 ///     .owned_get_info()?;
 ///
 /// // Send the chain and process replies.
@@ -132,7 +133,7 @@ pub trait Proxy {
     /// [`InterfaceDescription::parse`] to parse it.
     async fn get_interface_description(
         &mut self,
-        interface: &str,
+        interface: InterfaceName<'_>,
     ) -> crate::Result<core::result::Result<InterfaceDescription<'static>, Error<'_>>>;
 
     /// Get the IDL description of an interface (owned variant for chain API).
@@ -153,7 +154,7 @@ pub trait Proxy {
     #[zlink(rename = "GetInterfaceDescription")]
     async fn owned_get_interface_description(
         &mut self,
-        interface: &str,
+        interface: InterfaceName<'_>,
     ) -> crate::Result<core::result::Result<InterfaceDescription<'static>, OwnedError>>;
 }
 
@@ -175,7 +176,8 @@ mod tests {
 
         // Test that we can create the chain APIs.
         let _chain1 = conn.chain_owned_get_info()?;
-        let _chain2 = conn.chain_owned_get_interface_description("org.varlink.service")?;
+        let _chain2 =
+            conn.chain_owned_get_interface_description("org.varlink.service".try_into().unwrap())?;
 
         Ok(())
     }
@@ -194,7 +196,7 @@ mod tests {
         // Test that we can chain calls using extension methods and actually read replies.
         let chained = conn
             .chain_owned_get_info()?
-            .owned_get_interface_description("org.varlink.service")?
+            .owned_get_interface_description("org.varlink.service".try_into().unwrap())?
             .owned_get_info()?;
 
         let replies = chained.send::<OwnedReply, OwnedError>().await?;

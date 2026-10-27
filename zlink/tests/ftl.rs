@@ -82,7 +82,7 @@ async fn run_client(
 
         // Test `org.varlink.service` interface impl.
         let interface = conn
-            .get_interface_description("org.varlink.service")
+            .get_interface_description("org.varlink.service".try_into().unwrap())
             .await?
             .map_err(|e| e.to_string())?;
         let interface = interface.parse().unwrap();
@@ -90,13 +90,13 @@ async fn run_client(
 
         // Test `org.example.ftl` interface impl.
         let interface = conn
-            .get_interface_description("org.example.ftl")
+            .get_interface_description("org.example.ftl".try_into().unwrap())
             .await?
             .map_err(|e| e.to_string())?;
         let interface = interface.parse().unwrap();
         assert_eq!(interface.name(), "org.example.ftl");
         // Verify methods are present.
-        let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
+        let method_names: Vec<_> = interface.methods().map(|m| m.name().as_str()).collect();
         assert!(method_names.contains(&"GetDriveCondition"));
         assert!(method_names.contains(&"SetDriveCondition"));
         assert!(method_names.contains(&"Jump"));
@@ -106,7 +106,7 @@ async fn run_client(
 
         // Unimplemented interface query should return an error.
         let error = conn
-            .get_interface_description("org.varlink.unimplemented")
+            .get_interface_description("org.varlink.unimplemented".try_into().unwrap())
             .await
             .unwrap_err();
         let zlink::Error::VarlinkService(owned_error) = error else {

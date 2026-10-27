@@ -2,13 +2,15 @@
 
 use core::fmt;
 
+use zlink_names::FieldName;
+
 use super::{Comment, List, Type, TypeRef};
 
 /// A field in a custom type or method parameter.
 #[derive(Debug, Clone, Eq)]
 pub struct Field<'a> {
     /// The name of the field.
-    name: &'a str,
+    name: FieldName<'a>,
     /// The type of the field.
     ty: TypeRef<'a>,
     /// Comments associated with this field.
@@ -20,7 +22,15 @@ pub type Parameter<'a> = Field<'a>;
 
 impl<'a> Field<'a> {
     /// Creates a new field with the given name, borrowed type, and comments.
-    pub const fn new(name: &'a str, ty: &'a Type<'a>, comments: &'a [&'a Comment<'a>]) -> Self {
+    ///
+    /// As this is a `const fn`, it takes a name that is already validated. In `const` contexts,
+    /// make one with [`FieldName::from_static_str_unchecked`]. For anything else that converts
+    /// into a [`FieldName`], such as a string slice, use [`Field::new_owned`].
+    pub const fn new(
+        name: FieldName<'a>,
+        ty: &'a Type<'a>,
+        comments: &'a [&'a Comment<'a>],
+    ) -> Self {
         Self {
             name,
             ty: TypeRef::new(ty),
@@ -30,17 +40,31 @@ impl<'a> Field<'a> {
 
     /// Same as `new` but takes `ty` by value.
     /// Creates a new field with the given name, owned type, and comments.
-    pub fn new_owned(name: &'a str, ty: Type<'a>, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
-        Self {
-            name,
+    ///
+    /// The name can be anything that converts into a [`FieldName`], such as a string slice.
+    ///
+    /// # Errors
+    ///
+    /// If `name` doesn't convert into a [`FieldName`], e.g. because it is a string that is not a
+    /// valid field name.
+    pub fn new_owned<N>(
+        name: N,
+        ty: Type<'a>,
+        comments: alloc::vec::Vec<Comment<'a>>,
+    ) -> Result<Self, N::Error>
+    where
+        N: TryInto<FieldName<'a>>,
+    {
+        Ok(Self {
+            name: name.try_into()?,
             ty: TypeRef::new_owned(ty),
             comments: List::from(comments),
-        }
+        })
     }
 
     /// Returns the name of the field.
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> &FieldName<'a> {
+        &self.name
     }
 
     /// Returns the type of the field.
@@ -77,14 +101,25 @@ mod tests {
 
     #[test]
     fn field_creation() {
-        let field = Field::new("age", &Type::Int, &[]);
+        let field = Field::new("age".try_into().unwrap(), &Type::Int, &[]);
         assert_eq!(field.name(), "age");
         assert_eq!(field.ty(), &Type::Int);
     }
 
     #[test]
+    fn new_owned_rejects_an_invalid_name() {
+        let field = Field::new_owned("user_name", Type::Int, Vec::new()).unwrap();
+        assert_eq!(field.name(), "user_name");
+
+        assert_eq!(
+            Field::new_owned("user-name", Type::Int, Vec::new()).unwrap_err(),
+            zlink_names::Error::InvalidFieldName
+        );
+    }
+
+    #[test]
     fn parameter_alias() {
-        let param: Parameter<'_> = Field::new("input", &Type::String, &[]);
+        let param: Parameter<'_> = Field::new("input".try_into().unwrap(), &Type::String, &[]);
         assert_eq!(param.name(), "input");
         assert_eq!(param.ty(), &Type::String);
     }
@@ -98,7 +133,7 @@ mod tests {
         let comment2 = Comment::new("Must be valid format");
         let comments = [&comment1, &comment2];
 
-        let field = Field::new("email", &Type::String, &comments);
+        let field = Field::new("email".try_into().unwrap(), &Type::String, &comments);
         let mut displayed = String::new();
         write!(&mut displayed, "{}", field).unwrap();
         assert_eq!(

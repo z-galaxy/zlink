@@ -60,7 +60,9 @@ async fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", "─".repeat(60));
         println!();
 
-        let desc_result = conn.get_interface_description(interface_name).await?;
+        let desc_result = conn
+            .get_interface_description(interface_name.as_str().try_into()?)
+            .await?;
         let description = match desc_result {
             Ok(desc) => desc,
             Err(error) => {
@@ -245,7 +247,7 @@ fn format_type(ty: &zlink::idl::Type<'_>) -> ColoredString {
         zlink::idl::Type::Object(_) => "object".bright_blue(),
         zlink::idl::Type::Custom(name) => name.magenta(),
         zlink::idl::Type::Enum(variants) => {
-            let variant_names: Vec<&str> = variants.iter().map(|v| v.name()).collect();
+            let variant_names: Vec<&str> = variants.iter().map(|v| v.name().as_str()).collect();
             format!("({})", variant_names.join(", ")).bright_blue()
         }
     }

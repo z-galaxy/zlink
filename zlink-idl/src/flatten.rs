@@ -4,6 +4,8 @@
 //! the `Type`, `CustomType`, `ReplyError`, and `#[service]` derives/macros. They are not a
 //! supported public API — the module is `#[doc(hidden)]` and may change without notice.
 
+use zlink_names::FieldName;
+
 use crate::{Field, Type};
 
 /// The total number of fields once every group in `groups` is inlined.
@@ -29,7 +31,11 @@ pub const fn concat_fields<const N: usize>(
 ) -> [&'static Field<'static>; N] {
     // Fills the accumulator before the real refs are written in. Overwritten in every slot unless
     // `N == 0`, in which case the array is empty and the filler is never observed.
-    const FILLER: &Field<'static> = &Field::new("", &Type::Bool, &[]);
+    const FILLER: &Field<'static> = &Field::new(
+        FieldName::from_static_str_unchecked("filler"),
+        &Type::Bool,
+        &[],
+    );
     let mut out: [&Field<'static>; N] = [FILLER; N];
 
     let mut oi = 0;
@@ -84,9 +90,15 @@ mod tests {
 
     #[test]
     fn counts_and_concatenates_in_order() {
-        static A: Field<'static> = Field::new("a", &Type::Int, &[]);
-        static B: Field<'static> = Field::new("b", &Type::String, &[]);
-        static C: Field<'static> = Field::new("c", &Type::Bool, &[]);
+        static A: Field<'static> =
+            Field::new(FieldName::from_static_str_unchecked("a"), &Type::Int, &[]);
+        static B: Field<'static> = Field::new(
+            FieldName::from_static_str_unchecked("b"),
+            &Type::String,
+            &[],
+        );
+        static C: Field<'static> =
+            Field::new(FieldName::from_static_str_unchecked("c"), &Type::Bool, &[]);
         static G_A: &[&Field<'static>] = &[&A];
         static G_BC: &[&Field<'static>] = &[&B, &C];
         static GROUPS: &[&[&Field<'static>]] = &[G_A, G_BC];
@@ -96,7 +108,7 @@ mod tests {
 
         const N: usize = total_field_count(GROUPS);
         static OUT: [&Field<'static>; N] = concat_fields::<N>(GROUPS);
-        let names: Vec<&str> = OUT.iter().map(|f| f.name()).collect();
+        let names: Vec<&str> = OUT.iter().map(|f| f.name().as_str()).collect();
         assert_eq!(names, ["a", "b", "c"]);
     }
 
@@ -110,7 +122,8 @@ mod tests {
 
     #[test]
     fn object_fields_returns_the_members() {
-        static F: Field<'static> = Field::new("x", &Type::Int, &[]);
+        static F: Field<'static> =
+            Field::new(FieldName::from_static_str_unchecked("x"), &Type::Int, &[]);
         static FIELDS: &[&Field<'static>] = &[&F];
         static OBJ: Type<'static> = Type::Object(List::Borrowed(FIELDS));
 

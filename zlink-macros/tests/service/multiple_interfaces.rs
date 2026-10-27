@@ -204,7 +204,7 @@ async fn case_distinct_interface_names() -> Result<(), Box<dyn std::error::Error
 
             // Verify GetInterfaceDescription resolves each interface to its own description.
             let lower_desc = conn
-                .get_interface_description("org.example.foo")
+                .get_interface_description("org.example.foo".try_into().unwrap())
                 .await?
                 .unwrap();
             let lower_interface = lower_desc.parse()?;
@@ -213,7 +213,7 @@ async fn case_distinct_interface_names() -> Result<(), Box<dyn std::error::Error
             assert_eq!(lower_methods.as_slice(), ["LowerMethod"]);
 
             let upper_desc = conn
-                .get_interface_description("org.example.Foo")
+                .get_interface_description("org.example.Foo".try_into().unwrap())
                 .await?
                 .unwrap();
             let upper_interface = upper_desc.parse()?;

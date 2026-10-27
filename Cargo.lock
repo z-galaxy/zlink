@@ -2125,6 +2125,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcheapstr"
+version = "1.1.0"
+source = "git+https://github.com/z-galaxy/zcheapstr?rev=9fd99aca4b3676d79e34f46020d89e25b1f23c32#9fd99aca4b3676d79e34f46020d89e25b1f23c32"
+
+[[package]]
 name = "zerocopy"
 version = "0.8.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2200,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "zlink"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "clap",
  "colored 3.0.0",
@@ -2223,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-codegen"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "doc-comment",
@@ -2236,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2262,18 +2267,20 @@ dependencies = [
  "uuid",
  "zlink-idl",
  "zlink-macros",
+ "zlink-names",
 ]
 
 [[package]]
 name = "zlink-idl"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "winnow",
+ "zlink-names",
 ]
 
 [[package]]
 name = "zlink-macros"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "futures-util",
  "proc-macro2",
@@ -2287,12 +2294,22 @@ dependencies = [
  "test-log",
  "tokio",
  "zlink",
- "zlink-idl",
+ "zlink-names",
+]
+
+[[package]]
+name = "zlink-names"
+version = "0.8.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "winnow",
+ "zcheapstr",
 ]
 
 [[package]]
 name = "zlink-smol"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-broadcast",
  "async-channel",
@@ -2310,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-tokio"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "futures-util",
  "pin-project-lite",

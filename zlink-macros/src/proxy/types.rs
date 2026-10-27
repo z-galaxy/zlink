@@ -6,7 +6,7 @@ use super::utils::{extract_zlink_attrs, parse_rename_value};
 #[derive(Default)]
 pub(super) struct MethodAttrs {
     /// Rename the method for the Varlink call.
-    pub rename: Option<String>,
+    pub rename: Option<syn::LitStr>,
     /// Method returns a stream of responses.
     pub is_streaming: bool,
     /// Method is one-way (fire and forget).

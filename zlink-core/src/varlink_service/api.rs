@@ -9,6 +9,7 @@ use crate::{OptionalParams, ReplyError};
 #[cfg(feature = "idl")]
 use super::InterfaceDescription;
 use super::{Info, OwnedInfo};
+use crate::names::InterfaceName;
 
 /// `org.varlink.service` interface methods.
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,7 +25,8 @@ pub enum Method<'a> {
     #[serde(rename = "org.varlink.service.GetInterfaceDescription")]
     GetInterfaceDescription {
         /// The interface to get the description for.
-        interface: &'a str,
+        #[serde(borrow)]
+        interface: InterfaceName<'a>,
     },
 }
 
@@ -432,9 +434,7 @@ mod tests {
         let call: Call<Method<'_>> = serde_json::from_str(json).unwrap();
         assert!(matches!(
             call.method(),
-            Method::GetInterfaceDescription {
-                interface: "org.example"
-            }
+            Method::GetInterfaceDescription { interface } if *interface == "org.example"
         ));
 
         // The interface can't be left out.
@@ -446,6 +446,28 @@ mod tests {
         for json in jsons {
             serde_json::from_str::<Call<Method<'_>>>(json).unwrap_err();
         }
+    }
+
+    #[test]
+    fn get_interface_description_call() {
+        let json = r#"{
+            "method": "org.varlink.service.GetInterfaceDescription",
+            "parameters": {"interface": "org.example.foo"}
+        }"#;
+        let method: Method<'_> = serde_json::from_str(json).unwrap();
+        let Method::GetInterfaceDescription { interface } = method else {
+            panic!("Expected a GetInterfaceDescription call, got: {method:?}");
+        };
+        assert_eq!(interface, "org.example.foo");
+
+        // The interface must be a valid name.
+        let json = json.replace("org.example.foo", "foo");
+        let err = serde_json::from_str::<Method<'_>>(&json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expected a Varlink interface name"),
+            "unexpected error: {err}"
+        );
     }
 
     // Helper function to serialize Error to JSON string.

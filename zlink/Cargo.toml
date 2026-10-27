@@ -1,6 +1,6 @@
 [package]
 name = "zlink"
-version = "0.7.1"
+version = "0.8.0"
 description = "Async Varlink API"
 edition.workspace = true
 rust-version.workspace = true
@@ -32,9 +32,9 @@ tracing = ["zlink-core/tracing", "zlink-tokio?/tracing", "zlink-smol?/tracing"]
 defmt = ["zlink-core/defmt", "zlink-tokio?/defmt", "zlink-smol?/defmt"]
 
 [dependencies]
-zlink-core = { path = "../zlink-core", version = "=0.7.1", default-features = false }
-zlink-tokio = { path = "../zlink-tokio", version = "=0.7.1", default-features = false, optional = true }
-zlink-smol = { path = "../zlink-smol", version = "=0.7.1", default-features = false, optional = true }
+zlink-core = { path = "../zlink-core", version = "=0.8.0", default-features = false }
+zlink-tokio = { path = "../zlink-tokio", version = "=0.8.0", default-features = false, optional = true }
+zlink-smol = { path = "../zlink-smol", version = "=0.8.0", default-features = false, optional = true }
 
 [dev-dependencies]
 doc-comment = "0.3.3"

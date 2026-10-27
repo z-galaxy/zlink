@@ -62,7 +62,7 @@ pub(crate) fn validate(
 /// notation.
 pub(crate) fn validate_interface(lit: &LitStr) -> Result<(), Error> {
     let name = lit.value();
-    if !zlink_idl::is_valid_interface_name(&name) {
+    if !zlink_names::is_valid_interface_name(&name) {
         return Err(Error::new_spanned(
             lit,
             format!(
@@ -79,8 +79,8 @@ impl Grammar {
     /// Whether Varlink can express `name` under this rule.
     fn accepts(self, name: &str) -> bool {
         match self {
-            Self::Field => zlink_idl::is_valid_field_name(name),
-            Self::Type => zlink_idl::is_valid_type_name(name),
+            Self::Field => zlink_names::is_valid_field_name(name),
+            Self::Type => zlink_names::is_valid_type_name(name),
         }
     }
 

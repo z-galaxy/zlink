@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use zlink_names::TypeName;
+
 use super::{CustomEnum, CustomObject};
 
 /// A custom type definition in Varlink IDL.
@@ -18,7 +20,7 @@ pub enum CustomType<'a> {
 
 impl<'a> CustomType<'a> {
     /// Returns the name of the custom type.
-    pub fn name(&self) -> &'a str {
+    pub fn name(&self) -> &TypeName<'a> {
         match self {
             CustomType::Object(obj) => obj.name(),
             CustomType::Enum(enm) => enm.name(),
@@ -79,14 +81,15 @@ mod tests {
 
     use super::*;
     use crate::{EnumVariant, Field, Type};
+    use zlink_names::FieldName;
 
     #[test]
     fn object_creation() {
-        let field_x = Field::new("x", &Type::Float, &[]);
-        let field_y = Field::new("y", &Type::Float, &[]);
+        let field_x = Field::new("x".try_into().unwrap(), &Type::Float, &[]);
+        let field_y = Field::new("y".try_into().unwrap(), &Type::Float, &[]);
         let fields = [&field_x, &field_y];
 
-        let custom_obj = CustomObject::new("Point", &fields, &[]);
+        let custom_obj = CustomObject::new("Point".try_into().unwrap(), &fields, &[]);
         assert_eq!(custom_obj.name(), "Point");
         assert_eq!(custom_obj.fields().count(), 2);
 
@@ -100,10 +103,10 @@ mod tests {
 
     #[test]
     fn enum_creation() {
-        let red = EnumVariant::new_owned("red", vec![]);
-        let green = EnumVariant::new_owned("green", vec![]);
-        let blue = EnumVariant::new_owned("blue", vec![]);
-        let custom_enum = CustomEnum::new_owned("Color", vec![red, green, blue], vec![]);
+        let red = EnumVariant::new_owned("red", vec![]).unwrap();
+        let green = EnumVariant::new_owned("green", vec![]).unwrap();
+        let blue = EnumVariant::new_owned("blue", vec![]).unwrap();
+        let custom_enum = CustomEnum::new_owned("Color", vec![red, green, blue], vec![]).unwrap();
 
         assert_eq!(custom_enum.name(), "Color");
         assert_eq!(custom_enum.variants().count(), 3);
@@ -117,11 +120,11 @@ mod tests {
 
     #[test]
     fn type_from_object() {
-        let field_x = Field::new("x", &Type::Float, &[]);
-        let field_y = Field::new("y", &Type::Float, &[]);
+        let field_x = Field::new("x".try_into().unwrap(), &Type::Float, &[]);
+        let field_y = Field::new("y".try_into().unwrap(), &Type::Float, &[]);
         let fields = [&field_x, &field_y];
 
-        let custom_obj = CustomObject::new("Point", &fields, &[]);
+        let custom_obj = CustomObject::new("Point".try_into().unwrap(), &fields, &[]);
         let custom_type = CustomType::from(custom_obj);
 
         assert_eq!(custom_type.name(), "Point");
@@ -133,10 +136,10 @@ mod tests {
 
     #[test]
     fn type_from_enum() {
-        let red = EnumVariant::new_owned("red", vec![]);
-        let green = EnumVariant::new_owned("green", vec![]);
-        let blue = EnumVariant::new_owned("blue", vec![]);
-        let custom_enum = CustomEnum::new_owned("Color", vec![red, green, blue], vec![]);
+        let red = EnumVariant::new_owned("red", vec![]).unwrap();
+        let green = EnumVariant::new_owned("green", vec![]).unwrap();
+        let blue = EnumVariant::new_owned("blue", vec![]).unwrap();
+        let custom_enum = CustomEnum::new_owned("Color", vec![red, green, blue], vec![]).unwrap();
         let custom_type = CustomType::from(custom_enum);
 
         assert_eq!(custom_type.name(), "Color");
@@ -149,10 +152,10 @@ mod tests {
     #[test]
     fn type_display_object() {
         // Test object display
-        let field_x = Field::new("x", &Type::Int, &[]);
-        let field_y = Field::new("y", &Type::Int, &[]);
+        let field_x = Field::new("x".try_into().unwrap(), &Type::Int, &[]);
+        let field_y = Field::new("y".try_into().unwrap(), &Type::Int, &[]);
         let fields = [&field_x, &field_y];
-        let custom_obj = CustomObject::new("Point", &fields, &[]);
+        let custom_obj = CustomObject::new("Point".try_into().unwrap(), &fields, &[]);
         let custom_type = CustomType::from(custom_obj);
         use core::fmt::Write;
         let mut buf = String::new();
@@ -162,14 +165,14 @@ mod tests {
 
     #[test]
     fn type_display_enum() {
-        // Test enum display
+        // Test enum display. `const` items can't use the validating conversions.
         const DIRECTION_VARIANTS: &[&EnumVariant<'static>] = &[
-            &EnumVariant::new("north", &[]),
-            &EnumVariant::new("south", &[]),
-            &EnumVariant::new("east", &[]),
-            &EnumVariant::new("west", &[]),
+            &EnumVariant::new(FieldName::from_static_str_unchecked("north"), &[]),
+            &EnumVariant::new(FieldName::from_static_str_unchecked("south"), &[]),
+            &EnumVariant::new(FieldName::from_static_str_unchecked("east"), &[]),
+            &EnumVariant::new(FieldName::from_static_str_unchecked("west"), &[]),
         ];
-        let custom_enum = CustomEnum::new("Direction", DIRECTION_VARIANTS, &[]);
+        let custom_enum = CustomEnum::new("Direction".try_into().unwrap(), DIRECTION_VARIANTS, &[]);
         let custom_type = CustomType::from(custom_enum);
         use core::fmt::Write;
         let mut buf = String::new();
@@ -181,10 +184,10 @@ mod tests {
     fn owned_types() {
         // Test owned object
         let fields = vec![
-            Field::new("name", &Type::String, &[]),
-            Field::new("age", &Type::Int, &[]),
+            Field::new("name".try_into().unwrap(), &Type::String, &[]),
+            Field::new("age".try_into().unwrap(), &Type::Int, &[]),
         ];
-        let custom_obj = CustomObject::new_owned("Person", fields, vec![]);
+        let custom_obj = CustomObject::new_owned("Person", fields, vec![]).unwrap();
         assert_eq!(custom_obj.name(), "Person");
         use core::fmt::Write;
         let mut buf = String::new();
@@ -195,12 +198,13 @@ mod tests {
         let custom_enum = CustomEnum::new_owned(
             "Size",
             vec![
-                EnumVariant::new_owned("small", vec![]),
-                EnumVariant::new_owned("medium", vec![]),
-                EnumVariant::new_owned("large", vec![]),
+                EnumVariant::new_owned("small", vec![]).unwrap(),
+                EnumVariant::new_owned("medium", vec![]).unwrap(),
+                EnumVariant::new_owned("large", vec![]).unwrap(),
             ],
             vec![],
-        );
+        )
+        .unwrap();
         assert_eq!(custom_enum.name(), "Size");
         let mut buf = String::new();
         write!(buf, "{}", custom_enum).unwrap();

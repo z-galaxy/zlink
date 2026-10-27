@@ -2,20 +2,26 @@
 
 use core::fmt;
 
+use zlink_names::FieldName;
+
 use super::{Comment, List};
 
 /// A single variant in an enum type definition.
 #[derive(Debug, Clone, Eq)]
 pub struct EnumVariant<'a> {
     /// The name of the variant.
-    name: &'a str,
+    name: FieldName<'a>,
     /// The comments associated with this variant.
     comments: List<'a, Comment<'a>>,
 }
 
 impl<'a> EnumVariant<'a> {
     /// Creates a new enum variant with the given name and borrowed comments.
-    pub const fn new(name: &'a str, comments: &'a [&'a Comment<'a>]) -> Self {
+    ///
+    /// As this is a `const fn`, it takes a name that is already validated. In `const` contexts,
+    /// make one with [`FieldName::from_static_str_unchecked`]. For anything else that converts
+    /// into a [`FieldName`], such as a string slice, use [`EnumVariant::new_owned`].
+    pub const fn new(name: FieldName<'a>, comments: &'a [&'a Comment<'a>]) -> Self {
         Self {
             name,
             comments: List::Borrowed(comments),
@@ -23,16 +29,26 @@ impl<'a> EnumVariant<'a> {
     }
 
     /// Creates a new enum variant with the given name and owned comments.
-    pub fn new_owned(name: &'a str, comments: alloc::vec::Vec<Comment<'a>>) -> Self {
-        Self {
-            name,
+    ///
+    /// The name can be anything that converts into a [`FieldName`], such as a string slice.
+    ///
+    /// # Errors
+    ///
+    /// If `name` doesn't convert into a [`FieldName`], e.g. because it is a string that is not a
+    /// valid field name.
+    pub fn new_owned<N>(name: N, comments: alloc::vec::Vec<Comment<'a>>) -> Result<Self, N::Error>
+    where
+        N: TryInto<FieldName<'a>>,
+    {
+        Ok(Self {
+            name: name.try_into()?,
             comments: List::from(comments),
-        }
+        })
     }
 
     /// Returns the name of the variant.
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> &FieldName<'a> {
+        &self.name
     }
 
     /// Returns an iterator over the comments associated with this variant.
@@ -70,7 +86,7 @@ mod tests {
 
     #[test]
     fn simple_variant() {
-        let variant = EnumVariant::new("active", &[]);
+        let variant = EnumVariant::new("active".try_into().unwrap(), &[]);
         assert_eq!(variant.name(), "active");
         assert!(!variant.has_comments());
 
@@ -80,10 +96,21 @@ mod tests {
     }
 
     #[test]
+    fn new_owned_rejects_an_invalid_name() {
+        let variant = EnumVariant::new_owned("active", Vec::new()).unwrap();
+        assert_eq!(variant.name(), "active");
+
+        assert_eq!(
+            EnumVariant::new_owned("Active-State", Vec::new()).unwrap_err(),
+            zlink_names::Error::InvalidFieldName
+        );
+    }
+
+    #[test]
     fn variant_with_comments() {
         let comment = Comment::new("The active state");
         let comments = [&comment];
-        let variant = EnumVariant::new("active", &comments);
+        let variant = EnumVariant::new("active".try_into().unwrap(), &comments);
 
         assert_eq!(variant.name(), "active");
         assert!(variant.has_comments());
@@ -98,7 +125,7 @@ mod tests {
         let comment1 = Comment::new("First comment");
         let comment2 = Comment::new("Second comment");
         let comments = [&comment1, &comment2];
-        let variant = EnumVariant::new("complex", &comments);
+        let variant = EnumVariant::new("complex".try_into().unwrap(), &comments);
 
         assert_eq!(variant.name(), "complex");
         assert!(variant.has_comments());
@@ -115,7 +142,7 @@ mod tests {
             Comment::new("Owned comment 1"),
             Comment::new("Owned comment 2"),
         ];
-        let variant = EnumVariant::new_owned("owned", comments);
+        let variant = EnumVariant::new_owned("owned", comments).unwrap();
 
         assert_eq!(variant.name(), "owned");
         assert!(variant.has_comments());

@@ -55,7 +55,10 @@ fn custom_type_container_rename() {
 fn custom_type_rename_keeps_type_reference_in_sync() {
     // The `Type` impl must point at the same name the `CustomType` impl declares, or the IDL
     // reference dangles.
-    assert_eq!(Record::TYPE, &idl::Type::Custom("Membership"));
+    assert_eq!(
+        Record::TYPE,
+        &idl::Type::Custom("Membership".try_into().unwrap())
+    );
 }
 
 #[test]
@@ -83,7 +86,7 @@ fn custom_type_raw_ident_container_name_is_unraw_d() {
 fn raw_ident_custom_type_keeps_type_reference_in_sync() {
     // Same sync property as `custom_type_rename_keeps_type_reference_in_sync` above, but for the
     // no-explicit-rename path: the container name comes straight from the (unraw'd) Rust ident.
-    assert_eq!(Foo::TYPE, &idl::Type::Custom("Foo"));
+    assert_eq!(Foo::TYPE, &idl::Type::Custom("Foo".try_into().unwrap()));
 }
 
 #[test]

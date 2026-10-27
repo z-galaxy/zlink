@@ -1,6 +1,6 @@
 [package]
 name = "zlink-idl"
-version = "0.7.1"
+version = "0.8.0"
 description = "Varlink IDL types and parser"
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,7 @@ parse = ["dep:winnow"]
 winnow = { version = "0.7", default-features = false, features = [
     "alloc",
 ], optional = true }
+zlink-names = { path = "../zlink-names", version = "=0.8.0" }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -54,6 +54,7 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
 
     let type_comments = utils::extract_doc_comments(&input.attrs);
     let type_comment_objects = shared::generate_comment_objects(&type_comments, &crate_path);
+    let type_name_expr = shared::type_name_expr(&name_str, &crate_path);
 
     let custom_type = match &input.data {
         Data::Struct(data_struct) => {
@@ -67,7 +68,7 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
                 static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = #field_refs_init;
 
                 #crate_path::idl::CustomType::Object(
-                    #crate_path::idl::CustomObject::new(#name_str, FIELD_REFS, &[#(#type_comment_objects),*])
+                    #crate_path::idl::CustomObject::new(#type_name_expr, FIELD_REFS, &[#(#type_comment_objects),*])
                 )
             })
         }
@@ -81,7 +82,7 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
                 ];
 
                 #crate_path::idl::CustomType::Enum(
-                   #crate_path::idl::CustomEnum::new(#name_str, VARIANT_REFS, &[#(#type_comment_objects),*])
+                   #crate_path::idl::CustomEnum::new(#type_name_expr, VARIANT_REFS, &[#(#type_comment_objects),*])
                 )
             })
         }
@@ -99,7 +100,7 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
         }
 
         impl #impl_generics #crate_path::introspect::Type for #name #ty_generics #where_clause {
-            const TYPE: &'static #crate_path::idl::Type<'static> = &#crate_path::idl::Type::Custom(#name_str);
+            const TYPE: &'static #crate_path::idl::Type<'static> = &#crate_path::idl::Type::Custom(#type_name_expr);
         }
     })
 }

@@ -4,13 +4,15 @@ use core::fmt;
 
 use alloc::vec::Vec;
 
+use zlink_names::TypeName;
+
 use super::{Comment, List, Parameter};
 
 /// A method definition in Varlink IDL.
 #[derive(Debug, Clone, Eq)]
 pub struct Method<'a> {
     /// The name of the method.
-    name: &'a str,
+    name: TypeName<'a>,
     /// Input parameters for the method.
     inputs: List<'a, Parameter<'a>>,
     /// Output parameters for the method.
@@ -21,8 +23,12 @@ pub struct Method<'a> {
 
 impl<'a> Method<'a> {
     /// Creates a new method with the given name, borrowed parameters, and comments.
+    ///
+    /// As this is a `const fn`, it takes a name that is already validated. In `const` contexts,
+    /// make one with [`TypeName::from_static_str_unchecked`]. For anything else that converts
+    /// into a [`TypeName`], such as a string slice, use [`Method::new_owned`].
     pub const fn new(
-        name: &'a str,
+        name: TypeName<'a>,
         inputs: &'a [&'a Parameter<'a>],
         outputs: &'a [&'a Parameter<'a>],
         comments: &'a [&'a Comment<'a>],
@@ -36,23 +42,33 @@ impl<'a> Method<'a> {
     }
 
     /// Creates a new method with the given name, owned parameters, and comments.
-    pub fn new_owned(
-        name: &'a str,
+    ///
+    /// The name can be anything that converts into a [`TypeName`], such as a string slice.
+    ///
+    /// # Errors
+    ///
+    /// If `name` doesn't convert into a [`TypeName`], e.g. because it is a string that is not a
+    /// valid type name.
+    pub fn new_owned<N>(
+        name: N,
         inputs: Vec<Parameter<'a>>,
         outputs: Vec<Parameter<'a>>,
         comments: Vec<Comment<'a>>,
-    ) -> Self {
-        Self {
-            name,
+    ) -> Result<Self, N::Error>
+    where
+        N: TryInto<TypeName<'a>>,
+    {
+        Ok(Self {
+            name: name.try_into()?,
             inputs: List::from(inputs),
             outputs: List::from(outputs),
             comments: List::from(comments),
-        }
+        })
     }
 
     /// Returns the name of the method.
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> &TypeName<'a> {
+        &self.name
     }
 
     /// Returns an iterator over the input parameters.
@@ -126,12 +142,12 @@ mod tests {
 
     #[test]
     fn method_creation() {
-        let input = Parameter::new("id", &Type::Int, &[]);
-        let output = Parameter::new("name", &Type::String, &[]);
+        let input = Parameter::new("id".try_into().unwrap(), &Type::Int, &[]);
+        let output = Parameter::new("name".try_into().unwrap(), &Type::String, &[]);
         let inputs = [&input];
         let outputs = [&output];
 
-        let method = Method::new("GetName", &inputs, &outputs, &[]);
+        let method = Method::new("GetName".try_into().unwrap(), &inputs, &outputs, &[]);
         assert_eq!(method.name(), "GetName");
         assert_eq!(method.inputs().count(), 1);
         assert_eq!(method.outputs().count(), 1);
@@ -150,25 +166,36 @@ mod tests {
 
     #[test]
     fn method_no_params() {
-        let method = Method::new("Ping", &[], &[], &[]);
+        let method = Method::new("Ping".try_into().unwrap(), &[], &[], &[]);
         assert_eq!(method.name(), "Ping");
         assert!(method.has_no_inputs());
         assert!(method.has_no_outputs());
     }
 
     #[test]
+    fn new_owned_rejects_an_invalid_name() {
+        let method = Method::new_owned("Ping", Vec::new(), Vec::new(), Vec::new()).unwrap();
+        assert_eq!(method.name(), "Ping");
+
+        assert_eq!(
+            Method::new_owned("ping", Vec::new(), Vec::new(), Vec::new()).unwrap_err(),
+            zlink_names::Error::InvalidTypeName
+        );
+    }
+
+    #[test]
     fn method_display_with_no_outputs() {
         use core::fmt::Write;
 
-        let method = Method::new("Ping", &[], &[], &[]);
+        let method = Method::new("Ping".try_into().unwrap(), &[], &[], &[]);
         let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "method Ping() -> ()");
 
-        let name_param = Parameter::new("name", &Type::String, &[]);
-        let id_param = Parameter::new("id", &Type::String, &[]);
+        let name_param = Parameter::new("name".try_into().unwrap(), &Type::String, &[]);
+        let id_param = Parameter::new("id".try_into().unwrap(), &Type::String, &[]);
         let params = [&name_param, &id_param];
-        let method = Method::new("Register", &params, &[], &[]);
+        let method = Method::new("Register".try_into().unwrap(), &params, &[], &[]);
         let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(displayed, "method Register(name: string, id: string) -> ()");
@@ -183,12 +210,13 @@ mod tests {
         let comment2 = Comment::new("Returns user details by ID");
         let comments = [&comment1, &comment2];
 
-        let input = Parameter::new("id", &Type::Int, &[]);
-        let output = Parameter::new("user", &Type::Custom("User"), &[]);
+        let input = Parameter::new("id".try_into().unwrap(), &Type::Int, &[]);
+        let user_type = Type::Custom("User".try_into().unwrap());
+        let output = Parameter::new("user".try_into().unwrap(), &user_type, &[]);
         let inputs = [&input];
         let outputs = [&output];
 
-        let method = Method::new("GetUser", &inputs, &outputs, &comments);
+        let method = Method::new("GetUser".try_into().unwrap(), &inputs, &outputs, &comments);
         let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
         assert_eq!(

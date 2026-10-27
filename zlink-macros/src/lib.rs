@@ -546,7 +546,9 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///
 /// The following attributes can be used to customize the behavior of this macro:
 ///
-/// * `interface` (required) - The Varlink interface name (e.g., `"org.varlink.service"`).
+/// * `interface` (required) - The Varlink interface name (e.g., `"org.varlink.service"`). It can
+///   also be the only argument: `#[proxy("org.varlink.service")]`. It must be a valid Varlink
+///   interface name, in reverse-domain notation, or the macro fails to compile.
 /// * `crate` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
 /// * `chain_name` - Custom name for the generated chain extension trait. Defaults to
 ///   `{TraitName}Chain`.
@@ -555,9 +557,10 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///   `kebab-case`, `SCREAMING-KEBAB-CASE`. systemd's Varlink APIs, for instance, use `camelCase`
 ///   argument names (with `PascalCase` where a name mirrors a documented option name), so a proxy
 ///   for one typically wants `rename_all_arguments = "camelCase"`. Per-argument `#[zlink(rename =
-///   "...")]` takes precedence over `rename_all_arguments`. Every produced name must still fit the
-///   Varlink field-name grammar (`[A-Za-z](_?[A-Za-z0-9])*`), so a convention that steps outside it
-///   -- `kebab-case` on a multi-word argument, say -- is rejected at compile time:
+///   "...")]` takes precedence over `rename_all_arguments`. Every argument name -- whether a
+///   convention produced it, a rename gave it, or it is just the Rust identifier -- must fit the
+///   Varlink field-name grammar (`[A-Za-z](_?[A-Za-z0-9])*`), so a name that steps outside it is
+///   rejected at compile time. That is the case for `kebab-case` on a multi-word argument, say:
 ///
 /// ```rust,compile_fail
 /// # use zlink::proxy;
@@ -565,6 +568,32 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// trait ConfigProxy {
 ///     // `dry_run` would become `dry-run`, which Varlink cannot express.
 ///     async fn set_config(&mut self, dry_run: bool) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
+/// ```
+///
+/// It is also the case for a Rust identifier that the grammar doesn't allow, such as one with a
+/// leading underscore, unless you give the argument a name with `#[zlink(rename = "...")]`:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy("org.example.Config")]
+/// trait ConfigProxy {
+///     // `_dry_run` is a fine Rust identifier, but not a name Varlink can express.
+///     async fn set_config(&mut self, _dry_run: bool) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
+/// ```
+///
+/// An interface name that is not in reverse-domain notation is rejected at compile time as well:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy("Calculator")]
+/// trait CalculatorProxy {
+///     async fn add(&mut self, a: i64, b: i64) -> zlink::Result<Result<i64, MyError>>;
 /// }
 /// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// # enum MyError {}
@@ -857,6 +886,21 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// To specify a different Varlink method name, use the `#[zlink(rename = "...")]` attribute. See
 /// `list_machines` in the example above.
 ///
+/// Either way, the name must be a valid Varlink method name (`[A-Z][A-Za-z0-9]*`), which is checked
+/// at compile time:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy("org.example.Status")]
+/// trait StatusProxy {
+///     // `get-status` is not a name Varlink can express.
+///     #[zlink(rename = "get-status")]
+///     async fn status(&mut self) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
+/// ```
+///
 /// # Streaming Methods
 ///
 /// For methods that support streaming (the 'more' flag), use the `#[zlink(more)]` attribute.
@@ -1042,6 +1086,22 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # enum UserError { InvalidInput }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # }).unwrap();
+/// ```
+///
+/// Like every argument name, the new name must fit the Varlink field-name grammar:
+///
+/// ```rust,compile_fail
+/// # use zlink::proxy;
+/// #[proxy("org.example.Config")]
+/// trait ConfigProxy {
+///     // `dry-run` is not a name Varlink can express.
+///     async fn set_config(
+///         &mut self,
+///         #[zlink(rename = "dry-run")] dry_run: bool,
+///     ) -> zlink::Result<Result<(), MyError>>;
+/// }
+/// # #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// # enum MyError {}
 /// ```
 ///
 /// # Generic Parameters
@@ -1686,7 +1746,10 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # ];
 /// # let socket = MockSocket::with_responses(&responses);
 /// # let mut conn = zlink::Connection::new(socket);
-/// let desc = conn.get_interface_description("org.example.bank").await?.unwrap();
+/// let desc = conn
+///     .get_interface_description("org.example.bank".try_into()?)
+///     .await?
+///     .unwrap();
 /// let interface = desc.parse()?;
 /// assert_eq!(interface.name(), "org.example.bank");
 ///

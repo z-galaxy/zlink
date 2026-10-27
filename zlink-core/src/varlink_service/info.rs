@@ -1,5 +1,6 @@
 #[cfg(feature = "introspection")]
 use crate::introspect::Type;
+use crate::names::{InterfaceName, OwnedInterfaceName};
 use alloc::{borrow::Cow, vec::Vec};
 use serde::{Deserialize, Serialize};
 
@@ -24,25 +25,40 @@ pub struct Info<'a> {
     pub url: Cow<'a, str>,
     /// List of interfaces provided by the service.
     #[serde(borrow)]
-    pub interfaces: Vec<Cow<'a, str>>,
+    pub interfaces: Vec<InterfaceName<'a>>,
 }
 
 impl<'a> Info<'a> {
     /// Create a new `Info` instance.
-    pub fn new(
+    ///
+    /// The interface names can be anything that converts into an [`InterfaceName`], e.g. string
+    /// slices, which are validated, or `InterfaceName`s.
+    ///
+    /// # Errors
+    ///
+    /// If one of the interface names doesn't convert into an [`InterfaceName`], e.g. because it
+    /// is a string that is not a valid interface name.
+    pub fn new<I>(
         vendor: impl Into<Cow<'a, str>>,
         product: impl Into<Cow<'a, str>>,
         version: impl Into<Cow<'a, str>>,
         url: impl Into<Cow<'a, str>>,
-        interfaces: impl IntoIterator<Item = impl Into<Cow<'a, str>>>,
-    ) -> Self {
-        Self {
+        interfaces: I,
+    ) -> Result<Self, <I::Item as TryInto<InterfaceName<'a>>>::Error>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<InterfaceName<'a>>,
+    {
+        Ok(Self {
             vendor: vendor.into(),
             product: product.into(),
             version: version.into(),
             url: url.into(),
-            interfaces: interfaces.into_iter().map(Into::into).collect(),
-        }
+            interfaces: interfaces
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
     }
 
     /// Convert this info into an owned version with `'static` lifetime.
@@ -55,7 +71,7 @@ impl<'a> Info<'a> {
             interfaces: self
                 .interfaces
                 .into_iter()
-                .map(|s| Cow::Owned(s.into_owned()))
+                .map(|name| name.into_owned().into_inner())
                 .collect(),
         }
     }
@@ -81,14 +97,26 @@ pub struct OwnedInfo(Info<'static>);
 
 impl OwnedInfo {
     /// Create a new `OwnedInfo` instance.
-    pub fn new(
+    ///
+    /// The interface names can be anything that converts into an [`InterfaceName`], e.g. string
+    /// slices, which are validated, or `InterfaceName`s.
+    ///
+    /// # Errors
+    ///
+    /// If one of the interface names doesn't convert into an [`InterfaceName`], e.g. because it
+    /// is a string that is not a valid interface name.
+    pub fn new<I>(
         vendor: impl Into<Cow<'static, str>>,
         product: impl Into<Cow<'static, str>>,
         version: impl Into<Cow<'static, str>>,
         url: impl Into<Cow<'static, str>>,
-        interfaces: impl IntoIterator<Item = impl Into<Cow<'static, str>>>,
-    ) -> Self {
-        Self(Info::new(vendor, product, version, url, interfaces))
+        interfaces: I,
+    ) -> Result<Self, <I::Item as TryInto<InterfaceName<'static>>>::Error>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<InterfaceName<'static>>,
+    {
+        Info::new(vendor, product, version, url, interfaces).map(Self)
     }
 
     /// Returns a reference to the inner `Info`.
@@ -136,7 +164,7 @@ impl<'de> Deserialize<'de> for OwnedInfo {
             product: String,
             version: String,
             url: String,
-            interfaces: Vec<String>,
+            interfaces: Vec<OwnedInterfaceName>,
         }
 
         let info = InfoOwned::deserialize(deserializer)?;
@@ -145,7 +173,11 @@ impl<'de> Deserialize<'de> for OwnedInfo {
             product: Cow::Owned(info.product),
             version: Cow::Owned(info.version),
             url: Cow::Owned(info.url),
-            interfaces: info.interfaces.into_iter().map(Cow::Owned).collect(),
+            interfaces: info
+                .interfaces
+                .into_iter()
+                .map(OwnedInterfaceName::into_inner)
+                .collect(),
         }))
     }
 }
@@ -164,7 +196,8 @@ mod tests {
             "1.0.0",
             "https://example.com",
             interfaces,
-        );
+        )
+        .unwrap();
 
         let json = serde_json::to_string(&info).unwrap();
 
@@ -203,7 +236,8 @@ mod tests {
             "1.0.0",
             "https://example.com",
             interfaces,
-        );
+        )
+        .unwrap();
 
         // Serialize to JSON
         let json = serde_json::to_string(&original).unwrap();
@@ -213,5 +247,88 @@ mod tests {
 
         // Verify they are equal
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn invalid_interface_names() {
+        // The constructor validates the names it converts.
+        assert_eq!(
+            Info::new("Vendor", "Product", "1.0", "https://example.com", ["foo"]).unwrap_err(),
+            crate::names::Error::InvalidInterfaceName
+        );
+
+        // Names that are `InterfaceName`s already need no conversion, so it can't fail.
+        let name = InterfaceName::try_from("com.example.test").unwrap();
+        let Ok(info) = Info::new("Vendor", "Product", "1.0", "https://example.com", [name]);
+        assert_eq!(info.interfaces, ["com.example.test"]);
+
+        // Deserialization validates the names too.
+        let json = r#"{
+            "vendor": "Test Vendor",
+            "product": "Test Product",
+            "version": "1.0.0",
+            "url": "https://example.com",
+            "interfaces": ["com.example.test", "foo"]
+        }"#;
+        let err = serde_json::from_str::<Info<'_>>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expected a Varlink interface name"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // Whichever form the interface names come in, the error of the constructor converts into the
+    // crate's own.
+    #[test]
+    fn constructor_error_conversion() -> crate::Result<()> {
+        let info = Info::new("Vendor", "Product", "1.0", "", ["com.example.test"])?;
+        let name = InterfaceName::try_from("com.example.test")?;
+        assert_eq!(Info::new("Vendor", "Product", "1.0", "", [name])?, info);
+        let owned = OwnedInfo::new("Vendor", "Product", "1.0", "", ["com.example.test"])?;
+        let name = InterfaceName::try_from("com.example.test")?;
+        assert_eq!(
+            OwnedInfo::new("Vendor", "Product", "1.0", "", [name])?,
+            owned
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn owned_info() {
+        let json = r#"{
+            "vendor": "Test Vendor",
+            "product": "Test Product",
+            "version": "1.0.0",
+            "url": "https://example.com",
+            "interfaces": ["com.example.test", "com.example.other"]
+        }"#;
+        let info: OwnedInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.vendor, "Test Vendor");
+        assert_eq!(info.interfaces, ["com.example.test", "com.example.other"]);
+
+        // The names are validated, whether deserialized or passed to the constructor.
+        let json = json.replace("com.example.other", "other");
+        serde_json::from_str::<OwnedInfo>(&json).unwrap_err();
+        assert_eq!(
+            OwnedInfo::new("Vendor", "Product", "1.0", "https://example.com", ["other"])
+                .unwrap_err(),
+            crate::names::Error::InvalidInterfaceName
+        );
+
+        // An `Info` can be turned into an owned one, which no longer borrows.
+        let source = alloc::string::String::from("com.example.test");
+        let info = Info::new(
+            "Vendor",
+            "Product",
+            "1.0",
+            "https://example.com",
+            [source.as_str()],
+        )
+        .unwrap();
+        let owned = OwnedInfo::from(info);
+        drop(source);
+        assert_eq!(owned.interfaces, ["com.example.test"]);
     }
 }

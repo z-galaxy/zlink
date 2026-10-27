@@ -12,6 +12,8 @@ pub enum Error {
     BufferOverflow,
     /// Invalid UTF-8 data.
     InvalidUtf8(Utf8Error),
+    /// An invalid Varlink name.
+    InvalidName(crate::names::Error),
     /// Error serializing or deserializing to/from JSON.
     Json(serde_json::Error),
     /// An I/O error.
@@ -40,6 +42,7 @@ impl core::error::Error for Error {
             #[cfg(feature = "std")]
             Error::Io(e) => Some(e),
             Error::InvalidUtf8(e) => Some(e),
+            Error::InvalidName(e) => Some(e),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(_) => None,
             Error::VarlinkService(e) => Some(e),
@@ -51,6 +54,18 @@ impl core::error::Error for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Json(e)
+    }
+}
+
+impl From<crate::names::Error> for Error {
+    fn from(e: crate::names::Error) -> Self {
+        Error::InvalidName(e)
+    }
+}
+
+impl From<core::convert::Infallible> for Error {
+    fn from(e: core::convert::Infallible) -> Self {
+        match e {}
     }
 }
 
@@ -77,6 +92,7 @@ impl core::fmt::Display for Error {
             Error::SocketWrite => write!(f, "An error occurred while writing to the socket"),
             Error::BufferOverflow => write!(f, "Buffer overflow"),
             Error::InvalidUtf8(e) => write!(f, "Invalid UTF-8 data: {e}"),
+            Error::InvalidName(e) => write!(f, "{e}"),
             Error::Json(e) => write!(f, "Error serializing or deserializing to/from JSON: {e}"),
             #[cfg(feature = "std")]
             Error::Io(e) => write!(f, "I/O error: {e}"),
@@ -102,6 +118,7 @@ impl defmt::Format for Error {
             }
             Error::BufferOverflow => defmt::write!(fmt, "Buffer overflow"),
             Error::InvalidUtf8(_) => defmt::write!(fmt, "Invalid UTF-8 data"),
+            Error::InvalidName(_) => defmt::write!(fmt, "Invalid Varlink name"),
             Error::Json(_) => {
                 defmt::write!(fmt, "Error serializing or deserializing to/from JSON")
             }

@@ -51,6 +51,15 @@ pub use call::Call;
 pub use call::OptionalParams;
 pub mod reply;
 pub use reply::Reply;
+pub mod names {
+    //! Varlink name types and validation.
+    //!
+    //! This is a re-export of the [`zlink_names`] crate, for those who only need the name API and
+    //! not the rest of zlink.
+
+    #[doc(inline)]
+    pub use zlink_names::*;
+}
 #[cfg(feature = "idl")]
 pub mod idl {
     //! Interface Definition Language (IDL) support for Varlink.

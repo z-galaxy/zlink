@@ -4,13 +4,15 @@ use core::fmt;
 
 use alloc::vec::Vec;
 
+use zlink_names::InterfaceName;
+
 use super::List;
 
 /// A Varlink interface definition.
 #[derive(Debug, Clone, Eq)]
 pub struct Interface<'a> {
     /// The name of the interface in reverse-domain notation.
-    name: &'a str,
+    name: InterfaceName<'a>,
     /// The methods of the interface.
     methods: List<'a, super::Method<'a>>,
     /// The custom types of the interface.
@@ -23,8 +25,12 @@ pub struct Interface<'a> {
 
 impl<'a> Interface<'a> {
     /// Creates a new interface with the given name, borrowed collections, and comments.
+    ///
+    /// As this is a `const fn`, it takes a name that is already validated. In `const` contexts,
+    /// make one with [`InterfaceName::from_static_str_unchecked`]. For anything else that converts
+    /// into an [`InterfaceName`], such as a string slice, use [`Interface::new_owned`].
     pub const fn new(
-        name: &'a str,
+        name: InterfaceName<'a>,
         methods: &'a [&'a super::Method<'a>],
         custom_types: &'a [&'a super::CustomType<'a>],
         errors: &'a [&'a super::Error<'a>],
@@ -40,25 +46,35 @@ impl<'a> Interface<'a> {
     }
 
     /// Creates a new interface with the given name, owned collections, and comments.
-    pub fn new_owned(
-        name: &'a str,
+    ///
+    /// The name can be anything that converts into an [`InterfaceName`], such as a string slice.
+    ///
+    /// # Errors
+    ///
+    /// If `name` doesn't convert into an [`InterfaceName`], e.g. because it is a string that is not
+    /// a valid interface name.
+    pub fn new_owned<N>(
+        name: N,
         methods: Vec<super::Method<'a>>,
         custom_types: Vec<super::CustomType<'a>>,
         errors: Vec<super::Error<'a>>,
         comments: Vec<super::Comment<'a>>,
-    ) -> Self {
-        Self {
-            name,
+    ) -> Result<Self, N::Error>
+    where
+        N: TryInto<InterfaceName<'a>>,
+    {
+        Ok(Self {
+            name: name.try_into()?,
             methods: List::Owned(methods),
             custom_types: List::Owned(custom_types),
             errors: List::Owned(errors),
             comments: List::from(comments),
-        }
+        })
     }
 
     /// Returns the name of the interface.
-    pub fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> &InterfaceName<'a> {
+        &self.name
     }
 
     /// Returns an iterator over the methods of the interface.
@@ -138,37 +154,77 @@ mod tests {
         // Build the org.varlink.service interface as our test case
         let interfaces_type = Type::Array(TypeRef::new(&Type::String));
         let get_info_outputs = [
-            &Parameter::new("vendor", &Type::String, &[]),
-            &Parameter::new("product", &Type::String, &[]),
-            &Parameter::new("version", &Type::String, &[]),
-            &Parameter::new("url", &Type::String, &[]),
-            &Parameter::new("interfaces", &interfaces_type, &[]),
+            &Parameter::new("vendor".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("product".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("version".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("url".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("interfaces".try_into().unwrap(), &interfaces_type, &[]),
         ];
-        let get_info = Method::new("GetInfo", &[], &get_info_outputs, &[]);
+        let get_info = Method::new("GetInfo".try_into().unwrap(), &[], &get_info_outputs, &[]);
 
-        let get_interface_desc_inputs = [&Parameter::new("interface", &Type::String, &[])];
-        let get_interface_desc_outputs = [&Parameter::new("description", &Type::String, &[])];
+        let get_interface_desc_inputs = [&Parameter::new(
+            "interface".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
+        let get_interface_desc_outputs = [&Parameter::new(
+            "description".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
         let get_interface_desc = Method::new(
-            "GetInterfaceDescription",
+            "GetInterfaceDescription".try_into().unwrap(),
             &get_interface_desc_inputs,
             &get_interface_desc_outputs,
             &[],
         );
 
-        let interface_not_found_fields = [&Field::new("interface", &Type::String, &[])];
-        let interface_not_found = Error::new("InterfaceNotFound", &interface_not_found_fields, &[]);
+        let interface_not_found_fields = [&Field::new(
+            "interface".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
+        let interface_not_found = Error::new(
+            "InterfaceNotFound".try_into().unwrap(),
+            &interface_not_found_fields,
+            &[],
+        );
 
-        let method_not_found_fields = [&Field::new("method", &Type::String, &[])];
-        let method_not_found = Error::new("MethodNotFound", &method_not_found_fields, &[]);
+        let method_not_found_fields = [&Field::new(
+            "method".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
+        let method_not_found = Error::new(
+            "MethodNotFound".try_into().unwrap(),
+            &method_not_found_fields,
+            &[],
+        );
 
-        let method_not_impl_fields = [&Field::new("method", &Type::String, &[])];
-        let method_not_impl = Error::new("MethodNotImplemented", &method_not_impl_fields, &[]);
+        let method_not_impl_fields = [&Field::new(
+            "method".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
+        let method_not_impl = Error::new(
+            "MethodNotImplemented".try_into().unwrap(),
+            &method_not_impl_fields,
+            &[],
+        );
 
-        let invalid_param_fields = [&Field::new("parameter", &Type::String, &[])];
-        let invalid_param = Error::new("InvalidParameter", &invalid_param_fields, &[]);
+        let invalid_param_fields = [&Field::new(
+            "parameter".try_into().unwrap(),
+            &Type::String,
+            &[],
+        )];
+        let invalid_param = Error::new(
+            "InvalidParameter".try_into().unwrap(),
+            &invalid_param_fields,
+            &[],
+        );
 
-        let permission_denied = Error::new("PermissionDenied", &[], &[]);
-        let expected_more = Error::new("ExpectedMore", &[], &[]);
+        let permission_denied = Error::new("PermissionDenied".try_into().unwrap(), &[], &[]);
+        let expected_more = Error::new("ExpectedMore".try_into().unwrap(), &[], &[]);
 
         let methods = &[&get_info, &get_interface_desc];
         let errors = &[
@@ -180,7 +236,13 @@ mod tests {
             &expected_more,
         ];
 
-        let interface = Interface::new("org.varlink.service", methods, &[], errors, &[]);
+        let interface = Interface::new(
+            "org.varlink.service".try_into().unwrap(),
+            methods,
+            &[],
+            errors,
+            &[],
+        );
 
         assert_eq!(interface.name(), "org.varlink.service");
         assert_eq!(interface.methods().count(), 2);
@@ -249,11 +311,33 @@ error ExpectedMore ()
 
     #[test]
     fn empty_interface() {
-        let interface = Interface::new("com.example.empty", &[], &[], &[], &[]);
+        let interface = Interface::new("com.example.empty".try_into().unwrap(), &[], &[], &[], &[]);
         assert!(interface.is_empty());
         assert_eq!(interface.methods().count(), 0);
         assert_eq!(interface.errors().count(), 0);
         assert_eq!(interface.custom_types().count(), 0);
+    }
+
+    #[test]
+    fn new_owned_converts_the_name() {
+        fn new_owned(name: &str) -> Result<Interface<'_>, zlink_names::Error> {
+            Interface::new_owned(name, Vec::new(), Vec::new(), Vec::new(), Vec::new())
+        }
+
+        let interface = new_owned("org.example.test").unwrap();
+        assert_eq!(interface.name(), "org.example.test");
+
+        // An invalid name is an error.
+        assert_eq!(
+            new_owned("Test").unwrap_err(),
+            zlink_names::Error::InvalidInterfaceName
+        );
+
+        // A name needs no conversion, so there is nothing that can fail.
+        let name = InterfaceName::try_from("org.example.test").unwrap();
+        let Ok(interface) =
+            Interface::new_owned(name, Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        assert_eq!(interface.name(), "org.example.test");
     }
 
     #[cfg(feature = "parse")]
@@ -273,113 +357,137 @@ error ExpectedMore ()
 
         // Build ResolvedAddress custom type.
         let resolved_address_fields = [
-            &Field::new("ifindex", &optional_int_type, &[]),
-            &Field::new("family", &Type::Int, &[]),
-            &Field::new("address", &int_array_type, &[]),
+            &Field::new("ifindex".try_into().unwrap(), &optional_int_type, &[]),
+            &Field::new("family".try_into().unwrap(), &Type::Int, &[]),
+            &Field::new("address".try_into().unwrap(), &int_array_type, &[]),
         ];
         let resolved_address = CustomType::from(CustomObject::new(
-            "ResolvedAddress",
+            "ResolvedAddress".try_into().unwrap(),
             &resolved_address_fields,
             &[],
         ));
 
         // Build ResolvedName custom type.
         let resolved_name_fields = [
-            &Field::new("ifindex", &optional_int_type, &[]),
-            &Field::new("name", &Type::String, &[]),
+            &Field::new("ifindex".try_into().unwrap(), &optional_int_type, &[]),
+            &Field::new("name".try_into().unwrap(), &Type::String, &[]),
         ];
         let resolved_name = CustomType::from(CustomObject::new(
-            "ResolvedName",
+            "ResolvedName".try_into().unwrap(),
             &resolved_name_fields,
             &[],
         ));
 
         // Build ResourceKey custom type.
         let resource_key_fields = [
-            &Field::new("class", &Type::Int, &[]),
-            &Field::new("type", &Type::Int, &[]),
-            &Field::new("name", &Type::String, &[]),
+            &Field::new("class".try_into().unwrap(), &Type::Int, &[]),
+            &Field::new("type".try_into().unwrap(), &Type::Int, &[]),
+            &Field::new("name".try_into().unwrap(), &Type::String, &[]),
         ];
-        let resource_key =
-            CustomType::from(CustomObject::new("ResourceKey", &resource_key_fields, &[]));
+        let resource_key = CustomType::from(CustomObject::new(
+            "ResourceKey".try_into().unwrap(),
+            &resource_key_fields,
+            &[],
+        ));
 
         // Build ResourceRecord custom type (references ResourceKey).
-        let resource_key_type = Type::Custom("ResourceKey");
+        let resource_key_type = Type::Custom("ResourceKey".try_into().unwrap());
         let resource_record_fields = [
-            &Field::new("key", &resource_key_type, &[]),
-            &Field::new("priority", &optional_int_type, &[]),
-            &Field::new("weight", &optional_int_type, &[]),
-            &Field::new("port", &optional_int_type, &[]),
-            &Field::new("name", &optional_string_type, &[]),
-            &Field::new("address", &optional_int_array_type, &[]),
+            &Field::new("key".try_into().unwrap(), &resource_key_type, &[]),
+            &Field::new("priority".try_into().unwrap(), &optional_int_type, &[]),
+            &Field::new("weight".try_into().unwrap(), &optional_int_type, &[]),
+            &Field::new("port".try_into().unwrap(), &optional_int_type, &[]),
+            &Field::new("name".try_into().unwrap(), &optional_string_type, &[]),
+            &Field::new("address".try_into().unwrap(), &optional_int_array_type, &[]),
         ];
         let resource_record = CustomType::from(CustomObject::new(
-            "ResourceRecord",
+            "ResourceRecord".try_into().unwrap(),
             &resource_record_fields,
             &[],
         ));
 
         // Build methods.
-        let resolved_address_array_type =
-            Type::Array(TypeRef::new(&Type::Custom("ResolvedAddress")));
-        let resolved_name_array_type = Type::Array(TypeRef::new(&Type::Custom("ResolvedName")));
+        let resolved_address_type = Type::Custom("ResolvedAddress".try_into().unwrap());
+        let resolved_address_array_type = Type::Array(TypeRef::new(&resolved_address_type));
+        let resolved_name_type = Type::Custom("ResolvedName".try_into().unwrap());
+        let resolved_name_array_type = Type::Array(TypeRef::new(&resolved_name_type));
 
         let resolve_hostname_inputs = [
-            &Parameter::new("ifindex", &optional_int_type, &[]),
-            &Parameter::new("name", &Type::String, &[]),
-            &Parameter::new("family", &optional_int_type, &[]),
-            &Parameter::new("flags", &optional_int_type, &[]),
+            &Parameter::new("ifindex".try_into().unwrap(), &optional_int_type, &[]),
+            &Parameter::new("name".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("family".try_into().unwrap(), &optional_int_type, &[]),
+            &Parameter::new("flags".try_into().unwrap(), &optional_int_type, &[]),
         ];
         let resolve_hostname_outputs = [
-            &Parameter::new("addresses", &resolved_address_array_type, &[]),
-            &Parameter::new("name", &Type::String, &[]),
-            &Parameter::new("flags", &Type::Int, &[]),
+            &Parameter::new(
+                "addresses".try_into().unwrap(),
+                &resolved_address_array_type,
+                &[],
+            ),
+            &Parameter::new("name".try_into().unwrap(), &Type::String, &[]),
+            &Parameter::new("flags".try_into().unwrap(), &Type::Int, &[]),
         ];
         let resolve_hostname = Method::new(
-            "ResolveHostname",
+            "ResolveHostname".try_into().unwrap(),
             &resolve_hostname_inputs,
             &resolve_hostname_outputs,
             &[],
         );
 
         let resolve_address_inputs = [
-            &Parameter::new("ifindex", &optional_int_type, &[]),
-            &Parameter::new("family", &Type::Int, &[]),
-            &Parameter::new("address", &int_array_type, &[]),
-            &Parameter::new("flags", &optional_int_type, &[]),
+            &Parameter::new("ifindex".try_into().unwrap(), &optional_int_type, &[]),
+            &Parameter::new("family".try_into().unwrap(), &Type::Int, &[]),
+            &Parameter::new("address".try_into().unwrap(), &int_array_type, &[]),
+            &Parameter::new("flags".try_into().unwrap(), &optional_int_type, &[]),
         ];
         let resolve_address_outputs = [
-            &Parameter::new("names", &resolved_name_array_type, &[]),
-            &Parameter::new("flags", &Type::Int, &[]),
+            &Parameter::new("names".try_into().unwrap(), &resolved_name_array_type, &[]),
+            &Parameter::new("flags".try_into().unwrap(), &Type::Int, &[]),
         ];
         let resolve_address = Method::new(
-            "ResolveAddress",
+            "ResolveAddress".try_into().unwrap(),
             &resolve_address_inputs,
             &resolve_address_outputs,
             &[],
         );
 
         // Build errors.
-        let no_name_servers = Error::new("NoNameServers", &[], &[]);
-        let query_timed_out = Error::new("QueryTimedOut", &[], &[]);
+        let no_name_servers = Error::new("NoNameServers".try_into().unwrap(), &[], &[]);
+        let query_timed_out = Error::new("QueryTimedOut".try_into().unwrap(), &[], &[]);
 
         let dnssec_validation_failed_fields = [
-            &Field::new("result", &Type::String, &[]),
-            &Field::new("extendedDNSErrorCode", &optional_int_type, &[]),
-            &Field::new("extendedDNSErrorMessage", &optional_string_type, &[]),
+            &Field::new("result".try_into().unwrap(), &Type::String, &[]),
+            &Field::new(
+                "extendedDNSErrorCode".try_into().unwrap(),
+                &optional_int_type,
+                &[],
+            ),
+            &Field::new(
+                "extendedDNSErrorMessage".try_into().unwrap(),
+                &optional_string_type,
+                &[],
+            ),
         ];
         let dnssec_validation_failed = Error::new(
-            "DNSSECValidationFailed",
+            "DNSSECValidationFailed".try_into().unwrap(),
             &dnssec_validation_failed_fields,
             &[],
         );
 
         let dns_error_fields = [
-            &Field::new("rcode", &Type::Int, &[]),
-            &Field::new("extendedDNSErrorCode", &optional_int_type, &[]),
-            &Field::new("extendedDNSErrorMessage", &optional_string_type, &[]),
+            &Field::new("rcode".try_into().unwrap(), &Type::Int, &[]),
+            &Field::new(
+                "extendedDNSErrorCode".try_into().unwrap(),
+                &optional_int_type,
+                &[],
+            ),
+            &Field::new(
+                "extendedDNSErrorMessage".try_into().unwrap(),
+                &optional_string_type,
+                &[],
+            ),
         ];
-        let dns_error = Error::new("DNSError", &dns_error_fields, &[]);
+        let dns_error = Error::new("DNSError".try_into().unwrap(), &dns_error_fields, &[]);
 
         // Build the complete interface.
         let custom_types = &[
@@ -396,7 +504,13 @@ error ExpectedMore ()
             &dns_error,
         ];
 
-        let interface = Interface::new("io.systemd.Resolve", methods, custom_types, errors, &[]);
+        let interface = Interface::new(
+            "io.systemd.Resolve".try_into().unwrap(),
+            methods,
+            custom_types,
+            errors,
+            &[],
+        );
 
         // Test parsing the IDL and compare with manually constructed interface.
         const SYSTEMD_RESOLVED_IDL: &str = r#"interface io.systemd.Resolve
@@ -552,7 +666,7 @@ error DNSError(
         assert_eq!(parsed_outputs[0].name(), "addresses");
         assert_eq!(
             *parsed_outputs[0].ty(),
-            Type::Array(TypeRef::new(&Type::Custom("ResolvedAddress")))
+            Type::Array(TypeRef::new(&resolved_address_type))
         );
         assert_eq!(parsed_outputs[1].name(), "name");
         assert_eq!(*parsed_outputs[1].ty(), Type::String);
@@ -601,10 +715,16 @@ error DNSError(
 
         let method_comment = Comment::new("Test method");
         let method_comments = [&method_comment];
-        let method = Method::new("Test", &[], &[], &method_comments);
+        let method = Method::new("Test".try_into().unwrap(), &[], &[], &method_comments);
         let methods = [&method];
 
-        let interface = Interface::new("org.example.test", &methods, &[], &[], &interface_comments);
+        let interface = Interface::new(
+            "org.example.test".try_into().unwrap(),
+            &methods,
+            &[],
+            &[],
+            &interface_comments,
+        );
 
         let mut output = String::new();
         write!(&mut output, "{}", interface).unwrap();
@@ -627,10 +747,14 @@ error DNSError(
         let type_comments = [&type_comment];
         let name_field_comment = Comment::new("Full name");
         let name_field_comments = [&name_field_comment];
-        let name_field = Field::new("name", &Type::String, &name_field_comments);
-        let age_field = Field::new("age", &Type::Int, &[]);
+        let name_field = Field::new(
+            "name".try_into().unwrap(),
+            &Type::String,
+            &name_field_comments,
+        );
+        let age_field = Field::new("age".try_into().unwrap(), &Type::Int, &[]);
         let fields = [&name_field, &age_field];
-        let user_object = CustomObject::new("User", &fields, &type_comments);
+        let user_object = CustomObject::new("User".try_into().unwrap(), &fields, &type_comments);
         let user_type = CustomType::from(user_object);
         let custom_types = [&user_type];
 
@@ -639,23 +763,33 @@ error DNSError(
         let method_comments = [&method_comment];
         let id_param_comment = Comment::new("User ID");
         let id_param_comments = [&id_param_comment];
-        let id_param = Parameter::new("id", &Type::Int, &id_param_comments);
-        let user_param = Parameter::new("user", &Type::Custom("User"), &[]);
+        let id_param = Parameter::new("id".try_into().unwrap(), &Type::Int, &id_param_comments);
+        let user_ref = Type::Custom("User".try_into().unwrap());
+        let user_param = Parameter::new("user".try_into().unwrap(), &user_ref, &[]);
         let inputs = [&id_param];
         let outputs = [&user_param];
-        let method = Method::new("GetUser", &inputs, &outputs, &method_comments);
+        let method = Method::new(
+            "GetUser".try_into().unwrap(),
+            &inputs,
+            &outputs,
+            &method_comments,
+        );
         let methods = [&method];
 
         // Error with comments
         let error_comment = Comment::new("User not found error");
         let error_comments = [&error_comment];
-        let msg_field = Field::new("message", &Type::String, &[]);
+        let msg_field = Field::new("message".try_into().unwrap(), &Type::String, &[]);
         let error_fields = [&msg_field];
-        let error = Error::new("UserNotFound", &error_fields, &error_comments);
+        let error = Error::new(
+            "UserNotFound".try_into().unwrap(),
+            &error_fields,
+            &error_comments,
+        );
         let errors = [&error];
 
         let interface = Interface::new(
-            "org.example.comprehensive",
+            "org.example.comprehensive".try_into().unwrap(),
             &methods,
             &custom_types,
             &errors,

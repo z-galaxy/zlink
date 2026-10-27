@@ -10,6 +10,7 @@
 /// ```rust
 /// use zlink_core::introspect::CustomType;
 /// use zlink_core::idl::{self, Field, CustomObject};
+/// use zlink_core::names::{FieldName, TypeName};
 ///
 /// struct Point {
 ///     x: f64,
@@ -18,11 +19,21 @@
 ///
 /// impl CustomType for Point {
 ///     const CUSTOM_TYPE: &'static idl::CustomType<'static> = &{
-///         static FIELD_X: Field<'static> = Field::new("x", &zlink_core::idl::Type::Float, &[]);
-///         static FIELD_Y: Field<'static> = Field::new("y", &zlink_core::idl::Type::Float, &[]);
+///         // `const` items can't use the validating conversions, so the names are not checked.
+///         static FIELD_X: Field<'static> = Field::new(
+///             FieldName::from_static_str_unchecked("x"),
+///             &zlink_core::idl::Type::Float,
+///             &[],
+///         );
+///         static FIELD_Y: Field<'static> = Field::new(
+///             FieldName::from_static_str_unchecked("y"),
+///             &zlink_core::idl::Type::Float,
+///             &[],
+///         );
 ///         static FIELDS: &[&Field<'static>] = &[&FIELD_X, &FIELD_Y];
 ///
-///         idl::CustomType::Object(CustomObject::new("Point", FIELDS, &[]))
+///         let name = TypeName::from_static_str_unchecked("Point");
+///         idl::CustomType::Object(CustomObject::new(name, FIELDS, &[]))
 ///     };
 /// }
 /// ```
@@ -37,6 +48,7 @@ mod tests {
     use crate::{
         idl::{self, CustomEnum, CustomObject, EnumVariant, Field},
         introspect,
+        names::{FieldName, TypeName},
     };
 
     // Test implementation for a custom struct type
@@ -44,11 +56,24 @@ mod tests {
 
     impl CustomType for TestPoint {
         const CUSTOM_TYPE: &'static idl::CustomType<'static> = &{
-            static FIELD_X: Field<'static> = Field::new("x", <f64 as introspect::Type>::TYPE, &[]);
-            static FIELD_Y: Field<'static> = Field::new("y", <f64 as introspect::Type>::TYPE, &[]);
+            // `const` items can't use the validating conversions.
+            static FIELD_X: Field<'static> = Field::new(
+                FieldName::from_static_str_unchecked("x"),
+                <f64 as introspect::Type>::TYPE,
+                &[],
+            );
+            static FIELD_Y: Field<'static> = Field::new(
+                FieldName::from_static_str_unchecked("y"),
+                <f64 as introspect::Type>::TYPE,
+                &[],
+            );
             static FIELDS: &[&Field<'static>] = &[&FIELD_X, &FIELD_Y];
 
-            idl::CustomType::Object(CustomObject::new("Point", FIELDS, &[]))
+            idl::CustomType::Object(CustomObject::new(
+                TypeName::from_static_str_unchecked("Point"),
+                FIELDS,
+                &[],
+            ))
         };
     }
 
@@ -57,13 +82,21 @@ mod tests {
 
     impl CustomType for TestStatus {
         const CUSTOM_TYPE: &'static idl::CustomType<'static> = &{
-            static VARIANT_ACTIVE: EnumVariant<'static> = EnumVariant::new("Active", &[]);
-            static VARIANT_INACTIVE: EnumVariant<'static> = EnumVariant::new("Inactive", &[]);
-            static VARIANT_PENDING: EnumVariant<'static> = EnumVariant::new("Pending", &[]);
+            // `const` items can't use the validating conversions.
+            static VARIANT_ACTIVE: EnumVariant<'static> =
+                EnumVariant::new(FieldName::from_static_str_unchecked("Active"), &[]);
+            static VARIANT_INACTIVE: EnumVariant<'static> =
+                EnumVariant::new(FieldName::from_static_str_unchecked("Inactive"), &[]);
+            static VARIANT_PENDING: EnumVariant<'static> =
+                EnumVariant::new(FieldName::from_static_str_unchecked("Pending"), &[]);
             static VARIANTS: &[&EnumVariant<'static>] =
                 &[&VARIANT_ACTIVE, &VARIANT_INACTIVE, &VARIANT_PENDING];
 
-            idl::CustomType::Enum(CustomEnum::new("Status", VARIANTS, &[]))
+            idl::CustomType::Enum(CustomEnum::new(
+                TypeName::from_static_str_unchecked("Status"),
+                VARIANTS,
+                &[],
+            ))
         };
     }
 

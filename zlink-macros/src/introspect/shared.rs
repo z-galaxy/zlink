@@ -18,6 +18,22 @@ pub(crate) fn generate_comment_objects(
         .collect()
 }
 
+/// The expression that builds a `TypeName` from a name that was validated at compile time.
+///
+/// The macros check every name when they expand, so the code they generate doesn't check it again:
+/// it builds the name without validating it.
+pub(crate) fn type_name_expr(name: &str, crate_path: &TokenStream2) -> TokenStream2 {
+    quote! { #crate_path::names::TypeName::from_static_str_unchecked(#name) }
+}
+
+/// The expression that builds a `FieldName` from a name that was validated at compile time.
+///
+/// The macros check every name when they expand, so the code they generate doesn't check it again:
+/// it builds the name without validating it.
+pub(crate) fn field_name_expr(name: &str, crate_path: &TokenStream2) -> TokenStream2 {
+    quote! { #crate_path::names::FieldName::from_static_str_unchecked(#name) }
+}
+
 /// Generate field definitions for struct fields.
 ///
 /// If variant_prefix is provided, it's used to create unique static names for variant fields.
@@ -90,6 +106,7 @@ pub(super) fn generate_field_definitions(
             crate::attr_mode::FieldMode::Normal => {
                 let field_type = utils::remove_lifetimes_from_type(&field.ty);
                 let field_name_str = naming::field_name(&field.attrs, field_name, rename_all)?;
+                let field_name_expr = field_name_expr(&field_name_str, crate_path);
 
                 let static_name = if let Some(variant_ident) = variant_prefix {
                     quote::format_ident!(
@@ -107,7 +124,7 @@ pub(super) fn generate_field_definitions(
                 field_statics.push(quote! {
                     static #static_name: #crate_path::idl::Field<'static> =
                         #crate_path::idl::Field::new(
-                            #field_name_str,
+                            #field_name_expr,
                             <#field_type as #crate_path::introspect::Type>::TYPE,
                             &[#(#comment_objects),*]
                         );
@@ -160,11 +177,12 @@ pub(super) fn generate_enum_variant_definitions(
             Fields::Unit => {
                 let variant_name =
                     naming::enum_variant_name(&variant.attrs, &variant.ident, rename_all)?;
+                let variant_name_expr = field_name_expr(&variant_name, crate_path);
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = generate_comment_objects(&comments, crate_path);
                 let variant_ref = quote! {
                     &#crate_path::idl::EnumVariant::new(
-                        #variant_name,
+                        #variant_name_expr,
                         &[#(#comment_objects),*]
                     )
                 };

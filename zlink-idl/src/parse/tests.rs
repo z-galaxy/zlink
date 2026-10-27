@@ -143,60 +143,6 @@ fn parse_errors() {
 }
 
 #[test]
-fn parse_interface_name() {
-    let input = b"org.example.test";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "org.example.test");
-    assert!(input_mut.is_empty());
-
-    let input = b"com.example.foo.bar";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "com.example.foo.bar");
-    assert!(input_mut.is_empty());
-
-    // Invalid: no dot
-    let mut input_mut = b"example".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-
-    // Invalid: starts with number
-    let mut input_mut = b"1example.test".as_slice();
-    assert!(interface_name(&mut input_mut).is_err());
-
-    // Valid: hyphen inside a segment.
-    let input = b"org.exam-ple.test";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "org.exam-ple.test");
-    assert!(input_mut.is_empty());
-
-    // Valid: a dotted segment may start with a digit.
-    let input = b"org.0example";
-    let mut input_mut = input.as_slice();
-    let result = interface_name(&mut input_mut).unwrap();
-    assert_eq!(result, "org.0example");
-    assert!(input_mut.is_empty());
-
-    // Invalid: first segment ends with a trailing hyphen (not followed by an alnum).
-    let mut input_mut = b"org-.example".as_slice();
-    assert!(!full_interface_name_is_valid(&mut input_mut));
-
-    // Invalid: dotted segment ends with a trailing hyphen (not followed by an alnum).
-    let mut input_mut = b"org.example-".as_slice();
-    assert!(!full_interface_name_is_valid(&mut input_mut));
-
-    // Invalid: dotted segment starts with a hyphen (must start with an alnum).
-    let mut input_mut = b"org.-example".as_slice();
-    assert!(!full_interface_name_is_valid(&mut input_mut));
-}
-
-/// Parse `input` as an interface name and return whether it is valid *and* fully consumed.
-fn full_interface_name_is_valid(input: &mut &[u8]) -> bool {
-    matches!(interface_name(input), Ok(_) if input.is_empty())
-}
-
-#[test]
 fn test_parse_method() {
     let input = "method GetInfo() -> (info: string)";
     let method = parse_method(input).unwrap();
@@ -205,7 +151,7 @@ fn test_parse_method() {
     let mut outputs = method.outputs();
     assert_eq!(
         outputs.next().unwrap(),
-        &Parameter::new("info", &Type::String, &[])
+        &Parameter::new("info".try_into().unwrap(), &Type::String, &[])
     );
     assert!(outputs.next().is_none());
 
@@ -215,17 +161,17 @@ fn test_parse_method() {
     let mut inputs = method.inputs();
     assert_eq!(
         inputs.next().unwrap(),
-        &Parameter::new("a", &Type::Int, &[])
+        &Parameter::new("a".try_into().unwrap(), &Type::Int, &[])
     );
     assert_eq!(
         inputs.next().unwrap(),
-        &Parameter::new("b", &Type::Int, &[])
+        &Parameter::new("b".try_into().unwrap(), &Type::Int, &[])
     );
     assert!(inputs.next().is_none());
     let mut outputs = method.outputs();
     assert_eq!(
         outputs.next().unwrap(),
-        &Parameter::new("sum", &Type::Int, &[])
+        &Parameter::new("sum".try_into().unwrap(), &Type::Int, &[])
     );
     assert!(outputs.next().is_none());
 }
@@ -239,7 +185,7 @@ fn test_parse_error() {
     let mut fields = error.fields();
     assert_eq!(
         fields.next().unwrap(),
-        &Field::new("resource", &Type::String, &[])
+        &Field::new("resource".try_into().unwrap(), &Type::String, &[])
     );
     assert!(fields.next().is_none());
 
@@ -257,9 +203,12 @@ fn test_parse_custom_type() {
     let mut fields = custom_type.as_object().unwrap().fields();
     assert_eq!(
         fields.next().unwrap(),
-        &Field::new("name", &Type::String, &[])
+        &Field::new("name".try_into().unwrap(), &Type::String, &[])
     );
-    assert_eq!(fields.next().unwrap(), &Field::new("age", &Type::Int, &[]));
+    assert_eq!(
+        fields.next().unwrap(),
+        &Field::new("age".try_into().unwrap(), &Type::Int, &[])
+    );
     assert!(fields.next().is_none());
 
     let input = "type Config (host: string, port: int, enabled: bool)";
@@ -269,12 +218,15 @@ fn test_parse_custom_type() {
     let mut fields = custom_type.as_object().unwrap().fields();
     assert_eq!(
         fields.next().unwrap(),
-        &Field::new("host", &Type::String, &[])
+        &Field::new("host".try_into().unwrap(), &Type::String, &[])
     );
-    assert_eq!(fields.next().unwrap(), &Field::new("port", &Type::Int, &[]));
     assert_eq!(
         fields.next().unwrap(),
-        &Field::new("enabled", &Type::Bool, &[])
+        &Field::new("port".try_into().unwrap(), &Type::Int, &[])
+    );
+    assert_eq!(
+        fields.next().unwrap(),
+        &Field::new("enabled".try_into().unwrap(), &Type::Bool, &[])
     );
     assert!(fields.next().is_none());
 

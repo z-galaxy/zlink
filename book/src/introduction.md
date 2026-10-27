@@ -37,6 +37,7 @@ The zlink project is a Cargo workspace consisting of several crates:
 * **[`zlink-tokio`]**: [tokio]-based transport implementation and runtime integration.
 * **[`zlink-smol`]**: [smol]-based transport implementation and runtime integration.
 * **[`zlink-idl`]**: Varlink interface definition language (IDL) types and parser.
+* **[`zlink-names`]**: Types for Varlink names (interfaces, types and fields) and their validation.
 * **[`zlink-codegen`]**: Generates Rust code from Varlink IDL files.
 
 Since `zlink` re-exports everything you need, this book will only use the `zlink` crate in its
@@ -64,6 +65,7 @@ in the [`#zlink:matrix.org`] Matrix room. If something doesn't seem right, pleas
 [`zlink-tokio`]: https://docs.rs/zlink-tokio/
 [`zlink-smol`]: https://docs.rs/zlink-smol/
 [`zlink-idl`]: https://docs.rs/zlink-idl/
+[`zlink-names`]: https://docs.rs/zlink-names/
 [`zlink-codegen`]: https://docs.rs/zlink-codegen/
 [tokio]: https://tokio.rs/
 [smol]: https://github.com/smol-rs/smol

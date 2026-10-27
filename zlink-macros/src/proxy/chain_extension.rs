@@ -12,16 +12,14 @@ use super::{
 
 pub(super) fn generate_chain_extension_method(
     method: &mut syn::TraitItemFn,
-    interface_name: &str,
+    method_path: &str,
     _trait_generics: &syn::Generics,
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
     rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<(TokenStream, TokenStream), Error> {
-    // Only the wire name is unraw'd; `method_ident` stays raw so the generated fn still matches
-    // the trait it implements.
-    let method_name_str = crate::naming::unraw(&method.sig.ident);
+    // `method_ident` stays raw so the generated fn still matches the trait it implements.
     let method_ident = method.sig.ident.clone();
 
     // Check for explicit lifetimes early
@@ -41,10 +39,6 @@ pub(super) fn generate_chain_extension_method(
             return Ok((quote! {}, quote! {}));
         }
     }
-
-    let converted_name = snake_case_to_pascal_case(&method_name_str);
-    let actual_method_name = method_attrs.rename.as_deref().unwrap_or(&converted_name);
-    let method_path = format!("{interface_name}.{actual_method_name}");
 
     // Extract data we need before mutable borrow
     let method_generic_params = method.sig.generics.params.clone();
@@ -118,7 +112,7 @@ pub(super) fn generate_chain_extension_method(
     if arg_infos.is_empty() {
         generate_no_params_method(
             &method_ident,
-            &method_path,
+            method_path,
             method_attrs.is_oneway,
             #[cfg(feature = "std")]
             fds_init,
@@ -127,7 +121,7 @@ pub(super) fn generate_chain_extension_method(
     } else {
         generate_with_params_method(
             &method_ident,
-            &method_path,
+            method_path,
             generics,
             combined_where_clause,
             all_param_fields,

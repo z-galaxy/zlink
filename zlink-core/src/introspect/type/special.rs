@@ -98,3 +98,32 @@ impl Type for core::net::SocketAddrV4 {
 impl Type for core::net::SocketAddrV6 {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
+
+// ============================================================================
+// Varlink name types
+// ============================================================================
+
+/// Names are strings on the wire.
+impl Type for crate::names::FieldName<'_> {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}
+
+impl Type for crate::names::OwnedFieldName {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}
+
+impl Type for crate::names::TypeName<'_> {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}
+
+impl Type for crate::names::OwnedTypeName {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}
+
+impl Type for crate::names::InterfaceName<'_> {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}
+
+impl Type for crate::names::OwnedInterfaceName {
+    const TYPE: &'static idl::Type<'static> = &idl::Type::String;
+}

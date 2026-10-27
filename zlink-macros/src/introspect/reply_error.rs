@@ -67,6 +67,7 @@ fn generate_error_definitions(
 
     for variant in &data_enum.variants {
         let variant_name = naming::error_name(&variant.attrs, &variant.ident, rename_all)?;
+        let variant_name_expr = shared::type_name_expr(&variant_name, crate_path);
         // The variant's own `rename_all` governs its fields, kept separate from the enum-level
         // rule above, which governs variant names instead. Parsed unconditionally (even for unit
         // variants, which have no fields to apply it to) so a bogus value is always rejected,
@@ -78,7 +79,7 @@ fn generate_error_definitions(
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = shared::generate_comment_objects(&comments, crate_path);
                 let error_variant = quote! {
-                    &#crate_path::idl::Error::new(#variant_name, &[], &[#(#comment_objects),*])
+                    &#crate_path::idl::Error::new(#variant_name_expr, &[], &[#(#comment_objects),*])
                 };
                 error_variants.push(error_variant);
             }
@@ -115,7 +116,7 @@ fn generate_error_definitions(
 
                         static FIELD_REFS: &[&#crate_path::idl::Field<'static>] = #field_refs_init;
 
-                        #crate_path::idl::Error::new(#variant_name, FIELD_REFS, &[#(#comment_objects),*])
+                        #crate_path::idl::Error::new(#variant_name_expr, FIELD_REFS, &[#(#comment_objects),*])
                     }
                 };
                 error_variants.push(error_variant);
@@ -139,7 +140,7 @@ fn generate_error_definitions(
                                 let #crate_path::idl::List::Borrowed(field_slice) = fields else {
                                     panic!("Owned List not supported in const context")
                                 };
-                                #crate_path::idl::Error::new(#variant_name, field_slice, &[#(#comment_objects),*])
+                                #crate_path::idl::Error::new(#variant_name_expr, field_slice, &[#(#comment_objects),*])
                             }
                             _ => panic!("Tuple variant field type must have Type::Object"),
                         }

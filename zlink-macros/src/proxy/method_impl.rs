@@ -7,31 +7,20 @@ use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
         ParamAttrs, collect_used_type_params, convert_to_single_lifetime, parse_return_type,
-        resolve_serialized_name, snake_case_to_pascal_case, type_contains_lifetime,
+        resolve_serialized_name, type_contains_lifetime,
     },
 };
 use crate::utils::is_option_type;
 
 pub(super) fn generate_method_impl(
     method: &mut syn::TraitItemFn,
-    interface_name: &str,
+    method_path: &str,
     trait_generics: &syn::Generics,
     method_attrs: &MethodAttrs,
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
     rename_all: Option<crate::naming::RenameAll>,
 ) -> Result<TokenStream, Error> {
-    let method_name = &method.sig.ident;
-    // Only the wire name is unraw'd; the generated fn keeps the raw ident so it still matches the
-    // trait it implements.
-    let method_name_str = crate::naming::unraw(method_name);
-
-    let converted_name = snake_case_to_pascal_case(&method_name_str);
-    let actual_method_name = method_attrs.rename.as_deref().unwrap_or(&converted_name);
-
-    // Build the full method path: interface.method
-    let method_path = format!("{interface_name}.{actual_method_name}");
-
     // Parse method arguments (skip &mut self)
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
