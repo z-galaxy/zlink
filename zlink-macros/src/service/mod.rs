@@ -193,3 +193,58 @@ fn add_static_to_streaming_impl_trait(item_impl: &mut ItemImpl, methods_info: &[
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_states_can_be_spelled_differently() {
+        // The compiler checks that the upgrade methods return the same type of state, however it's
+        // spelled, e.g. through an alias or a qualified path.
+        let upgrade = expand_compact(quote! {
+            impl Blobs {
+                #[zlink(upgrade)]
+                async fn download(&self) -> ((), DownloadState) { todo!() }
+
+                #[zlink(upgrade)]
+                async fn upload(&self) -> Result<(Reply, crate::Protocol), Error> { todo!() }
+            }
+        });
+        assert!(upgrade.contains("typeUpgrade=DownloadState;"));
+    }
+
+    #[test]
+    fn upgrade_state_is_the_upgrade_of_the_service() {
+        let regular = expand_compact(quote! {
+            impl Blobs {
+                async fn download(&self) {}
+            }
+        });
+        assert!(regular.contains("typeUpgrade=();"));
+
+        // No explicit socket type parameter is needed.
+        let upgrade = expand_compact(quote! {
+            impl Blobs {
+                #[zlink(upgrade)]
+                async fn download(&self) -> ((), SendBlob) { todo!() }
+            }
+        });
+        assert!(upgrade.contains("typeUpgrade=SendBlob;"));
+        // The state may take connections over for only some of the sockets.
+        assert!(upgrade.contains("SendBlob:::zlink::service::TakeOver<__ZlinkSock>"));
+        // The server takes over with the state itself, and the method is a regular one.
+        assert!(!upgrade.contains("fnupgrade"));
+        assert!(upgrade.contains("fndownload"));
+    }
+
+    // The expansion of `input` without any whitespace, so that how the tokens are spaced doesn't
+    // matter.
+    fn expand_compact(input: TokenStream) -> String {
+        expand(input).unwrap().to_string().replace(' ', "")
+    }
+
+    fn expand(input: TokenStream) -> Result<TokenStream, Error> {
+        service_impl(quote!(interface = "org.example.blobs"), input)
+    }
+}
