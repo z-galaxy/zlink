@@ -5,7 +5,10 @@ use core::{fmt::Debug, future::Future};
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 
-pub use super::infallible::Infallible;
+pub use super::{
+    infallible::Infallible,
+    upgrade::{TakeOver, Upgraded},
+};
 use crate::{Call, Connection, Reply, connection::Socket};
 
 /// The item type that a [`Service::ReplyStream`] yields.
@@ -85,6 +88,12 @@ where
     type ReplyError<'ser>: Serialize + Debug
     where
         Self: 'ser;
+    /// The state that takes over the connections upgraded to another protocol.
+    ///
+    /// The state comes with the reply confirming the upgrade (see [`MethodReply::Upgrade`]), and
+    /// carries what the new protocol needs from the method call. Services that don't support
+    /// upgrades can set this to `()`.
+    type Upgrade: TakeOver<Sock>;
 
     /// Handle a method call.
     fn handle<'ser>(
@@ -93,7 +102,12 @@ where
         conn: &mut Connection<Sock>,
         #[cfg(feature = "std")] fds: Vec<std::os::fd::OwnedFd>,
     ) -> impl Future<
-        Output = HandleResult<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>>,
+        Output = HandleResult<
+            Self::ReplyParams<'ser>,
+            Self::ReplyStream,
+            Self::ReplyError<'ser>,
+            Self::Upgrade,
+        >,
     >;
 }
 
@@ -102,8 +116,8 @@ where
 /// On `std`, this is a tuple of the method reply and the file descriptors to send with it. On
 /// `no_std`, this is just the method reply.
 #[cfg(feature = "std")]
-pub type HandleResult<Params, ReplyStream, ReplyError> = (
-    MethodReply<Params, ReplyStream, ReplyError>,
+pub type HandleResult<Params, ReplyStream, ReplyError, Upgrade = ()> = (
+    MethodReply<Params, ReplyStream, ReplyError, Upgrade>,
     Vec<std::os::fd::OwnedFd>,
 );
 /// The result of a [`Service::handle`] call.
@@ -111,16 +125,26 @@ pub type HandleResult<Params, ReplyStream, ReplyError> = (
 /// On `std`, this is a tuple of the method reply and the file descriptors to send with it. On
 /// `no_std`, this is just the method reply.
 #[cfg(not(feature = "std"))]
-pub type HandleResult<Params, ReplyStream, ReplyError> =
-    MethodReply<Params, ReplyStream, ReplyError>;
+pub type HandleResult<Params, ReplyStream, ReplyError, Upgrade = ()> =
+    MethodReply<Params, ReplyStream, ReplyError, Upgrade>;
 
 /// A service method call reply.
 #[derive(Debug)]
-pub enum MethodReply<Params, ReplyStream, ReplyError> {
+pub enum MethodReply<Params, ReplyStream, ReplyError, Upgrade = ()> {
     /// A single reply.
+    ///
+    /// If the call asked for an upgrade, this reply confirms it but the server then closes the
+    /// connection, since there's nothing to take it over with: confirm it with
+    /// [`MethodReply::Upgrade`] instead.
     Single(Option<Params>),
     /// An error reply.
     Error(ReplyError),
     /// A multi-reply stream.
     Multi(ReplyStream),
+    /// A single reply confirming the upgrade that the call asked for (see [`Call::upgrade`]).
+    ///
+    /// After sending the reply, the server hands the socket of the connection over to the state
+    /// (see [`TakeOver`]). If the call didn't ask for an upgrade, the reply is sent like
+    /// [`MethodReply::Single`]'s and the state is dropped.
+    Upgrade(Option<Params>, Upgrade),
 }

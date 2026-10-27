@@ -253,6 +253,7 @@ pub(super) fn generate_service_impl(
             type ReplyStreamParams = #reply_stream_params_type;
             type ReplyStreamError = #reply_stream_error_ty;
             type ReplyError<'ser> = #error_type where Self: 'ser;
+            type Upgrade = ();
 
             async fn handle<'__zlink_ser>(
                 &'__zlink_ser mut self,
@@ -263,6 +264,7 @@ pub(super) fn generate_service_impl(
                 Self::ReplyParams<'__zlink_ser>,
                 Self::ReplyStream,
                 Self::ReplyError<'__zlink_ser>,
+                Self::Upgrade,
             > {
                 #handle_body
             }

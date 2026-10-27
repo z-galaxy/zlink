@@ -65,6 +65,9 @@ impl<M> Call<M> {
     }
 
     /// If the method call is requesting an upgrade to a different protocol.
+    ///
+    /// The service confirms the upgrade by replying with a single successful reply, after which
+    /// neither side speaks Varlink on the connection anymore. An error reply refuses the upgrade.
     pub fn upgrade(&self) -> bool {
         self.upgrade
     }
