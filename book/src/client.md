@@ -183,6 +183,8 @@ request/response traffic. Connections are cheap — this is the Varlink way. ✨
   `#[zlink(return_fds)]` on the method makes it also return the descriptors that came with the
   reply. As on D-Bus, the convention is for the JSON parameters to carry *indexes* into the
   descriptor array.
+- `#[zlink(upgrade)]`: ask for the connection to be upgraded to another protocol. See
+  [Upgrading connections](service.html#upgrading-connections).
 - Methods can be generic over their parameter types, with the usual `Serialize` bounds.
 
 ## Pipelining

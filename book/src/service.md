@@ -248,6 +248,144 @@ A client can monitor the drive condition with:
 varlinkctl call --more /run/org.example.ftl org.example.ftl.GetDriveCondition '{}'
 ```
 
+## Upgrading connections
+
+Some calls are better served by a protocol other than JSON messages, for example to stream large
+amounts of data or to pass file descriptors around. That's what the `upgrade` flag of a call is
+for: it asks for the connection to be taken over by a custom protocol after the call. The service
+confirms the upgrade with a single successful reply, after which neither side speaks Varlink on the
+connection anymore. An error reply refuses the upgrade instead, and the connection remains a
+Varlink one.
+
+A service marks the methods that upgrade their connections with `#[zlink(upgrade)]`. Along with its
+reply, such a method returns the state that takes the upgraded connection over: a value of a type
+that implements `TakeOver`, whose `take_over` method gets the socket of the connection and returns
+the future that speaks the new protocol over it. Here's a service that sends a blob over the
+connection it upgrades:
+
+```rust,noplayground
+use serde::Serialize;
+use std::os::fd::OwnedFd;
+use zlink::{
+    connection::socket::{Socket, WriteHalf},
+    introspect, service,
+    service::{TakeOver, Upgraded},
+};
+
+#[derive(Debug, Serialize, introspect::Type)]
+struct Download {
+    size: u64,
+}
+
+struct Blobs {
+    blob: Vec<u8>,
+}
+
+#[service(interface = "org.example.Blobs")]
+impl Blobs {
+    /// Replies with the size of the blob, which is then sent over the upgraded connection.
+    #[zlink(upgrade)]
+    async fn download(&self) -> (Download, SendBlob) {
+        let blob = self.blob.clone();
+        let download = Download {
+            size: blob.len() as u64,
+        };
+
+        (download, SendBlob(blob))
+    }
+}
+
+struct SendBlob(Vec<u8>);
+
+impl<Sock> TakeOver<Sock> for SendBlob
+where
+    Sock: Socket,
+{
+    async fn take_over(self, socket: Upgraded<Sock>) {
+        let (_read, mut write) = socket.split();
+        let fds = &[] as &[OwnedFd];
+        let _ = write
+            .write(&self.0, fds, #[cfg(target_os = "linux")] None)
+            .await;
+    }
+}
+```
+
+Some things to note:
+
+* The state carries what the new protocol needs from the call, like the blob above, so the service
+  doesn't have to store anything for it. `take_over` gets the socket of the upgraded connection, an
+  `Upgraded<Sock>`, and returns the future that speaks the new protocol over it. The `Server` polls
+  the future along with all the other connections until it completes, so it doesn't need a task of
+  its own. The future can't borrow from the service though, since the server keeps calling into the
+  service meanwhile: move what it needs into the state.
+* An `Upgraded<Sock>` is a `Socket` itself, and `split` gives the halves to read from and write to.
+  The client doesn't have to wait for the reply before it starts talking the new protocol, so the
+  server may have read some of its data along with the call: the read half returns that data first.
+* The future is `Send` whenever the state and the futures of the socket are, so a server with
+  upgrade methods can be `Send` as well, once the [compiler bug](#-serverrun-and-tokiospawn) that
+  keeps `Server::run` from being `Send` is fixed.
+* All the upgrade methods return the same type of state. To upgrade to several protocols, make it
+  an enum with a variant for each, whose `take_over` matches on itself.
+* The reply confirming the upgrade has already been sent by the time the state takes over, so it
+  can't refuse the upgrade anymore. Do the checks that the upgrade depends on, e.g. of the peer's
+  credentials, in the upgrade method instead, using a `#[zlink(connection)]` parameter, and return
+  an error to refuse the upgrade.
+* The macro refuses what wouldn't make sense, without calling the method: a call to an upgrade
+  method that doesn't ask for an upgrade gets the `ExpectedUpgrade` error that systemd's services
+  reply with as well, and a call that asks for an upgrade of any other method gets the standard
+  `InvalidParameter` error naming `upgrade`. One-way calls to an upgrade method aren't served
+  either, since they can't get a reply that confirms the upgrade. Upgrade methods can't be combined
+  with `#[zlink(more)]`, since a single reply confirms an upgrade, or `#[zlink(return_fds)]`: pass
+  file descriptors over the upgraded connection instead.
+
+On the client side, mark the proxy method with `#[zlink(upgrade)]` too. If the call returns a
+successful reply, the upgrade is confirmed and the socket can be taken out of the connection. The
+connection reads from the socket in chunks, so the reply may well come with the beginning of the new
+protocol's data: the read half that `into_read_half` returns hands it out first, ahead of what is
+left to read from the socket.
+
+```rust,noplayground
+use zlink::{connection::socket::ReadHalf, proxy};
+# #[derive(Debug, serde::Deserialize)]
+# struct Download { size: u64 }
+# #[derive(Debug, zlink::ReplyError)]
+# #[zlink(interface = "org.example.Blobs")]
+# enum BlobError { NotFound }
+
+#[proxy("org.example.Blobs")]
+trait BlobsProxy {
+    #[zlink(upgrade)]
+    async fn download(&mut self) -> zlink::Result<Result<Download, BlobError>>;
+}
+
+async fn download(
+    mut conn: zlink::tokio::unix::Connection,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let download = conn.download().await?.map_err(|e| format!("{e:?}"))?;
+
+    // The upgrade is confirmed so the connection doesn't speak Varlink anymore.
+    let (read, _write) = conn.split();
+    let mut read = read.into_read_half();
+    let mut blob = Vec::new();
+    let mut buf = [0; 4096];
+    while (blob.len() as u64) < download.size {
+        let len = read.read(&mut buf).await?.bytes_read();
+        if len == 0 {
+            return Err("the connection was closed before the blob was received".into());
+        }
+        blob.extend_from_slice(&buf[..len]);
+    }
+
+    Ok(blob)
+}
+```
+
+An error reply means the service refused the upgrade, which leaves a working Varlink connection.
+That is why proxy upgrade methods take `&mut self`, and why the data of the new protocol is best
+not sent before the reply has confirmed the upgrade: it would break the Varlink connection if the
+upgrade is refused.
+
 ## Introspection for free
 
 The macro implements the standard `org.varlink.service` interface for you:
@@ -320,9 +458,12 @@ if let Err(e) = listener.set_xattr("user.userdb.uid", "1000-1999") {
 ## Under the hood: the `Service` trait
 
 The `service` macro is sugar for implementing the `zlink::Service` trait, whose `handle` method
-receives each incoming `Call` and returns a `MethodReply` (single reply, error, or stream). You can
-implement it by hand for maximum control — the macro-generated introspection then becomes your
-responsibility — but for nearly all services, the macro is the way to go.
+receives each incoming `Call` and returns a `MethodReply` (single reply, error, stream, or upgrade).
+An upgrade reply comes with a value of the trait's `Upgrade` type, which implements `TakeOver` to
+take the connection over once the reply is sent. The macro sets that type to the state that the
+upgrade methods return, and to `()`, which just closes the connection, if there are none. You can
+implement the trait by hand for maximum control — the macro-generated introspection then becomes
+your responsibility — but for nearly all services, the macro is the way to go.
 
 [rustc-100013]: https://github.com/rust-lang/rust/issues/100013
 [`LocalSet`]: https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html

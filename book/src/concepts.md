@@ -122,7 +122,7 @@ A call can also carry a few flags that modify its behavior:
   issuing a `more` call on a connection dedicated to that stream, and the service streams replies
   for as long as needed.
 * **`upgrade`**: The client wants to take over the connection with a custom protocol after this
-  call. (Rarely used and out of scope for this book.)
+  call. See [Upgrading connections](service.html#upgrading-connections).
 
 ## Errors
 
