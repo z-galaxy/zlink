@@ -1119,10 +1119,19 @@ fn generate_interface_descriptions(
                     }
                 });
 
-                let comment_objects = crate::introspect::shared::generate_comment_objects(
-                    &method.comments,
-                    crate_path,
-                );
+                // Like systemd, mark the flags that the method supports or requires in comments
+                // right before it, since the IDL can't express them. Tools rely on these.
+                let mut comments = method.comments.clone();
+                if method.is_streaming {
+                    // The method gets the call's `more` flag, so it can send a single reply.
+                    comments.push("[Supports 'more' flag]".to_owned());
+                }
+                if method.is_upgrade {
+                    // Calls without the `upgrade` flag get `ExpectedUpgrade`.
+                    comments.push("[Requires 'upgrade' flag]".to_owned());
+                }
+                let comment_objects =
+                    crate::introspect::shared::generate_comment_objects(&comments, crate_path);
 
                 Ok(quote! {
                     const #method_const_name: &#crate_path::idl::Method<'static> = &{

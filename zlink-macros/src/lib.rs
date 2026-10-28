@@ -1539,6 +1539,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// - Set `Reply::set_continues(Some(true))` on every intermediate item and `Some(false)` on the
 ///   final one so that the client knows when the stream ends.
 ///
+/// Like systemd does, the interface description marks such a method with a
+/// `[Supports 'more' flag]` comment right before it.
+///
 /// ## Returning Method Errors From Streams
 ///
 /// Streaming methods can also opt in to emitting Varlink error replies as stream items. To do so,
@@ -1648,7 +1651,8 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// the method being called. One-way calls to it aren't served either, since they can't get the
 /// reply confirming the upgrade. Calls to any other method (including those of
 /// `org.varlink.service`) that do ask for an upgrade get an `InvalidParameter` error naming
-/// `upgrade`.
+/// `upgrade`. Like systemd does, the interface description marks an upgrade method with a
+/// `[Requires 'upgrade' flag]` comment right before it.
 ///
 /// Once the reply is sent, the server calls `TakeOver::take_over` on the state, so each protocol
 /// takes its connections over in its own way:

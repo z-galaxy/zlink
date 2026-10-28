@@ -93,6 +93,11 @@ async fn run_client(
             .get_interface_description("org.example.ftl".try_into().unwrap())
             .await?
             .map_err(|e| e.to_string())?;
+        // Like systemd, the service marks the methods supporting the `more` flag in a comment right
+        // before them.
+        let raw = interface.as_raw().unwrap();
+        assert!(raw.contains("# [Supports 'more' flag]\nmethod GetDriveCondition("));
+        assert_eq!(raw.matches("[Supports 'more' flag]").count(), 1);
         let interface = interface.parse().unwrap();
         assert_eq!(interface.name(), "org.example.ftl");
         // Verify methods are present.
