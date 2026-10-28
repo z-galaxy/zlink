@@ -131,7 +131,7 @@ impl defmt::Format for Error {
             }
             #[cfg(feature = "std")]
             Error::Io(_) => defmt::write!(fmt, "I/O error"),
-            Error::UnexpectedEof => defmt::write!(fmt, "I/O error"),
+            Error::UnexpectedEof => defmt::write!(fmt, "Unexpected end of file/stream"),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(_) => defmt::write!(fmt, "IDL parse error"),
             Error::MissingParameters => defmt::write!(fmt, "Missing required parameters"),

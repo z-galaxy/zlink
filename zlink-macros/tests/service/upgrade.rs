@@ -198,6 +198,14 @@ async fn upgrade_methods_are_described_by_their_replies() -> Result<(), Box<dyn 
         let echo = interface.methods().find(|m| m.name() == "Echo").unwrap();
         assert!(echo.has_no_outputs());
 
+        // Like systemd, the service marks the methods requiring the `upgrade` flag in a comment
+        // right before them.
+        let raw = desc.as_raw().unwrap();
+        assert!(raw.contains("# [Requires 'upgrade' flag]\nmethod Echo("));
+        assert_eq!(raw.matches("[Requires 'upgrade' flag]").count(), 4);
+        let ping = interface.methods().find(|m| m.name() == "Ping").unwrap();
+        assert_eq!(ping.comments().count(), 0);
+
         Ok(())
     })
     .await
