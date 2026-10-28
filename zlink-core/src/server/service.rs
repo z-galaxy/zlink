@@ -130,6 +130,7 @@ pub type HandleResult<Params, ReplyStream, ReplyError, Upgrade = ()> =
 
 /// A service method call reply.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MethodReply<Params, ReplyStream, ReplyError, Upgrade = ()> {
     /// A single reply.
     ///
