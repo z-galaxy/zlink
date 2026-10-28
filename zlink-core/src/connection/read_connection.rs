@@ -1,7 +1,7 @@
 //! Contains connection related API.
 
 #[cfg(feature = "std")]
-use core::cmp::Ordering;
+use core::ops::RangeInclusive;
 use core::{fmt::Debug, str::from_utf8};
 
 #[cfg(all(feature = "std", target_os = "linux"))]
@@ -11,6 +11,7 @@ use crate::{Result, varlink_service};
 use super::{
     BUFFER_SIZE, Call, MAX_BUFFER_SIZE,
     reply::{self, Reply},
+    rewind::Rewind,
     socket::ReadHalf,
 };
 #[cfg(feature = "std")]
@@ -37,11 +38,15 @@ type RecvResult<T> = T;
 #[derive(Debug)]
 pub struct ReadConnection<Read: ReadHalf> {
     socket: Read,
+    // The data read from the socket but not received yet is `buffer[msg_pos..read_pos]`:
+    // `buffer[msg_pos..msgs_end]` holds complete messages, each terminated by a NUL byte, and
+    // `buffer[msgs_end..read_pos]` the start of a message that wasn't completely read yet.
     read_pos: usize,
     msg_pos: usize,
+    msgs_end: usize,
     buffer: Vec<u8>,
     id: usize,
-    // File descriptors received for messages in `buffer` that haven't been returned yet.
+    // File descriptors received along with data in `buffer` that haven't been returned yet.
     #[cfg(feature = "std")]
     pending_fds: VecDeque<PendingFds>,
     // Number of `recvmsg` calls that returned FDs. Used by `Connection` to drain
@@ -59,6 +64,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             socket,
             read_pos: 0,
             msg_pos: 0,
+            msgs_end: 0,
             id,
             buffer: alloc::vec![0; BUFFER_SIZE],
             #[cfg(feature = "std")]
@@ -157,64 +163,96 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         self.read_message::<Call<Method>>().await
     }
 
-    // Reads at least one full message from the socket and return a single message bytes.
+    // Receives the next message, reading from the socket first if no complete one is buffered.
     async fn read_message<'m, M>(&'m mut self) -> Result<RecvResult<M>>
     where
         M: Deserialize<'m> + Debug,
     {
-        self.read_from_socket().await?;
+        if self.msg_pos == self.msgs_end {
+            self.read_from_socket().await?;
+        }
 
-        #[cfg(feature = "std")]
-        let fds = self.take_fds();
-
-        let mut stream = Deserializer::from_slice(&self.buffer[self.msg_pos..]).into_iter::<M>();
+        let start = self.msg_pos;
+        let mut stream =
+            Deserializer::from_slice(&self.buffer[start..self.msgs_end]).into_iter::<M>();
         let msg = stream.next();
-        let null_index = self.msg_pos + stream.byte_offset();
-        let buffer = &self.buffer[self.msg_pos..null_index];
-        if self.buffer[null_index + 1] == b'\0' {
-            // This means we're reading the last message and can now reset the indices.
+        // The deserializer tells where the JSON value ends, so the NUL byte terminating a
+        // well-formed message is found right away.
+        let json_end = start + stream.byte_offset();
+        let null_index = self.null_index_from(json_end);
+        #[cfg(feature = "std")]
+        let fds = take_fds(&mut self.pending_fds, start..=null_index);
+        self.msg_pos = null_index + 1;
+        if self.msg_pos == self.read_pos {
+            // Everything read was received, so the buffer can be reused from its start.
             self.read_pos = 0;
             self.msg_pos = 0;
+            self.msgs_end = 0;
             // Nothing is left for the remaining file descriptors, if any, to belong to.
             #[cfg(feature = "std")]
             self.pending_fds.clear();
-        } else {
-            self.msg_pos = null_index + 1;
         }
 
-        match msg {
-            Some(Ok(msg)) => {
-                // The message isn't necessarily valid UTF-8 even though it was deserialized: the
-                // deserializer doesn't check the values that the message type ignores.
-                trace!(
-                    "connection {}: received a message: {}",
-                    self.id,
-                    from_utf8(buffer).unwrap_or("<invalid UTF-8>")
-                );
-
-                #[cfg(feature = "std")]
-                {
-                    Ok((msg, fds))
-                }
-                #[cfg(not(feature = "std"))]
-                Ok(msg)
+        let msg = match msg {
+            Some(Ok(msg)) if is_json_whitespace(&self.buffer[json_end..null_index]) => msg,
+            Some(Ok(_)) => {
+                return Err(crate::Error::Json(serde::de::Error::custom(
+                    "trailing characters after the message",
+                )));
             }
-            Some(Err(e)) => Err(e.into()),
-            None => Err(crate::Error::UnexpectedEof),
+            Some(Err(e)) => return Err(e.into()),
+            None => return Err(crate::Error::UnexpectedEof),
+        };
+        let buffer = &self.buffer[start..null_index];
+        // The message isn't necessarily valid UTF-8 even though it was deserialized: the
+        // deserializer doesn't check the values that the message type ignores.
+        trace!(
+            "connection {}: received a message: {}",
+            self.id,
+            from_utf8(buffer).unwrap_or("<invalid UTF-8>")
+        );
+
+        #[cfg(feature = "std")]
+        {
+            Ok((msg, fds))
         }
+        #[cfg(not(feature = "std"))]
+        Ok(msg)
     }
 
-    // Reads at least one full message from the socket.
+    // The index of the NUL byte terminating the message that `pos` is in.
+    fn null_index_from(&self, pos: usize) -> usize {
+        // The complete messages end with a NUL byte.
+        self.buffer[pos..self.msgs_end]
+            .iter()
+            .position(|b| *b == b'\0')
+            .map_or(self.msgs_end - 1, |i| pos + i)
+    }
+
+    // Reads from the socket until at least one complete message is buffered.
     async fn read_from_socket(&mut self) -> Result<()> {
         if self.msg_pos > 0 {
-            // This means we already have at least one message in the buffer so no need to read.
-            return Ok(());
+            // Move the start of the next message to the start of the buffer, making room for the
+            // rest of it.
+            self.buffer.copy_within(self.msg_pos..self.read_pos, 0);
+            #[cfg(feature = "std")]
+            self.move_pending_fds_to_start();
+            self.read_pos -= self.msg_pos;
+            self.msg_pos = 0;
+            self.msgs_end = 0;
         }
 
         loop {
-            #[cfg(feature = "std")]
+            if self.read_pos == self.buffer.len() {
+                if self.read_pos >= MAX_BUFFER_SIZE {
+                    return Err(crate::Error::BufferOverflow);
+                }
+
+                self.buffer.extend(core::iter::repeat_n(0, BUFFER_SIZE));
+            }
+
             let read_start = self.read_pos;
-            let result = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            let result = self.socket.read(&mut self.buffer[read_start..]).await?;
             #[cfg(all(feature = "std", target_os = "linux"))]
             let mut result = result;
 
@@ -228,9 +266,19 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             }
             #[cfg(feature = "std")]
             if !result.fds().is_empty() {
-                let msg_pos = self.fds_msg_pos(read_start);
+                // Peers send the file descriptors of a message along with its first byte, in a
+                // write that carries no other message, but the reads don't necessarily match the
+                // writes. On Linux, the read that receives the file descriptors can also return
+                // the data of earlier writes but it ends with the data of the write that carried
+                // them. BSD-derived kernels instead begin the read with that write and can append
+                // the data of later writes to it. Hence, the last byte read came with the file
+                // descriptors on Linux, and the first one elsewhere.
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                let pos = self.read_pos - 1;
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                let pos = read_start;
                 self.pending_fds.push_back(PendingFds {
-                    msg_pos,
+                    pos,
                     fds: result.into_fds(),
                 });
                 // Track receipt so `Connection` can drain `WriteConnection::held_fds`.
@@ -240,76 +288,59 @@ impl<Read: ReadHalf> ReadConnection<Read> {
                 }
             }
 
-            if self.read_pos == self.buffer.len() {
-                if self.read_pos >= MAX_BUFFER_SIZE {
-                    return Err(crate::Error::BufferOverflow);
-                }
+            // The last NUL byte read terminates the last message read completely, if any.
+            if let Some(i) = self.buffer[read_start..self.read_pos]
+                .iter()
+                .rposition(|b| *b == b'\0')
+            {
+                self.msgs_end = read_start + i + 1;
 
-                self.buffer.extend(core::iter::repeat_n(0, BUFFER_SIZE));
-            }
-
-            // This marks end of all messages. After this loop is finished, we'll have 2 consecutive
-            // null bytes at the end. This is then used by the callers to determine that they've
-            // read all messages and can now reset the `read_pos`.
-            self.buffer[self.read_pos] = b'\0';
-
-            if self.buffer[self.read_pos - 1] == b'\0' {
-                // One or more full messages were read.
-                break;
+                return Ok(());
             }
         }
-
-        Ok(())
     }
 
-    /// The position of the message, in `buffer`, that the file descriptors received by the latest
-    /// read belong to.
-    ///
-    /// Peers send the file descriptors of a message along with its first byte, in a write that
-    /// carries no other message, but the reads don't necessarily match the writes. On Linux, the
-    /// read that receives the file descriptors can also return the data of earlier writes but it
-    /// ends with the data of the write that carried them. BSD-derived kernels instead begin the
-    /// read with that write and can append the data of later writes to it. Hence, the file
-    /// descriptors belong to the last message starting in the read on Linux, and to the first one
-    /// elsewhere.
+    // Moves the pending file descriptors along with the data they came with, as the data that was
+    // received is dropped from the start of the buffer.
     #[cfg(feature = "std")]
-    fn fds_msg_pos(&self, read_start: usize) -> usize {
-        // Skip the `\0` terminators since the message must have content.
-        let read = &self.buffer[read_start..self.read_pos];
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        let content_pos = read.iter().rposition(|b| *b != b'\0');
-        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        let content_pos = read.iter().position(|b| *b != b'\0');
-        let content_pos = read_start + content_pos.unwrap_or_default();
+    fn move_pending_fds_to_start(&mut self) {
+        let msg_pos = self.msg_pos;
+        self.pending_fds.retain_mut(|pending| {
+            let Some(pos) = pending.pos.checked_sub(msg_pos) else {
+                // Left over from a message that was received already.
+                return false;
+            };
+            pending.pos = pos;
 
-        // The message starts right after the terminator of the one before it.
-        self.buffer[..content_pos]
-            .iter()
-            .rposition(|b| *b == b'\0')
-            .map_or(0, |pos| pos + 1)
-    }
-
-    /// Take the file descriptors received for the message at `msg_pos`.
-    #[cfg(feature = "std")]
-    fn take_fds(&mut self) -> Vec<OwnedFd> {
-        let mut fds = Vec::new();
-        while let Some(pending) = self.pending_fds.front_mut() {
-            match pending.msg_pos.cmp(&self.msg_pos) {
-                // Left over from a message that couldn't be read.
-                Ordering::Less => (),
-                Ordering::Equal if fds.is_empty() => fds = core::mem::take(&mut pending.fds),
-                Ordering::Equal => fds.append(&mut pending.fds),
-                Ordering::Greater => break,
-            }
-            self.pending_fds.pop_front();
-        }
-
-        fds
+            true
+        });
     }
 
     /// The underlying read half of the socket.
     pub fn read_half(&self) -> &Read {
         &self.socket
+    }
+
+    /// Consume the connection into the underlying read half of the socket.
+    ///
+    /// The connection reads from the socket in chunks, so it may have read data that the peer
+    /// sent after the last message received through it. The returned read half returns that data
+    /// first, exactly as it was read, along with the file descriptors that came with it (`std`
+    /// only). It's where the data of another protocol starts when switching the socket over to
+    /// one, e.g. after a method call that asked for an upgrade (see [`Call::upgrade`]).
+    pub fn into_read_half(mut self) -> Rewind<Read> {
+        // Reuse the buffer for the data that wasn't received.
+        self.buffer.truncate(self.read_pos);
+        self.buffer.drain(..self.msg_pos);
+        #[cfg(feature = "std")]
+        self.move_pending_fds_to_start();
+
+        Rewind::new(
+            self.socket,
+            self.buffer,
+            #[cfg(feature = "std")]
+            self.pending_fds,
+        )
     }
 
     /// The credentials passed through over the socket with the latest message (if any).
@@ -322,12 +353,42 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     }
 }
 
-/// File descriptors received for a message in the buffer.
+/// File descriptors received along with data in the buffer.
 #[cfg(feature = "std")]
 #[derive(Debug)]
-struct PendingFds {
-    /// Buffer position where the message starts.
-    msg_pos: usize,
+pub(super) struct PendingFds {
+    /// Buffer position of a byte that came with the file descriptors.
+    ///
+    /// The file descriptors belong to the message this byte is part of. That's only known once the
+    /// message is read, as what follows a message isn't necessarily another message, e.g. after a
+    /// protocol upgrade.
+    pub(super) pos: usize,
     /// The file descriptors.
-    fds: Vec<OwnedFd>,
+    pub(super) fds: Vec<OwnedFd>,
+}
+
+/// Take the file descriptors received for the message spanning `msg` in the buffer, terminator
+/// included.
+#[cfg(feature = "std")]
+fn take_fds(pending_fds: &mut VecDeque<PendingFds>, msg: RangeInclusive<usize>) -> Vec<OwnedFd> {
+    let mut fds = Vec::new();
+    while let Some(pending) = pending_fds.front_mut() {
+        match pending.pos {
+            pos if pos > *msg.end() => break,
+            // Came with data before the message, which was received already.
+            pos if pos < *msg.start() => (),
+            _ if fds.is_empty() => fds = core::mem::take(&mut pending.fds),
+            _ => fds.append(&mut pending.fds),
+        }
+        pending_fds.pop_front();
+    }
+
+    fds
+}
+
+// Whether `bytes` is only JSON whitespace.
+fn is_json_whitespace(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
 }

@@ -264,3 +264,24 @@ async fn pipelining_vs_individual_sends() {
     write_conn_pipelined.flush().await.unwrap();
     assert_eq!(write_conn_pipelined.socket.count(), 1);
 }
+
+#[tokio::test]
+async fn into_write_half() {
+    use crate::test_utils::mock_socket::CountingWriteHalf;
+
+    let mut write_conn = WriteConnection::new(CountingWriteHalf::new(), 1);
+    #[cfg(feature = "std")]
+    {
+        write_conn.write(&42u32, vec![]).await.unwrap();
+        write_conn.enqueue(&3u32, vec![]).unwrap();
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        write_conn.write(&42u32).await.unwrap();
+        write_conn.enqueue(&3u32).unwrap();
+    }
+
+    // The message that was enqueued but not flushed is dropped.
+    let write = write_conn.into_write_half();
+    assert_eq!(write.count(), 1);
+}

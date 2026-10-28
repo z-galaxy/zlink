@@ -915,7 +915,8 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// must return `zlink::Result<()>` (just the outer Result for connection errors, no inner Result
 /// since there's no reply to process).
 ///
-/// One-way methods cannot be combined with `#[zlink(more)]` or `#[zlink(return_fds)]`.
+/// One-way methods cannot be combined with `#[zlink(more)]`, `#[zlink(upgrade)]` or
+/// `#[zlink(return_fds)]`.
 ///
 /// This attribute is particularly useful in combination with chaining method calls. When you chain
 /// oneway methods with regular methods, the oneway calls are sent but don't contribute to the reply
@@ -937,6 +938,79 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     async fn log_event(&mut self, level: &str, message: &str, timestamp: u64)
 ///         -> zlink::Result<()>;
 /// }
+/// ```
+///
+/// # Upgrade Methods
+///
+/// A method call can ask for its connection to be upgraded to another protocol, typically a binary
+/// one, e.g. to transfer large amounts of data or to pass file descriptors. Use the
+/// `#[zlink(upgrade)]` attribute for such methods. Other than the `upgrade` flag the proxy sets on
+/// the call, they are like regular methods: they take `&mut self` and return
+/// `zlink::Result<Result<ReplyType, ErrorType>>`.
+///
+/// The service confirms the upgrade with a single successful reply, after which neither side speaks
+/// Varlink on the connection anymore. So if the method returns `Ok(Ok(_))`, take the socket out of
+/// the connection using `Connection::split`, `ReadConnection::into_read_half` and
+/// `WriteConnection::into_write_half`. The data that the service sent after its reply may have been
+/// read along with it already, in which case the read half that `into_read_half` returns, returns
+/// that data first.
+///
+/// If the service replies with an error instead, it has refused the upgrade and the connection is
+/// still a Varlink one. Therefore, don't send any data of the new protocol before the reply
+/// confirms the upgrade.
+///
+/// File descriptors that arrive along with the reply are returned by the method if it's also marked
+/// with `#[zlink(return_fds)]`. The ones that arrive after the reply are returned by that read
+/// half, along with the data they arrived with.
+///
+/// Upgrade methods cannot be combined with `#[zlink(more)]` since a single reply confirms an
+/// upgrade, nor with `#[zlink(oneway)]` since an upgrade needs a reply. They don't get a `chain_`
+/// variant either.
+///
+/// ```rust
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// use serde::{Deserialize, Serialize};
+/// use zlink::{connection::socket::ReadHalf, proxy};
+///
+/// #[proxy("org.example.Blobs")]
+/// trait BlobsProxy {
+///     /// Ask for the blob to be sent over the connection once the service replies.
+///     #[zlink(upgrade)]
+///     async fn download(&mut self, name: &str) -> zlink::Result<Result<Download, BlobError>>;
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// struct Download {
+///     size: usize,
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// #[serde(tag = "error")]
+/// enum BlobError {
+///     NotFound,
+/// }
+///
+/// # use zlink::test_utils::mock_socket::MockSocket;
+/// # // The service starts sending the blob right after its reply.
+/// # let reads = [b"{\"parameters\":{\"size\":4}}\0blob".as_slice()];
+/// # let mut conn = zlink::Connection::new(MockSocket::with_reads(&reads, vec![]));
+/// let download = conn.download("blob").await?.unwrap();
+///
+/// // The upgrade is confirmed so the connection doesn't speak Varlink anymore.
+/// let (read, _write) = conn.split();
+/// let mut read = read.into_read_half();
+/// let mut blob = Vec::new();
+/// let mut buf = [0; 1024];
+/// while blob.len() < download.size {
+///     let result = read.read(&mut buf).await?;
+///     if result.bytes_read() == 0 {
+///         break;
+///     }
+///     blob.extend_from_slice(&buf[..result.bytes_read()]);
+/// }
+/// assert_eq!(blob, b"blob");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # }).unwrap();
 /// ```
 ///
 /// # File Descriptor Passing
@@ -1287,6 +1361,10 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///   generated at compile time from the method signatures and types.
 /// - **Unknown methods**: Return `MethodNotFound` error with the method name.
 /// - **Unknown interfaces** (in `GetInterfaceDescription`): Return `InterfaceNotFound` error.
+/// - **Protocol upgrades**: Calls asking for their connection to be upgraded to another protocol
+///   (the `upgrade` flag) get an `InvalidParameter` error naming `upgrade`, unless they are to a
+///   method marked with `#[zlink(upgrade)]`. Calls to those that don't ask for an upgrade get an
+///   `ExpectedUpgrade` error (see [Protocol Upgrades](#protocol-upgrades)).
 ///
 /// # Supported Attributes
 ///
@@ -1315,6 +1393,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///   types with it. This scopes the types to the specified interface so they only appear in that
 ///   interface's introspection output. Particularly useful for multi-interface services.
 /// * `#[zlink(rename = "MethodName")]` - Custom Varlink method name.
+/// * `#[zlink(upgrade)]` - Mark a method that upgrades its connection to another protocol. The
+///   method returns the state that takes the upgraded connection over along with its reply. See
+///   [Protocol Upgrades](#protocol-upgrades).
 ///
 /// ## On parameters:
 ///
@@ -1358,7 +1439,10 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # Generated Code
 ///
 /// The macro generates an `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method,
-/// along with internal helper types for serialization/deserialization.
+/// along with internal helper types for serialization/deserialization. If there are [upgrade
+/// methods](#protocol-upgrades), the impl sets `Service::Upgrade` to the type of the state that
+/// they return, and requires it to implement `TakeOver<Sock>`, which it can do for only some
+/// sockets.
 ///
 /// # Error Handling
 ///
@@ -1368,7 +1452,8 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// When a method returns `Err(e)`, the macro generates code that wraps it in the appropriate
 /// combo enum variant and returns `MethodReply::Error(...)`.
-/// When a method returns `Ok(v)`, it returns `MethodReply::Single(Some(v))`.
+/// When a method returns `Ok(v)`, it returns `MethodReply::Single(Some(v))`, or
+/// `MethodReply::Upgrade` for an [upgrade method](#protocol-upgrades).
 ///
 /// Methods can also return plain values (not wrapped in Result) - these are always treated as
 /// successful responses.
@@ -1536,6 +1621,105 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///             })
 ///             .collect();
 ///         futures_util::stream::iter(items)
+///     }
+/// }
+/// ```
+///
+/// # Protocol Upgrades
+///
+/// A call can ask for its connection to be upgraded to another protocol (the Varlink `upgrade`
+/// flag), typically a binary one to transfer large amounts of data or to pass file descriptors.
+/// The service confirms the upgrade by replying with a single successful reply, after which the
+/// connection doesn't speak Varlink anymore: the server stops serving it and hands its socket over
+/// to the new protocol. An error reply refuses the upgrade and the connection remains a Varlink
+/// one.
+///
+/// Methods that upgrade their connections are marked with `#[zlink(upgrade)]`. Such a method
+/// returns its reply (which can be `()`) along with the state that takes the upgraded connection
+/// over, as `(Reply, State)` or `Result<(Reply, State), Error>`, where `State` implements
+/// `TakeOver<Sock>`. Only the reply is part of the interface description. Upgrade methods are
+/// otherwise like regular ones, and they don't need an explicit generic socket type parameter
+/// unless they have a [connection parameter](#connection-parameter). They can't be combined with
+/// `#[zlink(more)]` since a single reply confirms an upgrade, nor with `#[zlink(return_fds)]`: pass
+/// file descriptors over the upgraded connection instead.
+///
+/// Calls to an upgrade method that don't ask for an upgrade get an `ExpectedUpgrade` error, without
+/// the method being called. One-way calls to it aren't served either, since they can't get the
+/// reply confirming the upgrade. Calls to any other method (including those of
+/// `org.varlink.service`) that do ask for an upgrade get an `InvalidParameter` error naming
+/// `upgrade`.
+///
+/// Once the reply is sent, the server calls `TakeOver::take_over` on the state, so each protocol
+/// takes its connections over in its own way:
+///
+/// * The state carries what the new protocol needs from the call (e.g. its parameters), which the
+///   method moves into it.
+/// * `take_over` takes the socket of the upgraded connection, an `Upgraded<Sock>`, and returns the
+///   future that speaks the new protocol over it. The server polls the future along with its other
+///   connections until it completes, so it doesn't need a task of its own. The future can't borrow
+///   the service, which the server keeps calling into.
+/// * An `Upgraded<Sock>` is a `Socket`, so `split` gives the halves to read from and write to. The
+///   client doesn't have to wait for the reply before it starts talking the new protocol, so the
+///   read half first returns the data that the client sent after the call, if the server has read
+///   any of it already. If the upgrade is refused instead, such data breaks the Varlink connection.
+/// * The future is `Send` whenever the state and the futures of the socket are, so a server with
+///   upgrade methods can be `Send` (see the caveats of `Server::run` for why it can't be yet).
+/// * All the upgrade methods return the same type of state. To upgrade to several protocols, they
+///   can share one state type, e.g. an enum whose `take_over` matches on itself.
+/// * The state can't refuse the upgrade, since the reply that confirms it is sent before the state
+///   takes the connection over. Do the checks that the upgrade depends on, e.g. of
+///   `Connection::peer_credentials`, in the upgrade method instead, using a `#[zlink(connection)]`
+///   parameter, and return an error to refuse the upgrade.
+///
+/// ```rust
+/// use serde::Serialize;
+/// use std::{collections::HashMap, os::fd::OwnedFd};
+/// use zlink::{
+///     connection::socket::{Socket, WriteHalf},
+///     introspect, service,
+///     service::{TakeOver, Upgraded},
+/// };
+///
+/// #[derive(Debug, Serialize, introspect::Type)]
+/// struct Download {
+///     size: u64,
+/// }
+///
+/// #[derive(Debug, zlink::ReplyError, introspect::ReplyError)]
+/// #[zlink(interface = "org.example.blobs")]
+/// enum BlobError {
+///     NotFound,
+/// }
+///
+/// struct Blobs {
+///     blobs: HashMap<String, Vec<u8>>,
+/// }
+///
+/// #[service(interface = "org.example.blobs")]
+/// impl Blobs {
+///     /// Replies with the size of the blob, which is then sent over the upgraded connection.
+///     #[zlink(upgrade)]
+///     async fn download(&self, name: String) -> Result<(Download, SendBlob), BlobError> {
+///         // The error reply refuses the upgrade.
+///         let blob = self.blobs.get(&name).ok_or(BlobError::NotFound)?.clone();
+///
+///         Ok((Download { size: blob.len() as u64 }, SendBlob(blob)))
+///     }
+/// }
+///
+/// // The state that takes the upgraded connection over, for any type of socket.
+/// struct SendBlob(Vec<u8>);
+///
+/// impl<Sock> TakeOver<Sock> for SendBlob
+/// where
+///     Sock: Socket,
+/// {
+///     async fn take_over(self, socket: Upgraded<Sock>) {
+///         let (_read, mut write) = socket.split();
+///         let fds = &[] as &[OwnedFd];
+///         let _ = write
+///             .write(&self.0, fds, #[cfg(target_os = "linux")] None)
+///             .await;
 ///     }
 /// }
 /// ```

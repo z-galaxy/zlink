@@ -48,6 +48,18 @@ pub(super) fn generate_method_impl(
             "method cannot be both oneway (`oneway`) and return file descriptors (`return_fds`)",
         ));
     }
+    if method_attrs.is_upgrade && method_attrs.is_streaming {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "method cannot be both upgrade (`upgrade`) and streaming (`more`)",
+        ));
+    }
+    if method_attrs.is_upgrade && method_attrs.is_oneway {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "method cannot be both upgrade (`upgrade`) and oneway (`oneway`)",
+        ));
+    }
 
     // Validate FD parameters
     let fds_params: Vec<_> = arg_infos.iter().filter(|info| info.is_fds).collect();
@@ -169,6 +181,7 @@ pub(super) fn generate_method_impl(
             &error_type,
             out_params_extract,
             method_attrs.return_fds,
+            method_attrs.is_upgrade,
             #[cfg(feature = "std")]
             fds_init,
             crate_path,
@@ -540,6 +553,7 @@ fn generate_regular_method(
     error_type: &Type,
     out_params_extract: TokenStream,
     return_fds: bool,
+    upgrade: bool,
     #[cfg(feature = "std")] fds_init: TokenStream,
     crate_path: &TokenStream,
 ) -> (TokenStream, TokenStream) {
@@ -583,9 +597,15 @@ fn generate_regular_method(
         quote! { Ok(Err(error)) },
     );
 
+    let set_upgrade = if upgrade {
+        quote! { .set_upgrade(true) }
+    } else {
+        quote! {}
+    };
+
     let implementation = quote! {
         #method_call_setup
-        let call = #crate_path::Call::new(method_call);
+        let call = #crate_path::Call::new(method_call)#set_upgrade;
         #receive_result self.call_method::<_, #reply_type, #error_type>(#call_method_args).await?;
         match result {
             Ok(reply) => #ok_arm,

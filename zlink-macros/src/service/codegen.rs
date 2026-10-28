@@ -173,11 +173,25 @@ pub(super) fn generate_service_impl(
             (default_ident, generics, None)
         });
 
-    // Build the where clause: always add Socket bound, then user's additional predicates.
+    // The state that the upgrade methods return along with their replies. They all return the same
+    // type, which the server takes the upgraded connections over with. Without upgrade methods,
+    // `handle` refuses all the requests to upgrade a connection, so there's nothing to take over.
+    let upgrade_state = methods_info.iter().find_map(|m| m.upgrade_state.as_ref());
+    let upgrade_type = match upgrade_state {
+        Some(state) => quote! { #state },
+        None => quote! { () },
+    };
+    // The state might take the connections over for some of the sockets only.
+    let upgrade_predicate =
+        upgrade_state.map(|state| quote! { #state: #crate_path::service::TakeOver<#socket_ty>, });
+
+    // Build the where clause: always add Socket bound, then the one of the state, then user's
+    // additional predicates.
     let user_predicates = user_where_clause.map(|w| w.predicates).unwrap_or_default();
     let where_clause = quote! {
         where
             #socket_ty: #crate_path::connection::Socket,
+            #upgrade_predicate
             #user_predicates
     };
 
@@ -253,6 +267,7 @@ pub(super) fn generate_service_impl(
             type ReplyStreamParams = #reply_stream_params_type;
             type ReplyStreamError = #reply_stream_error_ty;
             type ReplyError<'ser> = #error_type where Self: 'ser;
+            type Upgrade = #upgrade_type;
 
             async fn handle<'__zlink_ser>(
                 &'__zlink_ser mut self,
@@ -263,6 +278,7 @@ pub(super) fn generate_service_impl(
                 Self::ReplyParams<'__zlink_ser>,
                 Self::ReplyStream,
                 Self::ReplyError<'__zlink_ser>,
+                Self::Upgrade,
             > {
                 #handle_body
             }
@@ -1297,6 +1313,25 @@ fn generate_handle_body(
 
     let mut user_match_arms: Vec<TokenStream> = Vec::new();
     let type_to_variant = build_return_type_variant_map(methods_info);
+    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
+
+    let refusal = |error: TokenStream| {
+        wrap_handle_result_no_fds(quote! {
+            #crate_path::service::MethodReply::Error(
+                #reply_error_name::#varlink_error_variant(#error)
+            )
+        })
+    };
+    // A successful reply confirms an upgrade (see `Call::upgrade`), so the calls asking for one are
+    // refused by the methods that don't support upgrades.
+    let refuse_upgrade = refusal(quote! {
+        #crate_path::varlink_service::Error::InvalidParameter {
+            parameter: ::core::convert::From::from("upgrade"),
+        }
+    });
+    // The calls to the methods that do are refused unless they ask for an upgrade, with the error
+    // that systemd also uses when a method requiring the flag is called without it.
+    let expect_upgrade = refusal(quote! { #crate_path::varlink_service::Error::ExpectedUpgrade });
 
     for method in methods_info {
         let Some(_full_path) = method.full_method_path() else {
@@ -1399,6 +1434,25 @@ fn generate_handle_body(
                 .collect();
 
             quote! { self.#method_name(#(#call_args),*).await }
+        };
+
+        // A single reply, which confirms the upgrade for an upgrade method. The method returns the
+        // state that takes the upgraded connection over along with its reply, which goes with the
+        // reply.
+        let single_reply = |params: TokenStream| {
+            if method.is_upgrade {
+                quote! { #crate_path::service::MethodReply::Upgrade(#params, __zlink_state) }
+            } else {
+                quote! { #crate_path::service::MethodReply::Single(#params) }
+            }
+        };
+        // The pattern of the value that the method returns on success, given the one of its reply.
+        let success = |reply: TokenStream| {
+            if method.is_upgrade {
+                quote! { (#reply, __zlink_state) }
+            } else {
+                reply
+            }
         };
 
         // Build the return expression based on method type.
@@ -1561,12 +1615,13 @@ fn generate_handle_body(
                 } else {
                     quote! { ::core::convert::From::from(__err) }
                 };
+                let ok = success(quote! { __ok });
+                let ok_reply =
+                    single_reply(quote! { Some(#reply_params_name::#reply_variant_name(__ok)) });
                 wrap_handle_result_no_fds(quote! {
                     match #method_call {
-                        ::core::result::Result::Ok(__ok) => {
-                            #crate_path::service::MethodReply::Single(Some(
-                                #reply_params_name::#reply_variant_name(__ok)
-                            ))
+                        ::core::result::Result::Ok(#ok) => {
+                            #ok_reply
                         }
                         ::core::result::Result::Err(__err) => {
                             #crate_path::service::MethodReply::Error(#error_convert)
@@ -1580,10 +1635,12 @@ fn generate_handle_body(
                 } else {
                     quote! { ::core::convert::From::from(__err) }
                 };
+                let ok = success(quote! { () });
+                let ok_reply = single_reply(quote! { None });
                 wrap_handle_result_no_fds(quote! {
                     match #method_call {
-                        ::core::result::Result::Ok(()) => {
-                            #crate_path::service::MethodReply::Single(None)
+                        ::core::result::Result::Ok(#ok) => {
+                            #ok_reply
                         }
                         ::core::result::Result::Err(__err) => {
                             #crate_path::service::MethodReply::Error(#error_convert)
@@ -1596,30 +1653,47 @@ fn generate_handle_body(
             let type_str = return_type.to_token_stream().to_string();
             let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
             let reply_variant_name = format_ident!("__{}Variant{}", method_call_name, variant_idx);
+            let result = success(quote! { __result });
+            let reply =
+                single_reply(quote! { Some(#reply_params_name::#reply_variant_name(__result)) });
             wrap_handle_result_no_fds(quote! {
-                let __result = #method_call;
-                #crate_path::service::MethodReply::Single(Some(
-                    #reply_params_name::#reply_variant_name(__result)
-                ))
+                let #result = #method_call;
+                #reply
             })
         } else {
-            // Method has no return type.
+            // Method has no return type, other than the state for an upgrade method.
+            let result = success(quote! { _ });
+            let reply = single_reply(quote! { None });
             wrap_handle_result_no_fds(quote! {
-                let _ = #method_call;
-                #crate_path::service::MethodReply::Single(None)
+                let #result = #method_call;
+                #reply
             })
         };
 
+        // An upgrade method has to be called with the upgrade flag, and the upgrade needs a reply
+        // to be confirmed. One-way calls don't get any so they're refused too, which only means the
+        // method isn't called. Other methods can't be called with the flag.
+        let (refused, refusal) = if method.is_upgrade {
+            (
+                quote! { !__zlink_call.upgrade() || __zlink_call.oneway() },
+                &expect_upgrade,
+            )
+        } else {
+            (quote! { __zlink_call.upgrade() }, &refuse_upgrade)
+        };
         user_match_arms.push(quote! {
             #pattern => {
-                #return_expr
+                if #refused {
+                    #refusal
+                } else {
+                    #return_expr
+                }
             }
         });
     }
 
     let unused_variant = format_ident!("__{}Unused", user_methods_name);
     let unknown_variant = format_ident!("__{}Unknown", user_methods_name);
-    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
     let varlink_reply_variant = format_ident!("__{}VarlinkService", reply_params_name);
 
     // Add the unused variant arm first (to match enum order).
@@ -1738,6 +1812,9 @@ fn generate_handle_body(
     // `Info::new` converts the interface names it is given. They are `InterfaceName`s already, so
     // the conversion can't fail, which makes the `Result` pattern in the `GetInfo` arm irrefutable.
     let varlink_service_match = quote! {
+        #method_call_name::__VarlinkService(_) if __zlink_call.upgrade() => {
+            #refuse_upgrade
+        }
         #method_call_name::__VarlinkService(__varlink_method) => {
             match __varlink_method {
                 #crate_path::varlink_service::Method::GetInfo => {

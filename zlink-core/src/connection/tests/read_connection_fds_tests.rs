@@ -136,6 +136,57 @@ async fn receive_calls_with_fds_among_other_calls() {
     }
 }
 
+// The FDs of a call that's only partially read when the call before it is received are returned
+// with it once the rest of it is read.
+#[tokio::test]
+async fn receive_partially_read_call_with_fds() {
+    let call2 = call(2);
+    // Linux returns the FDs in the read that ends with the data written along with them, so the
+    // buffer is moved to make room for the rest of the second call while the FDs are pending.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let reads = [
+        ([call(1), call2[..10].to_vec()].concat(), vec![fd(), fd()]),
+        (call2[10..].to_vec(), vec![]),
+    ];
+    // BSD-derived kernels start the read that returns the FDs with the data written along with
+    // them.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let reads = [
+        (call(1), vec![]),
+        (call2[..10].to_vec(), vec![fd(), fd()]),
+        (call2[10..].to_vec(), vec![]),
+    ];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    for (value, fd_count) in [(1, 0), (2, 2)] {
+        let (call, fds) = conn.receive_call::<TestMethod>().await.unwrap();
+        assert_eq!(call.method(), &TestMethod::Test { value });
+        assert_eq!(fds.len(), fd_count, "FDs received with call {value}");
+    }
+}
+
+// What follows a message isn't necessarily another message, e.g. after a protocol upgrade. Linux
+// returns the FDs in the read that ends with the data written along with them, so they're received
+// with the reply here, but they're not the reply's: they're read from `into_read_half` along with
+// that data. That holds even when the data is only NUL bytes, like the single byte commonly sent
+// along with FDs.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[tokio::test]
+async fn receive_reply_followed_by_nul_with_fds() {
+    let reads = [(
+        [&br#"{"parameters":{"result":"ok"}}"#[..], b"\0\0"].concat(),
+        vec![fd()],
+    )];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    let (reply, fds) = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+    assert!(fds.is_empty());
+
+    let mut read = conn.into_read_half();
+    assert_eq!(read_all(&mut read).await, [(b"\0".to_vec(), 1)]);
+}
+
 #[tokio::test]
 async fn receive_reply_with_single_fd() {
     let (r_fd, _w_fd) = UnixStream::pair().unwrap();
@@ -335,6 +386,33 @@ async fn receive_reply_error_with_fds() {
     assert_eq!(received_fds.len(), 1);
 }
 
+// Linux returns the FDs in the read that ends with the data written along with them. When that's
+// the data of another protocol following a reply, the FDs are received before the reply is
+// returned. They're then read from `into_read_half` along with the byte that came with them, alone,
+// so that it's the last byte of the read as on Linux, as well as the first one as elsewhere.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[tokio::test]
+async fn into_read_half_returns_unreceived_fds() {
+    let reads = [
+        (br#"{"parameters":"#.to_vec(), vec![fd()]),
+        (
+            [&br#"{"result":"ok"}}"#[..], b"\0raw"].concat(),
+            vec![fd(), fd()],
+        ),
+    ];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    let (reply, fds) = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+    assert_eq!(fds.len(), 1);
+
+    let mut read = conn.into_read_half();
+    assert_eq!(
+        read_all(&mut read).await,
+        [(b"ra".to_vec(), 0), (b"w".to_vec(), 2)]
+    );
+}
+
 /// A call to `org.example.Test` with `value`, as it's sent over the socket.
 fn call(value: u32) -> Vec<u8> {
     let mut call =
@@ -342,6 +420,24 @@ fn call(value: u32) -> Vec<u8> {
     call.push(b'\0');
 
     call
+}
+
+/// The data and the number of FDs of each read from `read`, until the end of the data.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+async fn read_all<R>(read: &mut R) -> Vec<(Vec<u8>, usize)>
+where
+    R: ReadHalf,
+{
+    let mut buf = [0; 64];
+    let mut reads = Vec::new();
+    loop {
+        let result = read.read(&mut buf).await.unwrap();
+        let bytes_read = result.bytes_read();
+        if bytes_read == 0 {
+            return reads;
+        }
+        reads.push((buf[..bytes_read].to_vec(), result.fds().len()));
+    }
 }
 
 fn fd() -> OwnedFd {

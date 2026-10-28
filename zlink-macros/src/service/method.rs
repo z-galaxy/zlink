@@ -43,6 +43,13 @@ pub(super) struct MethodInfo {
     pub stream_uses_impl_trait: bool,
     /// Whether this method returns file descriptors (`#[zlink(return_fds)]`).
     pub return_fds: bool,
+    /// Whether this method upgrades its connection to another protocol (`#[zlink(upgrade)]`).
+    pub is_upgrade: bool,
+    /// The type of the state that takes the upgraded connection over, for an upgrade method.
+    ///
+    /// The method returns the state along with its reply (the `S` in `(T, S)` or
+    /// `Result<(T, S), E>`), so it isn't part of `return_type`.
+    pub upgrade_state: Option<Type>,
     /// Doc-comments on this method, for introspection.
     pub comments: Vec<String>,
 }
@@ -81,6 +88,25 @@ impl MethodInfo {
 
         // Check if this is a streaming method.
         let is_streaming = method_attrs.is_streaming;
+
+        // Check if this is an upgrade method. A single reply confirms an upgrade so it can't be a
+        // stream. It can't send file descriptors with the reply either since the write half can
+        // still be holding on to them when the connection is taken over, which is when they're
+        // closed.
+        let is_upgrade = method_attrs.is_upgrade;
+        if is_upgrade && is_streaming {
+            return Err(Error::new_spanned(
+                &method.sig,
+                "method cannot be both upgrade (`upgrade`) and streaming (`more`)",
+            ));
+        }
+        if is_upgrade && method_attrs.return_fds {
+            return Err(Error::new_spanned(
+                &method.sig,
+                "method cannot be both upgrade (`upgrade`) and return file descriptors \
+                 (`return_fds`): send them over the upgraded connection instead",
+            ));
+        }
 
         // Extract parameters (skip self).
         let params: Vec<ParamInfo> = method
@@ -311,6 +337,29 @@ impl MethodInfo {
             }
         };
 
+        // An upgrade method returns the state that takes the upgraded connection over along with
+        // its reply, which can be `()`. Only one level of tuple is split, so the state can be a
+        // tuple too.
+        let (return_type, upgrade_state) = match return_type {
+            Some(Type::Tuple(tuple)) if is_upgrade && tuple.elems.len() == 2 => {
+                let mut elems = tuple.elems.into_iter();
+                let reply = elems.next().filter(|reply| !is_unit_type(reply));
+
+                (reply, elems.next())
+            }
+            return_type => (return_type, None),
+        };
+        if is_upgrade && upgrade_state.is_none() {
+            let message = "`#[zlink(upgrade)]` methods must return their reply along with the \
+                           state that takes the upgraded connection over: `(Reply, State)` or \
+                           `Result<(Reply, State), Error>`, where `State` implements `TakeOver`";
+
+            return Err(match &method.sig.output {
+                ReturnType::Type(_, ty) => Error::new_spanned(ty, message),
+                ReturnType::Default => Error::new_spanned(&method.sig, message),
+            });
+        }
+
         // Capture the method body.
         let block = &method.block;
         let body = quote::quote! { #block };
@@ -331,6 +380,8 @@ impl MethodInfo {
             stream_return_type,
             stream_uses_impl_trait,
             return_fds,
+            is_upgrade,
+            upgrade_state,
             comments,
         })
     }
@@ -368,6 +419,8 @@ struct MethodAttrs {
     is_streaming: bool,
     /// Whether this method returns file descriptors.
     return_fds: bool,
+    /// Whether this method upgrades its connection to another protocol.
+    is_upgrade: bool,
 }
 
 impl MethodAttrs {
@@ -417,6 +470,11 @@ impl MethodAttrs {
                         return Err(meta.error("duplicate `return_fds` attribute"));
                     }
                     result.return_fds = true;
+                } else if meta.path.is_ident("upgrade") {
+                    if result.is_upgrade {
+                        return Err(meta.error("duplicate `upgrade` attribute"));
+                    }
+                    result.is_upgrade = true;
                 } else {
                     return Err(meta.error("unknown zlink attribute"));
                 }
@@ -685,7 +743,100 @@ pub(super) fn extract_first_tuple_element(ty: &Type) -> Option<Type> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quote::ToTokens;
     use syn::{FnArg, parse_quote};
+
+    #[test]
+    fn upgrade_cannot_be_combined_with_more_or_return_fds() {
+        for (attrs, conflict) in [
+            (
+                "upgrade, more",
+                "upgrade (`upgrade`) and streaming (`more`)",
+            ),
+            (
+                "upgrade, return_fds",
+                "upgrade (`upgrade`) and return file descriptors (`return_fds`)",
+            ),
+        ] {
+            let attrs: TokenStream = attrs.parse().unwrap();
+            let mut method: ImplItemFn = parse_quote! {
+                #[zlink(#attrs)]
+                async fn probe(&self) -> Result<Reply, Error> { todo!() }
+            };
+            let mut interface = Some("org.example.probe".to_owned());
+
+            let Err(err) = MethodInfo::extract(&mut method, &mut interface) else {
+                panic!("`{attrs}` must be rejected");
+            };
+
+            assert!(
+                err.to_string().contains(conflict),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn upgrade_must_return_state_along_with_reply() {
+        for output in [
+            "",
+            "-> ()",
+            "-> Reply",
+            "-> Result<Reply, Error>",
+            "-> Result<(), Error>",
+            "-> (Reply, State, u32)",
+        ] {
+            let output: TokenStream = output.parse().unwrap();
+            let mut method: ImplItemFn = parse_quote! {
+                #[zlink(upgrade)]
+                async fn probe(&self) #output { todo!() }
+            };
+            let mut interface = Some("org.example.probe".to_owned());
+
+            let Err(err) = MethodInfo::extract(&mut method, &mut interface) else {
+                panic!("`{output}` must be rejected");
+            };
+
+            // Both forms are named.
+            let err = err.to_string();
+            assert!(
+                err.contains("`(Reply, State)`") && err.contains("`Result<(Reply, State), Error>`"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn upgrade_reply_is_split_from_state() {
+        for (output, reply, state, returns_result) in [
+            ("(Reply, State)", Some("Reply"), "State", false),
+            ("((), State)", None, "State", false),
+            (
+                "Result<(Reply, State), Error>",
+                Some("Reply"),
+                "State",
+                true,
+            ),
+            ("Result<((), State), Error>", None, "State", true),
+            // Only one level of tuple is split.
+            ("(Reply, (u8, bool))", Some("Reply"), "(u8,bool)", false),
+        ] {
+            let output: Type = syn::parse_str(output).unwrap();
+            let mut method: ImplItemFn = parse_quote! {
+                #[zlink(upgrade)]
+                async fn probe(&self) -> #output { todo!() }
+            };
+            let mut interface = Some("org.example.probe".to_owned());
+
+            let method = MethodInfo::extract(&mut method, &mut interface).unwrap();
+
+            // Only the reply is described and serialized.
+            assert!(method.is_upgrade);
+            assert_eq!(compact(method.return_type).as_deref(), reply);
+            assert_eq!(compact(method.upgrade_state).as_deref(), Some(state));
+            assert_eq!(method.returns_result, returns_result);
+        }
+    }
 
     /// Validation must judge the same string `ParamInfo::wire_name` does, or a raw ident slips past
     /// it and reaches the IDL unraw'd as `_foo`. Both spellings resolve to `_foo`, which the field
@@ -713,5 +864,10 @@ mod tests {
                 "message must point at the `rename` escape hatch: {err}"
             );
         }
+    }
+
+    // The tokens of `ty` without any whitespace, so that how they're spaced doesn't matter.
+    fn compact(ty: Option<Type>) -> Option<String> {
+        ty.map(|ty| ty.to_token_stream().to_string().replace(' ', ""))
     }
 }

@@ -157,7 +157,11 @@ let (mut read, mut write) = conn.split();
 # }
 ```
 
-Both halves share the connection's unique `id()`, so they can be re-associated later.
+Both halves share the connection's unique `id()`, so they can be re-associated later. They can also
+be turned into the halves of the underlying socket with `ReadConnection::into_read_half` and
+`WriteConnection::into_write_half`, to switch to another protocol after an
+[upgrade](service.html#upgrading-connections). The read half that the former returns first hands out
+the data that was read past the last message received.
 
 ## Server-side connections
 

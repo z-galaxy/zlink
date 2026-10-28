@@ -279,6 +279,15 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         &self.socket
     }
 
+    /// Consume the connection into the underlying write half of the socket.
+    ///
+    /// Messages that were enqueued but not flushed yet are dropped, so [flush](Self::flush) them
+    /// first if needed. This is useful to switch the socket over to another protocol, e.g. after a
+    /// method call that asked for an upgrade (see [`Call::upgrade`]).
+    pub fn into_write_half(self) -> Write {
+        self.socket
+    }
+
     /// Set the credentials to send with all subsequent writes.
     ///
     /// This is only available for `std` feature and `linux` target.

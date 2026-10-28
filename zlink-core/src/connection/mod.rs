@@ -77,6 +77,8 @@ pub use credentials::Credentials;
 #[cfg(feature = "std")]
 pub use credentials::PassedCredentials;
 pub use read_connection::ReadConnection;
+mod rewind;
+pub use rewind::Rewind;
 #[cfg(feature = "std")]
 pub use rustix::{process::Gid, process::Pid, process::Uid};
 pub mod chain;
@@ -162,6 +164,10 @@ where
     }
 
     /// Split the connection into read and write halves.
+    ///
+    /// [`ReadConnection::into_read_half`] and [`WriteConnection::into_write_half`] take the socket
+    /// halves out of these, e.g. to switch to another protocol after an upgrade (see
+    /// [`Call::upgrade`]).
     ///
     /// Note: This consumes any cached credentials. If you need the credentials after splitting,
     /// call [`Connection::peer_credentials`] before splitting.

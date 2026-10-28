@@ -64,7 +64,8 @@ module documentation][fd-passing] describes the convention in detail.
 Chain methods are only generated for methods whose reply and error types are owned
 (`DeserializeOwned`). Borrowed reply types can't be used in chains because the read buffer is
 reused from one reply to the next — see [the pipelining chapter](pipelining.html#chaining-proxy-methods).
-Input parameters may borrow either way.
+Input parameters may borrow either way. Upgrade methods (`#[zlink(upgrade)]`) don't get a `chain_`
+variant either, since the calls pipelined after a confirmed upgrade would never be answered.
 
 ## How do I try this against real services?
 

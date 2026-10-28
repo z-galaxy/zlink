@@ -479,6 +479,247 @@ async fn partial_message_at_buffer_boundary() {
     assert!(matches!(result, Err(crate::Error::UnexpectedEof)));
 }
 
+#[tokio::test]
+async fn message_before_incomplete_one() {
+    // A complete message is received without waiting for the rest of the one after it.
+    let call2 = call(2);
+    let first_read = [call(1), call2[..10].to_vec()].concat();
+    let reads: [&[u8]; 2] = [&first_read, &call2[10..]];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 1 });
+    // The second read wasn't needed.
+    assert_eq!(conn.read_half().messages_remaining(), 1);
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 2 });
+    assert_eq!(conn.read_half().messages_remaining(), 0);
+}
+
+#[tokio::test]
+async fn messages_split_across_reads() {
+    // Messages are received no matter where the reads split them, including inside a NUL-less
+    // part in the middle of one.
+    let call3 = call(3);
+    let reads: [&[u8]; 4] = [
+        &[call(1), call(2), call3[..10].to_vec()].concat(),
+        &call3[10..20],
+        &[&call3[20..], &call(4)[..]].concat(),
+        &call(5),
+    ];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    for value in 1..=5 {
+        let result = conn.receive_call::<TestMethod>().await.unwrap();
+        #[cfg(feature = "std")]
+        let (call, _fds) = result;
+        #[cfg(not(feature = "std"))]
+        let call = result;
+        assert_eq!(call.method, TestMethod::Test { value });
+    }
+}
+
+#[tokio::test]
+async fn unterminated_message() {
+    // A message without its NUL terminator isn't complete, however complete it looks.
+    let message = [&call(1)[..], b"{\"method\":\"org.example.Test\""].concat();
+    let reads: [&[u8]; 1] = [&message];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    assert!(conn.receive_call::<TestMethod>().await.is_ok());
+    let result = conn.receive_call::<TestMethod>().await;
+    assert!(matches!(result, Err(crate::Error::UnexpectedEof)));
+}
+
+#[tokio::test]
+async fn malformed_message_is_skipped() {
+    // A message that can't be deserialized doesn't affect the ones after it.
+    let malformed = br#"{"method":"org.example.Test","parameters":{"value":"one"}}"#;
+    let read = [&malformed[..], b"\0", &call(2)].concat();
+    let reads: [&[u8]; 1] = [&read];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_call::<TestMethod>().await;
+    assert!(matches!(result, Err(crate::Error::Json(_))));
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 2 });
+}
+
+#[tokio::test]
+async fn whitespace_after_message() {
+    let message = br#"{"method":"org.example.Test","parameters":{"value":1}}"#;
+    let read = [&message[..], b" \r\n\t\0"].concat();
+    let reads: [&[u8]; 1] = [&read];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 1 });
+}
+
+#[tokio::test]
+async fn trailing_characters_after_message() {
+    // Anything but whitespace between the end of the JSON value and the NUL is an error.
+    let message = br#"{"method":"org.example.Test","parameters":{"value":1}}"#;
+    let read = [&message[..], b" trailing\0", &call(2)].concat();
+    let reads: [&[u8]; 1] = [&read];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_call::<TestMethod>().await;
+    assert!(matches!(result, Err(crate::Error::Json(_))));
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 2 });
+}
+
+#[tokio::test]
+async fn empty_message() {
+    let read = [b"\0", &call(1)[..]].concat();
+    let reads: [&[u8]; 1] = [&read];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_call::<TestMethod>().await;
+    assert!(matches!(result, Err(crate::Error::Json(_))));
+
+    let result = conn.receive_call::<TestMethod>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (call, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let call = result;
+    assert_eq!(call.method, TestMethod::Test { value: 1 });
+}
+
+#[tokio::test]
+async fn into_read_half_returns_unreceived_data() {
+    // A reply followed by the start of the data of another protocol, which can begin with NUL
+    // bytes.
+    let reads: [&[u8]; 2] = [b"{\"parameters\":{\"result\":\"ok\"}}\0\0\0\x01*", b"rest"];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+
+    // The data that was read along with the reply comes first, and then what's left to read from
+    // the socket.
+    let mut read = conn.into_read_half();
+    assert_eq!(
+        read_all(&mut read, 3).await,
+        [&b"\0\0\x01"[..], b"*", b"res", b"t"]
+    );
+}
+
+#[tokio::test]
+async fn into_read_half_returns_unreceived_messages() {
+    // The messages that were read but not received are returned as they were read.
+    let reads: [&[u8]; 1] =
+        [b"{\"parameters\":{\"result\":\"1\"}}\0{\"parameters\":{\"result\":\"2\"}}\0"];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "1");
+
+    let mut read = conn.into_read_half();
+    assert_eq!(
+        read_all(&mut read, 64).await,
+        [b"{\"parameters\":{\"result\":\"2\"}}\0"]
+    );
+}
+
+#[tokio::test]
+async fn into_read_half_without_unreceived_data() {
+    let socket = MockSocket::with_responses(&[r#"{"parameters":{"result":"ok"}}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    assert!(conn.receive_reply::<TestReply, TestReply>().await.is_ok());
+
+    let mut read = conn.into_read_half();
+    assert!(read_all(&mut read, 64).await.is_empty());
+}
+
 // Deserializing a message doesn't check that the values its type ignores are valid UTF-8, so a
 // message can be received even if it isn't valid UTF-8. It must be logged nonetheless.
 #[test_log::test(tokio::test)]
@@ -494,6 +735,31 @@ async fn receive_message_with_invalid_utf8_in_ignored_value() {
     #[cfg(not(feature = "std"))]
     let call = result;
     assert_eq!(call.method(), &TestMethod::Test { value: 42 });
+}
+
+/// A call to `org.example.Test` with `value`, as it's sent over the socket.
+fn call(value: u32) -> Vec<u8> {
+    let mut call =
+        format!(r#"{{"method":"org.example.Test","parameters":{{"value":{value}}}}}"#).into_bytes();
+    call.push(b'\0');
+
+    call
+}
+
+/// The data of each read from `read` with a buffer of `len` bytes, until the end of the data.
+async fn read_all<R>(read: &mut R, len: usize) -> Vec<Vec<u8>>
+where
+    R: ReadHalf,
+{
+    let mut buf = vec![0; len];
+    let mut reads = Vec::new();
+    loop {
+        let bytes_read = read.read(&mut buf).await.unwrap().bytes_read();
+        if bytes_read == 0 {
+            return reads;
+        }
+        reads.push(buf[..bytes_read].to_vec());
+    }
 }
 
 /// A read half returning the given bytes in a single read.

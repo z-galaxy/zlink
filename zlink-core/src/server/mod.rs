@@ -3,11 +3,17 @@ mod select_all;
 pub mod service;
 
 mod infallible;
+mod upgrade;
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
+use core::{
+    future::{Future, poll_fn},
+    pin::{Pin, pin},
+    task::Poll,
+};
 use futures_util::{FutureExt, StreamExt};
 use select_all::SelectAll;
-use service::MethodReply;
+use service::{MethodReply, TakeOver, Upgraded};
 
 use crate::{Call, Connection, Reply, connection::Socket};
 
@@ -34,6 +40,12 @@ where
     }
 
     /// Run the server.
+    ///
+    /// The server serves each connection until it's closed, unless its upgrade to another protocol
+    /// is confirmed: its socket is then handed over to the state that came with the reply (see
+    /// [`TakeOver`]), and the server polls the future serving it instead, until it completes. If
+    /// the listener stops accepting connections, the server returns once it's done with all of
+    /// them, including the upgraded ones.
     ///
     /// # Caveats
     ///
@@ -65,12 +77,18 @@ where
         // Vec for futures from `Connection::receive_call`. Reused across iterations to avoid
         // per-iteration allocations.
         let mut read_futures = Vec::new();
+        // The futures serving the upgraded connections, along with the IDs of the connections.
+        let mut upgrades = Vec::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
         let mut listener_closed = false;
 
         loop {
-            if listener_closed && connections.is_empty() && reply_streams.is_empty() {
+            if listener_closed
+                && connections.is_empty()
+                && reply_streams.is_empty()
+                && upgrades.is_empty()
+            {
                 return Ok(());
             }
 
@@ -108,13 +126,26 @@ where
                 }
             }
 
+            // Prepare the futures serving the upgraded connections. They only complete once, after
+            // which they're removed, so there's no need to take turns to be polled first.
+            let mut upgrade_select_all = SelectAll::new(None);
+            for (_, future) in &mut upgrades {
+                upgrade_select_all.push(future);
+            }
+
             futures_util::select_biased! {
                 // 1. Accept a new connection.
                 conn = listener.accept().fuse() => match conn? {
                     Some(conn) => connections.push(conn),
                     None => listener_closed = true,
                 },
-                // 2. Read method calls from the existing connections and handle them.
+                // 2. Serve the upgraded connections. They come before the method calls so that
+                // they're polled even if there's always a method call to handle.
+                (idx, ()) = upgrade_select_all.fuse() => {
+                    let (id, _) = upgrades.swap_remove(idx);
+                    trace!("Done serving upgraded client {}", id);
+                },
+                // 3. Read method calls from the existing connections and handle them.
                 (idx, result) = read_select_all.fuse() => {
                         #[cfg(feature = "std")]
                         let (call, fds) = match result {
@@ -125,34 +156,45 @@ where
                         let call = result;
                         last_method_call_winner = Some(idx);
 
-                        let mut stream = None;
-                        let mut remove = true;
-                        match call {
+                        let next = match call {
                             Ok(call) => {
                                 #[cfg(feature = "std")]
-                                let result =
-                                    self.handle_call(call, &mut connections[idx], fds).await;
+                                let handling = self.handle_call(call, &mut connections[idx], fds);
                                 #[cfg(not(feature = "std"))]
-                                let result =
-                                    self.handle_call(call, &mut connections[idx]).await;
-                                match result {
-                                    Ok(None) => remove = false,
-                                    Ok(Some(s)) => stream = Some(s),
-                                    Err(e) => warn!("Error writing to connection: {:?}", e),
+                                let handling = self.handle_call(call, &mut connections[idx]);
+                                match while_serving_upgrades(handling, &mut upgrades).await {
+                                    Ok(next) => Some(next),
+                                    Err(e) => {
+                                        warn!("Error writing to connection: {:?}", e);
+                                        None
+                                    }
                                 }
                             }
-                            Err(e) => debug!("Error reading from socket: {:?}", e),
-                        }
+                            Err(e) => {
+                                debug!("Error reading from socket: {:?}", e);
+                                None
+                            }
+                        };
 
-                        if stream.is_some() || remove {
-                            let conn = connections.swap_remove(idx);
-
-                            if let Some(stream) = stream {
+                        match next {
+                            Some(NextStep::Receive) => (),
+                            Some(NextStep::Stream(stream)) => {
+                                let conn = connections.swap_remove(idx);
                                 reply_streams.push(ReplyStream::new(stream, conn));
+                            }
+                            Some(NextStep::Upgrade(state)) => {
+                                let conn = connections.swap_remove(idx);
+                                let id = conn.id();
+                                trace!("Client {} upgraded, handing over its socket", id);
+                                let socket = Upgraded::new(conn);
+                                upgrades.push((id, Box::pin(state.take_over(socket))));
+                            }
+                            Some(NextStep::Close) | None => {
+                                connections.swap_remove(idx);
                             }
                         }
                 }
-                // 3. Read replies from the reply streams and send them off.
+                // 4. Read replies from the reply streams and send them off.
                 reply = reply_stream_select_all.fuse() => {
                     let (idx, item) = reply;
                     last_reply_stream_winner = Some(idx);
@@ -162,22 +204,22 @@ where
                         Some(item) => {
                             #[cfg(feature = "std")]
                             let (item, fds) = item;
+                            let conn = &mut reply_streams[idx].conn;
                             #[cfg(feature = "std")]
-                            let send_result = match item {
-                                Ok(reply) => reply_streams[idx]
-                                    .conn
-                                    .send_reply(&reply, fds)
-                                    .await,
-                                Err(error) => reply_streams[idx]
-                                    .conn
-                                    .send_error(&error, fds)
-                                    .await,
+                            let sending = async {
+                                match item {
+                                    Ok(reply) => conn.send_reply(&reply, fds).await,
+                                    Err(error) => conn.send_error(&error, fds).await,
+                                }
                             };
                             #[cfg(not(feature = "std"))]
-                            let send_result = match item {
-                                Ok(reply) => reply_streams[idx].conn.send_reply(&reply).await,
-                                Err(error) => reply_streams[idx].conn.send_error(&error).await,
+                            let sending = async {
+                                match item {
+                                    Ok(reply) => conn.send_reply(&reply).await,
+                                    Err(error) => conn.send_error(&error).await,
+                                }
                             };
+                            let send_result = while_serving_upgrades(sending, &mut upgrades).await;
                             if let Err(e) = send_result {
                                 warn!("Error writing to client {}: {:?}", id, e);
                                 reply_streams.swap_remove(idx);
@@ -199,36 +241,101 @@ where
         call: Call<Service::MethodCall<'_>>,
         conn: &mut Connection<Listener::Socket>,
         #[cfg(feature = "std")] fds: Vec<std::os::fd::OwnedFd>,
-    ) -> crate::Result<Option<Service::ReplyStream>> {
-        let mut stream = None;
-
+    ) -> crate::Result<NextStep<Service::ReplyStream, Service::Upgrade>> {
         #[cfg(feature = "std")]
         let (reply, reply_fds) = self.service.handle(&call, conn, fds).await;
         #[cfg(not(feature = "std"))]
         let reply = self.service.handle(&call, conn).await;
 
-        match reply {
+        let (params, state) = match reply {
             // Don't send replies or errors for oneway calls.
-            MethodReply::Single(_) | MethodReply::Error(_) if call.oneway() => (),
-            MethodReply::Single(params) => {
-                let reply = Reply::new(params).set_continues(Some(false));
-                #[cfg(feature = "std")]
-                conn.send_reply(&reply, reply_fds).await?;
-                #[cfg(not(feature = "std"))]
-                conn.send_reply(&reply).await?;
+            MethodReply::Single(_) | MethodReply::Error(_) | MethodReply::Upgrade(..)
+                if call.oneway() =>
+            {
+                return Ok(NextStep::Receive);
             }
-            #[cfg(feature = "std")]
-            MethodReply::Error(err) => conn.send_error(&err, reply_fds).await?,
-            #[cfg(not(feature = "std"))]
-            MethodReply::Error(err) => conn.send_error(&err).await?,
+            MethodReply::Single(params) => (params, None),
+            MethodReply::Upgrade(params, state) => (params, Some(state)),
+            MethodReply::Error(err) => {
+                #[cfg(feature = "std")]
+                conn.send_error(&err, reply_fds).await?;
+                #[cfg(not(feature = "std"))]
+                conn.send_error(&err).await?;
+
+                return Ok(NextStep::Receive);
+            }
             MethodReply::Multi(s) => {
                 trace!("Client {} now turning into a reply stream", conn.id());
-                stream = Some(s)
+
+                return Ok(NextStep::Stream(s));
             }
+        };
+
+        let reply = Reply::new(params).set_continues(Some(false));
+        #[cfg(feature = "std")]
+        conn.send_reply(&reply, reply_fds).await?;
+        #[cfg(not(feature = "std"))]
+        conn.send_reply(&reply).await?;
+
+        // A successful reply confirms an upgrade, whether or not it comes with the state to take
+        // the connection over with.
+        let next = match (call.upgrade(), state) {
+            (true, Some(state)) => NextStep::Upgrade(state),
+            (true, None) => {
+                warn!(
+                    "Upgrade of client {} confirmed without any state to take it over with, \
+                     closing it",
+                    conn.id()
+                );
+                NextStep::Close
+            }
+            (false, Some(_)) => {
+                warn!(
+                    "Upgrade of client {} confirmed although it didn't ask for one, ignoring it",
+                    conn.id()
+                );
+                NextStep::Receive
+            }
+            (false, None) => NextStep::Receive,
+        };
+
+        Ok(next)
+    }
+}
+
+/// Drive `future` to completion while serving the upgraded connections.
+///
+/// The server serves all its connections from a single task, so it would otherwise stop serving
+/// the upgraded connections while it awaits anything else, even when that waits for one of them in
+/// turn, e.g. a method call waiting for a transfer over an upgraded connection to complete.
+async fn while_serving_upgrades<Fut, Upgrade>(
+    future: Fut,
+    upgrades: &mut Vec<(usize, Pin<Box<Upgrade>>)>,
+) -> Fut::Output
+where
+    Fut: Future,
+    Upgrade: Future<Output = ()>,
+{
+    let mut future = pin!(future);
+
+    poll_fn(|cx| {
+        if let Poll::Ready(output) = future.as_mut().poll(cx) {
+            return Poll::Ready(output);
         }
 
-        Ok(stream)
-    }
+        let mut idx = 0;
+        while idx < upgrades.len() {
+            if upgrades[idx].1.as_mut().poll(cx).is_pending() {
+                idx += 1;
+                continue;
+            }
+            let (id, _) = upgrades.swap_remove(idx);
+            trace!("Done serving upgraded client {}", id);
+        }
+
+        Poll::Pending
+    })
+    .await
 }
 
 /// Method reply stream and connection pair.
@@ -244,5 +351,386 @@ where
 {
     fn new(stream: St, conn: Connection<Sock>) -> Self {
         Self { stream, conn }
+    }
+}
+
+/// What the server does with a connection after handling a method call received on it.
+enum NextStep<St, Upgrade> {
+    /// Receive the next method call.
+    Receive,
+    /// Send the replies of the stream.
+    Stream(St),
+    /// Hand the socket of the connection over to the state, since its upgrade was confirmed.
+    Upgrade(Upgrade),
+    /// Close the connection, since its upgrade was confirmed without any state to take it over
+    /// with.
+    Close,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::VecDeque, rc::Rc};
+    use core::{
+        cell::{Cell, RefCell},
+        future::{Future, poll_fn},
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+
+    use serde::Deserialize;
+
+    use super::*;
+    use crate::{
+        ReadyListener, Service,
+        connection::socket::ReadHalf,
+        service::{HandleResult, Infallible, ReplyStreamItem},
+        test_utils::mock_socket::MockSocket,
+        varlink_service,
+    };
+
+    #[tokio::test]
+    async fn confirmed_upgrade_is_handed_over() {
+        // The data of the other protocol, which starts with a NUL byte, follows the call.
+        let reads: [&[u8]; 1] = [b"{\"method\":\"org.example.Upgrade\",\"upgrade\":true}\0\0raw"];
+        let state = serve(&reads, TestService).await;
+
+        let mut state = state.take();
+        assert_eq!(state.handled, 1);
+        assert_eq!(state.upgraded.len(), 1);
+        let (socket, upgrade_state) = state.upgraded.pop().unwrap();
+        // The state that came with the reply was handed over along with the socket.
+        assert_eq!(upgrade_state, "upgraded");
+        let (mut read, write) = socket.split();
+        // The data that followed the call is read first.
+        let mut buf = [0; 16];
+        let bytes_read = read.read(&mut buf).await.unwrap().bytes_read();
+        assert_eq!(&buf[..bytes_read], b"\0raw");
+        // The reply was sent before the socket was handed over.
+        assert_eq!(write.written_data(), b"{\"continues\":false}\0");
+    }
+
+    #[tokio::test]
+    async fn refused_upgrade_is_not_handed_over() {
+        let reads: [&[u8]; 3] = [
+            // An error reply refuses the upgrade.
+            b"{\"method\":\"org.example.Refuse\",\"upgrade\":true}\0",
+            // A one-way call gets no reply that could confirm its upgrade.
+            b"{\"method\":\"org.example.Upgrade\",\"oneway\":true,\"upgrade\":true}\0",
+            // The connection is still served after the above. A call that doesn't ask for an
+            // upgrade doesn't get one either, even if the service confirms one.
+            b"{\"method\":\"org.example.Upgrade\"}\0",
+        ];
+        let state = serve(&reads, TestService).await;
+
+        let state = state.borrow();
+        assert_eq!(state.handled, 3);
+        assert!(state.upgraded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn upgraded_connection_is_closed_without_take_over() {
+        // A single reply confirms the upgrade without any state to take the connection over with,
+        // and `()` doesn't take it over either.
+        for single in [true, false] {
+            let reads: [&[u8]; 2] = [
+                b"{\"method\":\"org.example.Upgrade\",\"upgrade\":true}\0",
+                // Not read since the connection is closed once it's upgraded.
+                b"{\"method\":\"org.example.Upgrade\"}\0",
+            ];
+            let state = serve(&reads, |state| Closing { state, single }).await;
+
+            assert_eq!(state.borrow().handled, 1, "single: {single}");
+        }
+    }
+
+    #[test]
+    fn upgraded_connections_are_served_while_handling_calls() {
+        let start: &[&[u8]] = &[b"{\"method\":\"org.example.Start\",\"upgrade\":true}\0"];
+        let finish: &[&[u8]] = &[b"{\"method\":\"org.example.Finish\"}\0"];
+        let sockets = [start, finish].map(|reads| {
+            MockSocket::with_reads(
+                reads,
+                #[cfg(feature = "std")]
+                Vec::new(),
+            )
+        });
+        let transfer = Rc::new(Transfer::default());
+        let server = Server::new(
+            Sockets(Some(sockets.into())),
+            Transferring(transfer.clone()),
+        );
+
+        // The sockets never block, so the server only ever waits for the transfer over the
+        // upgraded connection and for the `Finish` call, which waits for the transfer in turn.
+        let mut run = pin!(server.run());
+        let mut cx = Context::from_waker(Waker::noop());
+        for _ in 0..100 {
+            if let Poll::Ready(result) = run.as_mut().poll(&mut cx) {
+                result.unwrap();
+                assert!(transfer.done.raised.get());
+
+                return;
+            }
+        }
+        panic!("the server stopped serving the upgraded connection");
+    }
+
+    // Serves a connection that reads `reads` until the end or until it's handed over, with the
+    // service that `new` creates.
+    async fn serve<New, Svc>(reads: &[&[u8]], new: New) -> Rc<RefCell<State>>
+    where
+        New: FnOnce(Rc<RefCell<State>>) -> Svc,
+        Svc: Service<MockSocket>,
+    {
+        let state = Rc::new(RefCell::new(State::default()));
+        let socket = MockSocket::with_reads(
+            reads,
+            #[cfg(feature = "std")]
+            Vec::new(),
+        );
+        Server::new(ReadyListener::new(socket), new(state.clone()))
+            .run()
+            .await
+            .unwrap();
+
+        state
+    }
+
+    #[derive(Debug, Default)]
+    struct State {
+        handled: usize,
+        upgraded: Vec<(Upgraded<MockSocket>, &'static str)>,
+    }
+
+    #[derive(Debug)]
+    struct TestService(Rc<RefCell<State>>);
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "method")]
+    enum Method {
+        #[serde(rename = "org.example.Upgrade")]
+        Upgrade,
+        #[serde(rename = "org.example.Refuse")]
+        Refuse,
+    }
+
+    impl Service<MockSocket> for TestService {
+        type MethodCall<'de> = Method;
+        type ReplyParams<'ser>
+            = ()
+        where
+            Self: 'ser;
+        type ReplyStreamParams = ();
+        type ReplyStreamError = Infallible;
+        type ReplyStream = futures_util::stream::Empty<ReplyStreamItem<(), Infallible>>;
+        type ReplyError<'ser>
+            = varlink_service::Error<'ser>
+        where
+            Self: 'ser;
+        type Upgrade = Recording;
+
+        async fn handle<'ser>(
+            &'ser mut self,
+            method: &'ser Call<Self::MethodCall<'_>>,
+            _conn: &mut Connection<MockSocket>,
+            #[cfg(feature = "std")] _fds: Vec<std::os::fd::OwnedFd>,
+        ) -> HandleResult<(), Self::ReplyStream, varlink_service::Error<'ser>, Recording> {
+            self.0.borrow_mut().handled += 1;
+            let reply = match method.method() {
+                Method::Upgrade => MethodReply::Upgrade(
+                    None,
+                    Recording {
+                        state: self.0.clone(),
+                        label: "upgraded",
+                    },
+                ),
+                Method::Refuse => MethodReply::Error(varlink_service::Error::InvalidParameter {
+                    parameter: "upgrade".into(),
+                }),
+            };
+
+            #[cfg(feature = "std")]
+            return (reply, Vec::new());
+            #[cfg(not(feature = "std"))]
+            return reply;
+        }
+    }
+
+    // Takes over the upgraded connections by recording their sockets, along with its label.
+    #[derive(Debug)]
+    struct Recording {
+        state: Rc<RefCell<State>>,
+        label: &'static str,
+    }
+
+    impl TakeOver<MockSocket> for Recording {
+        async fn take_over(self, socket: Upgraded<MockSocket>) {
+            // The socket is only taken over once the server polls the future.
+            self.state.borrow_mut().upgraded.push((socket, self.label));
+        }
+    }
+
+    // Confirms all upgrades, with a single reply or not, but doesn't take over the upgraded
+    // connections.
+    #[derive(Debug)]
+    struct Closing {
+        state: Rc<RefCell<State>>,
+        single: bool,
+    }
+
+    impl Service<MockSocket> for Closing {
+        type MethodCall<'de> = Method;
+        type ReplyParams<'ser>
+            = ()
+        where
+            Self: 'ser;
+        type ReplyStreamParams = ();
+        type ReplyStreamError = Infallible;
+        type ReplyStream = futures_util::stream::Empty<ReplyStreamItem<(), Infallible>>;
+        type ReplyError<'ser>
+            = varlink_service::Error<'ser>
+        where
+            Self: 'ser;
+        type Upgrade = ();
+
+        async fn handle<'ser>(
+            &'ser mut self,
+            _method: &'ser Call<Self::MethodCall<'_>>,
+            _conn: &mut Connection<MockSocket>,
+            #[cfg(feature = "std")] _fds: Vec<std::os::fd::OwnedFd>,
+        ) -> HandleResult<(), Self::ReplyStream, varlink_service::Error<'ser>> {
+            self.state.borrow_mut().handled += 1;
+            let reply = if self.single {
+                MethodReply::Single(None)
+            } else {
+                MethodReply::Upgrade(None, ())
+            };
+
+            #[cfg(feature = "std")]
+            return (reply, Vec::new());
+            #[cfg(not(feature = "std"))]
+            return reply;
+        }
+    }
+
+    // Serves a transfer over the connection that a `Start` call upgrades, which a `Finish` call on
+    // another connection waits for.
+    #[derive(Debug)]
+    struct Transferring(Rc<Transfer>);
+
+    #[derive(Debug, Default)]
+    struct Transfer {
+        // Raised by the `Finish` call for the transfer to complete.
+        go: Flag,
+        // Raised by the transfer once it's complete.
+        done: Flag,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "method")]
+    enum TransferMethod {
+        #[serde(rename = "org.example.Start")]
+        Start,
+        #[serde(rename = "org.example.Finish")]
+        Finish,
+    }
+
+    impl Service<MockSocket> for Transferring {
+        type MethodCall<'de> = TransferMethod;
+        type ReplyParams<'ser>
+            = ()
+        where
+            Self: 'ser;
+        type ReplyStreamParams = ();
+        type ReplyStreamError = Infallible;
+        type ReplyStream = futures_util::stream::Empty<ReplyStreamItem<(), Infallible>>;
+        type ReplyError<'ser>
+            = varlink_service::Error<'ser>
+        where
+            Self: 'ser;
+        type Upgrade = Transferred;
+
+        async fn handle<'ser>(
+            &'ser mut self,
+            method: &'ser Call<Self::MethodCall<'_>>,
+            _conn: &mut Connection<MockSocket>,
+            #[cfg(feature = "std")] _fds: Vec<std::os::fd::OwnedFd>,
+        ) -> HandleResult<(), Self::ReplyStream, varlink_service::Error<'ser>, Transferred>
+        {
+            let reply = match method.method() {
+                TransferMethod::Start => MethodReply::Upgrade(None, Transferred(self.0.clone())),
+                TransferMethod::Finish => {
+                    self.0.go.raise();
+                    self.0.done.raised().await;
+
+                    MethodReply::Single(None)
+                }
+            };
+
+            #[cfg(feature = "std")]
+            return (reply, Vec::new());
+            #[cfg(not(feature = "std"))]
+            return reply;
+        }
+    }
+
+    // Takes over the connection that a `Start` call upgrades, to complete the transfer over it once
+    // the `Finish` call lets it.
+    #[derive(Debug)]
+    struct Transferred(Rc<Transfer>);
+
+    impl TakeOver<MockSocket> for Transferred {
+        async fn take_over(self, _socket: Upgraded<MockSocket>) {
+            self.0.go.raised().await;
+            self.0.done.raise();
+        }
+    }
+
+    // A flag that futures can wait to be raised.
+    #[derive(Debug, Default)]
+    struct Flag {
+        raised: Cell<bool>,
+        waker: RefCell<Option<Waker>>,
+    }
+
+    impl Flag {
+        fn raise(&self) {
+            self.raised.set(true);
+            if let Some(waker) = self.waker.take() {
+                waker.wake();
+            }
+        }
+
+        async fn raised(&self) {
+            poll_fn(|cx| {
+                if self.raised.get() {
+                    return Poll::Ready(());
+                }
+                *self.waker.borrow_mut() = Some(cx.waker().clone());
+
+                Poll::Pending
+            })
+            .await
+        }
+    }
+
+    // Hands out its sockets, one connection after the other, and then reports its closure.
+    #[derive(Debug)]
+    struct Sockets(Option<VecDeque<MockSocket>>);
+
+    impl listener::Listener for Sockets {
+        type Socket = MockSocket;
+
+        async fn accept(&mut self) -> crate::Result<Option<Connection<MockSocket>>> {
+            let Some(sockets) = &mut self.0 else {
+                return core::future::pending().await;
+            };
+            let socket = sockets.pop_front();
+            if socket.is_none() {
+                self.0 = None;
+            }
+
+            Ok(socket.map(Connection::new))
+        }
     }
 }

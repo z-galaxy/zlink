@@ -11,6 +11,8 @@ pub(super) struct MethodAttrs {
     pub is_streaming: bool,
     /// Method is one-way (fire and forget).
     pub is_oneway: bool,
+    /// Method asks for the connection to be upgraded to another protocol.
+    pub is_upgrade: bool,
     /// Method returns file descriptors.
     pub return_fds: bool,
 }
@@ -37,6 +39,12 @@ impl MethodAttrs {
                             return Err(Error::new_spanned(&meta, "duplicate `oneway` attribute"));
                         }
                         method_attrs.is_oneway = true;
+                    }
+                    Meta::Path(path) if path.is_ident("upgrade") => {
+                        if method_attrs.is_upgrade {
+                            return Err(Error::new_spanned(&meta, "duplicate `upgrade` attribute"));
+                        }
+                        method_attrs.is_upgrade = true;
                     }
                     Meta::Path(path) if path.is_ident("return_fds") => {
                         if method_attrs.return_fds {

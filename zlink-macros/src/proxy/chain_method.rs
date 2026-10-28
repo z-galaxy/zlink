@@ -33,8 +33,9 @@ pub(super) fn generate_chain_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain methods for methods that return FDs since chains don't support returning FDs.
-    if method_attrs.return_fds {
+    // Skip chain methods for methods that return FDs since chains don't support returning FDs, and
+    // for upgrade methods since the calls pipelined after a confirmed upgrade would go unanswered.
+    if method_attrs.return_fds || method_attrs.is_upgrade {
         return Ok((quote! {}, quote! {}));
     }
 
