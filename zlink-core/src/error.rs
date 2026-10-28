@@ -28,6 +28,12 @@ pub enum Error {
     MissingParameters,
     /// A general service error.
     VarlinkService(crate::varlink_service::OwnedError),
+    /// An error reply that the client doesn't know.
+    ///
+    /// The error couldn't be deserialized as one of the `org.varlink.service` interface or of the
+    /// error type the reply was received as, e.g. because the service is newer than the client.
+    /// Contains the name of the error.
+    UnknownErrorReply(alloc::string::String),
     /// Empty chain creation attempt.
     EmptyChain,
 }
@@ -101,6 +107,7 @@ impl core::fmt::Display for Error {
             Error::IdlParse(e) => write!(f, "IDL parse error: {e}"),
             Error::MissingParameters => write!(f, "Missing required parameters"),
             Error::VarlinkService(e) => write!(f, "{e}"),
+            Error::UnknownErrorReply(name) => write!(f, "Unknown error reply: {name}"),
             Error::EmptyChain => write!(f, "Cannot create a chain from an empty iterator or slice"),
         }
     }
@@ -129,6 +136,7 @@ impl defmt::Format for Error {
             Error::IdlParse(_) => defmt::write!(fmt, "IDL parse error"),
             Error::MissingParameters => defmt::write!(fmt, "Missing required parameters"),
             Error::VarlinkService(_) => defmt::write!(fmt, "Varlink service error"),
+            Error::UnknownErrorReply(_) => defmt::write!(fmt, "Unknown error reply"),
             Error::EmptyChain => {
                 defmt::write!(fmt, "Cannot create a chain from an empty iterator or slice")
             }

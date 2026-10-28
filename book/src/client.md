@@ -142,6 +142,11 @@ Variant and field names can be adjusted with `#[zlink(rename = "...")]` / `renam
 fields can borrow zero-copy with `#[zlink(borrow)]` on a `Cow<'_, str>` field. Tuple variants are
 not supported — Varlink error parameters are named, so use struct variants.
 
+The errors of the `org.varlink.service` interface, such as `MethodNotFound`, are returned in the
+outer `Result` instead, as `zlink::Error::VarlinkService`. So are the errors that the reply error
+type doesn't know, e.g. one that a newer version of the service added, as
+`zlink::Error::UnknownErrorReply` with the name of the error.
+
 ## Streaming calls
 
 Where D-Bus has signals and properties-changed notifications, Varlink has

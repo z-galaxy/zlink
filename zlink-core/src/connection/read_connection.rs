@@ -16,7 +16,7 @@ use super::{
 };
 #[cfg(feature = "std")]
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use serde::Deserialize;
 use serde_json::Deserializer;
 
@@ -108,7 +108,14 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     /// }
     /// ```
     ///
+    /// Errors of the `org.varlink.service` interface are returned as [`Error::VarlinkService`], and
+    /// other errors that `ReplyError` can't be deserialized from, e.g. ones that the client doesn't
+    /// know, as [`Error::UnknownErrorReply`].
+    ///
     /// Returns the reply and any file descriptors received (std only).
+    ///
+    /// [`Error::VarlinkService`]: crate::Error::VarlinkService
+    /// [`Error::UnknownErrorReply`]: crate::Error::UnknownErrorReply
     pub async fn receive_reply<'r, ReplyParams, ReplyError>(
         &'r mut self,
     ) -> Result<RecvResult<reply::Result<ReplyParams, ReplyError>>>
@@ -122,6 +129,11 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             #[serde(borrow)]
             Varlink(varlink_service::Error<'m>),
             Error(ReplyError),
+            // Any other error, which `Reply` would take for a successful reply since it ignores
+            // the `error` field.
+            UnknownError {
+                error: String,
+            },
             Reply(Reply<ReplyParams>),
         }
 
@@ -137,6 +149,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         let result = match msg {
             // Varlink service interface error need to be returned as the top-level error.
             ReplyMsg::Varlink(e) => Err(crate::Error::VarlinkService(e.into())),
+            // So do the errors that the client doesn't know.
+            ReplyMsg::UnknownError { error } => Err(crate::Error::UnknownErrorReply(error)),
             ReplyMsg::Error(e) => Ok(Err(e)),
             ReplyMsg::Reply(reply) => Ok(Ok(reply)),
         };
