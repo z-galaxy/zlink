@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use crate::{
+    ReplyError,
     connection::{
         read_connection::ReadConnection,
         socket::{ReadHalf, ReadResult, Socket},
@@ -735,6 +736,113 @@ async fn receive_message_with_invalid_utf8_in_ignored_value() {
     #[cfg(not(feature = "std"))]
     let call = result;
     assert_eq!(call.method(), &TestMethod::Test { value: 42 });
+}
+
+// Unknown Error Reply Tests.
+
+#[tokio::test]
+async fn receive_reply_unknown_error() {
+    let socket = MockSocket::with_responses(&[r#"{"error":"org.example.Unknown"}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<(), TestError>().await;
+    let Err(crate::Error::UnknownErrorReply(name)) = result else {
+        panic!("Expected Error::UnknownErrorReply, got {result:?}");
+    };
+    assert_eq!(name, "org.example.Unknown");
+}
+
+#[tokio::test]
+async fn receive_reply_unknown_error_with_parameters() {
+    let socket = MockSocket::with_responses(&[
+        r#"{"error":"org.example.Unknown","parameters":{"field":"value"}}"#,
+        r#"{"parameters":{"field":"value"}}"#,
+    ]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    // The parameters of an error reply don't make it a successful one.
+    let result = conn.receive_reply::<FieldReply, TestError>().await;
+    let Err(crate::Error::UnknownErrorReply(name)) = result else {
+        panic!("Expected Error::UnknownErrorReply, got {result:?}");
+    };
+    assert_eq!(name, "org.example.Unknown");
+
+    // Without the error, the same parameters make a successful reply.
+    let result = conn.receive_reply::<FieldReply, TestError>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    let reply = reply.unwrap();
+    assert_eq!(reply.parameters().unwrap().field.as_deref(), Some("value"));
+}
+
+#[tokio::test]
+async fn receive_reply_unknown_error_with_escaped_name() {
+    // The escape makes the name a string that can't be borrowed from the message.
+    let socket = MockSocket::with_responses(&[r#"{"error":"org.example.\u0055nknown"}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<(), TestError>().await;
+    let Err(crate::Error::UnknownErrorReply(name)) = result else {
+        panic!("Expected Error::UnknownErrorReply, got {result:?}");
+    };
+    assert_eq!(name, "org.example.Unknown");
+}
+
+#[tokio::test]
+async fn receive_reply_unknown_varlink_service_error() {
+    let socket = MockSocket::with_responses(&[r#"{"error":"org.varlink.service.NotDefinedYet"}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    let result = conn.receive_reply::<(), TestError>().await;
+    let Err(crate::Error::UnknownErrorReply(name)) = result else {
+        panic!("Expected Error::UnknownErrorReply, got {result:?}");
+    };
+    assert_eq!(name, "org.varlink.service.NotDefinedYet");
+}
+
+#[tokio::test]
+async fn receive_reply_known_errors() {
+    let socket = MockSocket::with_responses(&[
+        r#"{"error":"org.example.NotFound"}"#,
+        r#"{"error":"org.varlink.service.MethodNotFound","parameters":{"method":"Foo"}}"#,
+    ]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    // Errors of the given error type are returned as the reply.
+    let result = conn.receive_reply::<(), TestError>().await.unwrap();
+    #[cfg(feature = "std")]
+    let (reply, _fds) = result;
+    #[cfg(not(feature = "std"))]
+    let reply = result;
+    assert_eq!(reply.unwrap_err(), TestError::NotFound);
+
+    // Errors of the `org.varlink.service` interface are returned as the top-level error.
+    let result = conn.receive_reply::<(), TestError>().await;
+    let Err(crate::Error::VarlinkService(error)) = result else {
+        panic!("Expected Error::VarlinkService, got {result:?}");
+    };
+    assert!(matches!(
+        error.inner(),
+        crate::varlink_service::Error::MethodNotFound { .. }
+    ));
+}
+
+#[derive(Debug, PartialEq, ReplyError)]
+#[zlink(interface = "org.example")]
+enum TestError {
+    NotFound,
+}
+
+#[derive(Debug, Deserialize)]
+struct FieldReply {
+    field: Option<String>,
 }
 
 /// A call to `org.example.Test` with `value`, as it's sent over the socket.

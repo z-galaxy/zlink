@@ -76,10 +76,10 @@ where
                     Ok(Ok(_)) => {
                         // Streaming reply, don't increment index yet.
                     }
-                    Ok(Err(_)) | Err(Error::VarlinkService(_)) => {
+                    Ok(Err(_)) | Err(Error::VarlinkService(_) | Error::UnknownErrorReply(_)) => {
                         // For error replies, including those of the `org.varlink.service`
-                        // interface, always increment since there won't be more replies to the
-                        // call.
+                        // interface and unknown ones, always increment since there won't be more
+                        // replies to the call.
                         current_index += 1;
                     }
                     Err(_) => {

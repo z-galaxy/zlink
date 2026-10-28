@@ -870,7 +870,8 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// - Take `&mut self` as the first parameter
 /// - Can be either `async fn` or return `impl Future`
 /// - Return `zlink::Result<Result<ReplyType, ErrorType>>` (outer Result for connection errors,
-///   inner for method errors)
+///   `org.varlink.service` errors and errors that `ErrorType` doesn't know, inner for method
+///   errors)
 /// - The arguments can be any type that implement `serde::Serialize`
 /// - The reply type (`Ok` case of the inner `Result`) must be a type that implements
 ///   `serde::Deserialize` and deserializes itself from a JSON object. Typically you'd just use a
