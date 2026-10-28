@@ -21,3 +21,6 @@ tokio = { version = "1.0", features = ["rt", "macros"] }
 zlink = { path = "../../zlink", features = ["idl-parse"] }
 zlink-codegen = { path = ".." }
 
+[dev-dependencies]
+futures-util = { version = "0.3.31", default-features = false }
+

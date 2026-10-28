@@ -4,6 +4,7 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::{TryStreamExt, pin_mut};
     use serde_json::json;
     use zlink::{Connection, test_utils::mock_socket::MockSocket};
 
@@ -453,5 +454,218 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result.result["nested"]["deep"], true);
+    }
+
+    #[tokio::test]
+    async fn more_supported_method() {
+        let item = |name, size| ListOutput {
+            item: Item {
+                name: String::from(name),
+                size,
+            },
+        };
+
+        // The method can be called without the `more` flag, getting a single reply.
+        let mut conn = connection(&[json!({"parameters": {"item": {"name": "a", "size": 1}}})]);
+        assert_eq!(conn.list().await.unwrap().unwrap(), item("a", 1));
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "List", None);
+
+        // It can also be called with the flag, getting a stream of replies. The stream has to be
+        // dropped before the connection can be used again.
+        let mut conn = connection(&[
+            json!({"continues": true, "parameters": {"item": {"name": "a", "size": 1}}}),
+            json!({"parameters": {"item": {"name": "b", "size": 2}}}),
+        ]);
+        {
+            let stream = conn.list_more().await.unwrap();
+            pin_mut!(stream);
+            let replies = stream.try_collect::<Vec<_>>().await.unwrap();
+            assert_eq!(replies, [Ok(item("a", 1)), Ok(item("b", 2))]);
+        }
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "List", Some("more"));
+    }
+
+    #[tokio::test]
+    async fn more_required_method() {
+        let mut conn = connection(&[
+            json!({"continues": true, "parameters": {"name": "a", "removed": false}}),
+            json!({"parameters": {"name": "a", "removed": true}}),
+        ]);
+        {
+            let stream = conn.watch().await.unwrap();
+            pin_mut!(stream);
+            let reply = |name: &str, removed| {
+                Ok(WatchOutput {
+                    name: name.to_string(),
+                    removed,
+                })
+            };
+            assert_eq!(stream.try_next().await.unwrap(), Some(reply("a", false)));
+            assert_eq!(stream.try_next().await.unwrap(), Some(reply("a", true)));
+            assert_eq!(stream.try_next().await.unwrap(), None);
+        }
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Watch", Some("more"));
+
+        // The errors of the interface are the items of the stream.
+        let mut conn = connection(&[
+            json!({"error": "org.example.flags.NoSuchItem", "parameters": {"name": "a"}}),
+        ]);
+        let stream = conn.watch().await.unwrap();
+        pin_mut!(stream);
+        let error = FlagsError::NoSuchItem {
+            name: "a".to_string(),
+        };
+        assert_eq!(stream.try_next().await.unwrap(), Some(Err(error)));
+        assert_eq!(stream.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn upgrade_required_method() {
+        let mut conn = connection(&[json!({"parameters": {"size": 3, "checksum": "abc"}})]);
+        let download = conn.download("blob").await.unwrap().unwrap();
+        assert_eq!(
+            download,
+            DownloadOutput {
+                size: 3,
+                checksum: "abc".to_string(),
+            }
+        );
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Download", Some("upgrade"));
+        assert_eq!(calls[0]["parameters"], json!({"name": "blob"}));
+
+        // The error reply refuses the upgrade.
+        let mut conn = connection(&[
+            json!({"error": "org.example.flags.NoSuchItem", "parameters": {"name": "blob"}}),
+        ]);
+        let error = conn.download("blob").await.unwrap().unwrap_err();
+        let expected = FlagsError::NoSuchItem {
+            name: "blob".to_string(),
+        };
+        assert_eq!(error, expected);
+    }
+
+    #[tokio::test]
+    async fn upgrade_supported_method() {
+        // The method can be called without the `upgrade` flag.
+        let mut conn = connection(&[json!({"parameters": {"size": 3}})]);
+        let fetch = conn.fetch("blob").await.unwrap().unwrap();
+        assert_eq!(fetch, FetchOutput { size: 3 });
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Fetch", None);
+        assert_eq!(calls[0]["parameters"], json!({"name": "blob"}));
+
+        // It can also be called with the flag, with the same name on the wire.
+        let mut conn = connection(&[json!({"parameters": {"size": 3}})]);
+        let fetch = conn.fetch_upgrade("blob").await.unwrap().unwrap();
+        assert_eq!(fetch, FetchOutput { size: 3 });
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Fetch", Some("upgrade"));
+        assert_eq!(calls[0]["parameters"], json!({"name": "blob"}));
+    }
+
+    #[tokio::test]
+    async fn method_without_flags() {
+        let mut conn = connection(&[json!({})]);
+        conn.ping().await.unwrap().unwrap();
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Ping", None);
+    }
+
+    #[tokio::test]
+    async fn more_chain_calls() {
+        // A chain starting with a streaming method asks for more replies too, and gets them all.
+        let mut conn = connection(&[
+            json!({"continues": true, "parameters": {"item": {"name": "a", "size": 1}}}),
+            json!({"parameters": {"item": {"name": "b", "size": 2}}}),
+        ]);
+        {
+            let replies = conn
+                .chain_list_more()
+                .unwrap()
+                .send::<ListOutput, FlagsError>()
+                .await
+                .unwrap();
+            pin_mut!(replies);
+            let replies = replies.try_collect::<Vec<_>>().await.unwrap();
+            let names: Vec<_> = replies
+                .into_iter()
+                .map(|(reply, _fds)| reply.unwrap().into_parameters().unwrap().item.name)
+                .collect();
+            assert_eq!(names, ["a", "b"]);
+        }
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "List", Some("more"));
+
+        let mut conn = connection(&[
+            json!({"continues": true, "parameters": {"name": "a", "removed": false}}),
+            json!({"parameters": {"name": "a", "removed": true}}),
+        ]);
+        {
+            let replies = conn
+                .chain_watch()
+                .unwrap()
+                .send::<WatchOutput, FlagsError>()
+                .await
+                .unwrap();
+            pin_mut!(replies);
+            let replies = replies.try_collect::<Vec<_>>().await.unwrap();
+            let removed: Vec<_> = replies
+                .into_iter()
+                .map(|(reply, _fds)| reply.unwrap().into_parameters().unwrap().removed)
+                .collect();
+            assert_eq!(removed, [false, true]);
+        }
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_call(&calls[0], "Watch", Some("more"));
+    }
+
+    /// A connection that gets the `replies`.
+    fn connection(replies: &[serde_json::Value]) -> Connection<MockSocket> {
+        let replies: Vec<_> = replies.iter().map(|reply| reply.to_string()).collect();
+        let replies: Vec<_> = replies.iter().map(|reply| reply.as_str()).collect();
+
+        Connection::new(MockSocket::with_responses(&replies))
+    }
+
+    /// The calls that were sent through the `conn`, in order.
+    fn sent_calls(conn: &Connection<MockSocket>) -> Vec<serde_json::Value> {
+        // Each call is terminated by a NUL byte.
+        conn.write()
+            .write_half()
+            .written_data()
+            .split(|byte| *byte == 0)
+            .filter(|call| !call.is_empty())
+            .map(|call| serde_json::from_slice(call).unwrap())
+            .collect()
+    }
+
+    /// Assert that the `call` is for the `method` of the flags interface, with the `flag` set if
+    /// there's one, and the other flag unset.
+    #[track_caller]
+    fn assert_call(call: &serde_json::Value, method: &str, flag: Option<&str>) {
+        assert_eq!(call["method"], format!("org.example.flags.{method}"));
+        for name in ["more", "upgrade"] {
+            if flag == Some(name) {
+                assert_eq!(call[name], true);
+            } else {
+                assert!(
+                    call.get(name).is_none(),
+                    "unexpected `{name}` flag in {call}"
+                );
+            }
+        }
     }
 }

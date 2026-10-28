@@ -1,0 +1,29 @@
+# Methods marked with the flags they can or must be called with, as systemd marks them.
+interface org.example.flags
+
+# An item.
+type Item (
+    name: string,
+    size: int
+)
+
+error NoSuchItem(name: string)
+
+# Lists the items.
+# [Supports 'more' flag]
+method List() -> (item: Item)
+
+# Watches the items for changes.
+# [Requires 'more' flag]
+method Watch() -> (name: string, removed: bool)
+
+# Downloads an item over the upgraded connection.
+# [Requires 'upgrade' flag]
+method Download(name: string) -> (size: int, checksum: string)
+
+# Gets an item, or downloads it over the upgraded connection.
+# [Supports 'upgrade' flag]
+method Fetch(name: string) -> (size: int)
+
+# Pings the service.
+method Ping() -> ()
