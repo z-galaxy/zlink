@@ -8,7 +8,7 @@ use futures_util::stream::{Stream, unfold};
 use serde::de::DeserializeOwned;
 
 use crate::{
-    Result,
+    Error, Result,
     connection::{ReadConnection, socket::ReadHalf},
     reply,
 };
@@ -76,9 +76,10 @@ where
                     Ok(Ok(_)) => {
                         // Streaming reply, don't increment index yet.
                     }
-                    Ok(Err(_)) => {
-                        // For method errors, always increment since there won't be more
-                        // replies.
+                    Ok(Err(_)) | Err(Error::VarlinkService(_)) => {
+                        // For error replies, including those of the `org.varlink.service`
+                        // interface, always increment since there won't be more replies to the
+                        // call.
                         current_index += 1;
                     }
                     Err(_) => {

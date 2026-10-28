@@ -198,6 +198,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replies_after_varlink_service_error() -> crate::Result<()> {
+        let responses = [
+            r#"{"error":"org.varlink.service.MethodNotFound","parameters":{"method":"GetUser"}}"#,
+            r#"{"parameters":{"id":2}}"#,
+        ];
+        let socket = MockSocket::with_responses(&responses);
+        let mut conn = Connection::new(socket);
+
+        let call1 = Call::new(GetUser { id: 1 });
+        let call2 = Call::new(GetUser { id: 2 });
+
+        #[cfg(feature = "std")]
+        let replies = conn
+            .chain_call::<GetUser>(&call1, vec![])?
+            .append(&call2, vec![])?
+            .send::<User, ApiError>()
+            .await?;
+        #[cfg(not(feature = "std"))]
+        let replies = conn
+            .chain_call::<GetUser>(&call1)?
+            .append(&call2)?
+            .send::<User, ApiError>()
+            .await?;
+
+        use futures_util::stream::StreamExt;
+        pin_mut!(replies);
+
+        // The error reply to the first call doesn't end the replies to the others.
+        let error = replies.next().await.unwrap().unwrap_err();
+        let crate::Error::VarlinkService(error) = error else {
+            panic!("unexpected error: {error:?}");
+        };
+        assert!(matches!(
+            error.inner(),
+            crate::varlink_service::Error::MethodNotFound { .. }
+        ));
+
+        #[cfg(feature = "std")]
+        let (user, _fds) = replies.next().await.unwrap()?;
+        #[cfg(not(feature = "std"))]
+        let user = replies.next().await.unwrap()?;
+        assert_eq!(user.unwrap().parameters().unwrap().id, 2);
+
+        assert!(replies.next().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn oneway_calls_no_reply() -> crate::Result<()> {
         // Only the first call expects a reply; the second is oneway.
         let responses = [r#"{"parameters":{"id":1}}"#];
