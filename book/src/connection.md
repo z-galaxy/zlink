@@ -12,10 +12,10 @@ popular runtimes, enabled through cargo features:
 
 ```toml
 # tokio (the default):
-zlink = "0.7"
+zlink = "0.8"
 
 # ...or smol:
-zlink = { version = "0.7", default-features = false, features = ["smol", "service", "proxy", "tracing"] }
+zlink = { version = "0.8", default-features = false, features = ["smol", "service", "proxy", "tracing"] }
 ```
 
 The features are additive — you can enable both at once. The bulk of the API is runtime-agnostic

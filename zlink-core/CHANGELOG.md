@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.0 - 2026-10-29
+
+### ✨ Added
+- Add the `ExpectedUpgrade` error of `org.varlink.service`.
+- Add methods to take the socket halves out of connections.
+- Expose the Varlink name types.
+
+### 💥 Breaking
+- Make `MethodReply` non-exhaustive.
+- Make `varlink_service::Error` non-exhaustive.
+- Hand upgraded connections over to services.
+- Use InterfaceName in the org.varlink.service API.
+- Name fields and enum variants with FieldName.
+- Name types, methods and errors with TypeName.
+- Name interfaces with InterfaceName.
+
+### 👷 CI
+- Measure the server's benchmarks by CPU simulation.
+
+### ♻️ Changed
+- Tie received FDs to the bytes they came with.
+
+### 📦 Dependencies
+- Depend on zlink-names.
+
+### 📝 Documentation
+- List zlink-names among the project's crates.
+- Link to the file descriptor passing docs.
+- Document the file descriptor passing convention.
+
+### 🐛 Fixed
+- Fix the defmt message of `UnexpectedEof` errors.
+- Don't take unknown error replies for successful ones.
+- Keep receiving chain replies after `org.varlink.service` errors.
+- Probe socket xattr support on a stream socket.
+- Cache socket xattr probe failures that would recur. #332
+- Don't assume received messages are valid UTF-8.
+- Accept omitted and empty method call parameters.
+- Hand received FDs to the message they came with.
+
+### ⚙️ Other
+- 🚩 Enable the `unstable` feature of test-log.
+- 💸 Add CodSpeed as a sponsor in the README.
+
+### ⚡️ Performance
+- Hand out messages as soon as they're fully read.
+
+### ✅ Testing
+- Test omitted and empty method call parameters.
+- Test FDs received in reads returning several messages.
+- Benchmark a server's receiving on one thread.
+
 ## 0.7.1 - 2026-09-09
 
 ### ✨ Added

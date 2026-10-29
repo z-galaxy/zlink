@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.0 - 2026-10-29
+
+### ✨ Added
+- Mark the flags of service methods in descriptions.
+
+### 💥 Breaking
+- Use InterfaceName in the org.varlink.service API.
+- Name fields and enum variants with FieldName.
+- Name types, methods and errors with TypeName.
+
+### 📝 Documentation
+- List zlink-names among the project's crates.
+- Link to the file descriptor passing docs.
+
+### 🐛 Fixed
+- Don't take unknown error replies for successful ones.
+
+### ⚙️ Other
+- 💸 Add CodSpeed as a sponsor in the README.
+
+### ✅ Testing
+- Test protocol upgrades end to end.
+- Test calls with omitted and empty parameters.
+- Test that FDs arrive with their calls over a real socket.
+
 ## 0.7.1 - 2026-09-09
 
 ### ✅ Testing

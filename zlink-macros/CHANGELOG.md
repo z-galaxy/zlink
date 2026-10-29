@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.0 - 2026-10-29
+
+### ✨ Added
+- Mark the flags of service methods in descriptions.
+- Support upgrade methods in services.
+- Support upgrade methods in proxies.
+
+### 💥 Breaking
+- Hand upgraded connections over to services.
+- Use InterfaceName in the org.varlink.service API.
+- Name fields and enum variants with FieldName.
+- Name types, methods and errors with TypeName.
+- Name interfaces with InterfaceName.
+
+### ♻️ Changed
+- Move the Varlink name grammar out of zlink-idl.
+
+### 📦 Dependencies
+- Drop the zlink-idl dependency.
+- Depend on zlink-names.
+
+### 📝 Documentation
+- List zlink-names among the project's crates.
+- Link to the file descriptor passing docs.
+
+### 🐛 Fixed
+- Set the `more` flag on the chain calls of streaming methods.
+- Don't take unknown error replies for successful ones.
+- Refuse protocol upgrade requests in services.
+- Accept omitted and empty parameters in service calls.
+- Fix validating of field name. #309
+
+### ⚙️ Other
+- 🦺 Validate all proxy parameter names.
+- 🦺 Validate proxy method names.
+- 🦺 Validate the shorthand proxy interface name.
+- 🚨 Build attr_mode only with the introspection feature.
+- 💸 Add CodSpeed as a sponsor in the README.
+
+### ✅ Testing
+- Test how service methods get their parameters.
+
 ## 0.7.1 - 2026-09-09
 
 ### 🐛 Fixed
