@@ -415,23 +415,24 @@ impl CodeGenerator {
                 self.writeln(&format!("/// {}", flag.doc()))?;
             }
 
-            // Tell the proxy macro about the flag and the Varlink method.
-            let mut attrs = Vec::new();
-            if let Some(flag) = call {
-                attrs.push(flag.name().to_string());
-            }
-            if renamed.is_some() {
-                attrs.push(format!("rename = \"{}\"", method.name()));
-            }
-            if !attrs.is_empty() {
-                self.writeln(&format!("#[zlink({})]", attrs.join(", ")))?;
-            }
-
             let name = match renamed {
                 Some(flag) => format!("{}_{}", method_name, flag.name()),
                 None => method_name.clone(),
             };
             let safe_name = rust_ident(&name);
+
+            // Tell the proxy macro about the flag, and about the Varlink method unless the macro
+            // derives its name from the identifier (without the `r#`) by itself.
+            let mut attrs = Vec::new();
+            if let Some(flag) = call {
+                attrs.push(flag.name().to_string());
+            }
+            if snake_case_to_pascal_case(unraw(&safe_name)) != method.name().as_str() {
+                attrs.push(format!("rename = \"{}\"", method.name()));
+            }
+            if !attrs.is_empty() {
+                self.writeln(&format!("#[zlink({})]", attrs.join(", ")))?;
+            }
 
             // Generate method signature.
             let return_type = if call == Some(CallFlag::More) {
@@ -815,6 +816,25 @@ fn type_needs_borrow(ty: &Type) -> bool {
         Type::Optional(inner) => type_needs_borrow(inner.inner()),
         _ => false,
     }
+}
+
+/// Convert snake_case to PascalCase, the way the `proxy` macro does to name the Varlink method of a
+/// proxy method that has no `#[zlink(rename)]`.
+///
+/// This is a copy of `snake_case_to_pascal_case` in `zlink-macros/src/proxy/utils.rs`, with which
+/// it has to agree. The integration tests call the methods through the real macro, so they notice
+/// if it doesn't.
+fn snake_case_to_pascal_case(input: &str) -> String {
+    input
+        .split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            let Some(first) = chars.next() else {
+                return String::new();
+            };
+            first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+        })
+        .collect()
 }
 
 /// The identifier for the `name`, which is in Rust case already: snake_case for fields, parameters

@@ -645,6 +645,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acronym_method() {
+        let mut conn = connection(&[json!({"parameters": {"super": "s"}})]);
+        conn.get_uuid("a", 1).await.unwrap().unwrap();
+
+        // The macro makes `GetUuid` of `get_uuid`, which isn't the name of the method.
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "org.example.names.GetUUID");
+    }
+
+    #[tokio::test]
     async fn keyword_method() {
         let mut conn = connection(&[json!({})]);
         conn.self_().await.unwrap().unwrap();

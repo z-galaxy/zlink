@@ -816,6 +816,110 @@ fn reserved_keywords() {
     }
 }
 
+#[test]
+fn method_names_that_map_back() {
+    let code = names_code();
+
+    // The proxy macro would make `GetUuid` of `get_uuid`, so it's told which method it is.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"GetUUID\")]\n",
+            "    async fn get_uuid(&mut self, #[zlink(rename = \"self\")] self_: &str, ",
+            "#[zlink(rename = \"crate\")] crate_: i64) -> ",
+            "zlink::Result<Result<GetUuidOutput<'_>, NamesError>>;\n",
+        ),
+    );
+
+    // It makes `Self` of `self_`, so there's nothing to tell.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// A method that is named after a keyword.\n",
+            "    async fn self_(&mut self) -> zlink::Result<Result<(), NamesError>>;\n",
+        ),
+    );
+
+    // What matters is what the macro makes of the identifier, not what the name looks like.
+    let idl = r#"
+interface org.example.methods
+
+method GetUuid() -> ()
+method HTTPGet() -> ()
+method IPv4Address() -> ()
+method ListUUIDs() -> ()
+method Get2Things() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "    async fn get_uuid(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"HTTPGet\")]\n",
+            "    async fn http_get(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    async fn i_pv4_address(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"ListUUIDs\")]\n",
+            "    async fn list_uui_ds(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    async fn get2_things(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
+#[test]
+fn method_names_of_keywords_in_other_case() {
+    let idl = r#"
+interface org.example.methods
+
+method TYPE() -> ()
+method SELF() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The macro makes `Type` and `Self` of `r#type` and `self_`, not `TYPE` and `SELF`.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"TYPE\")]\n",
+            "    async fn r#type(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"SELF\")]\n",
+            "    async fn self_(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
+#[test]
+fn method_names_with_flags_that_map_back() {
+    let idl = r#"
+interface org.example.methods
+
+# [Supports 'more' flag]
+method GetUUID() -> ()
+
+# [Requires 'upgrade' flag]
+method OpenFD() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The attribute of the method that is renamed back anyway has the flag too.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"GetUUID\")]\n",
+            "    async fn get_uuid(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"GetUUID\")]\n",
+            "    async fn get_uuid_more(&mut self) -> ",
+            "zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<(), MethodsError>>>>;\n",
+            "    #[zlink(upgrade, rename = \"OpenFD\")]\n",
+            "    async fn open_fd(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
 /// Generate the code for the IDL of the integration test, whose methods have all kinds of flags.
 fn flags_code() -> String {
     // Read the IDL file from the integration test to avoid duplication.

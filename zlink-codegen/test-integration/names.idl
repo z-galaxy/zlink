@@ -11,7 +11,6 @@ type Node (
     gen: ?string
 )
 
-# An error with an acronym in its name, and a field that is named after a keyword.
 error HTTPError(self: string)
 
 # A method with an acronym in its name, and parameters and an output named after keywords.
