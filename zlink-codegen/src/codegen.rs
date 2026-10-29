@@ -127,7 +127,7 @@ impl CodeGenerator {
         }
 
         self.writeln("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]")?;
-        self.writeln(&format!("pub struct {} {{", obj.name().to_pascal_case()))?;
+        self.writeln(&format!("pub struct {} {{", custom_type_name(obj.name())))?;
         self.indent();
 
         for field in obj.fields() {
@@ -150,7 +150,7 @@ impl CodeGenerator {
         self.writeln("#[serde(rename_all = \"snake_case\")]")?;
         self.writeln(&format!(
             "pub enum {} {{",
-            enum_type.name().to_pascal_case()
+            custom_type_name(enum_type.name())
         ))?;
         self.indent();
 
@@ -161,7 +161,14 @@ impl CodeGenerator {
             }
 
             // Varlink enum variants don't have explicit values, just names.
-            self.writeln(&format!("{},", variant.name().to_pascal_case()))?;
+            let variant_name = variant.name().to_pascal_case();
+            let safe_variant_name = rust_ident(&variant_name);
+
+            // Serde would take the underscore of an escaped variant as part of the value.
+            if unraw(&safe_variant_name) != variant_name {
+                self.writeln(&format!("#[serde(rename = \"{}\")]", variant.name()))?;
+            }
+            self.writeln(&format!("{},", safe_variant_name))?;
         }
 
         self.dedent();
@@ -187,9 +194,10 @@ impl CodeGenerator {
             rust_type
         };
 
-        // Handle field name if it's a Rust keyword.
-        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name().as_str()
-        {
+        // Rename the field unless its identifier is spelled like its name. A raw identifier isn't,
+        // although serde strips the `r#`.
+        let safe_field_name = rust_ident(&field_name);
+        let field_name_attr = if safe_field_name != field.name().as_str() {
             format!("#[serde(rename = \"{}\")]", field.name())
         } else {
             String::new()
@@ -198,12 +206,6 @@ impl CodeGenerator {
         if !field_name_attr.is_empty() {
             self.writeln(&field_name_attr)?;
         }
-
-        let safe_field_name = if is_rust_keyword(&field_name) {
-            format!("r#{}", field_name)
-        } else {
-            field_name
-        };
 
         self.writeln(&format!("pub {}: {},", safe_field_name, rust_type))?;
 
@@ -227,10 +229,17 @@ impl CodeGenerator {
             }
 
             let variant_name = error.name().to_pascal_case();
+            let safe_variant_name = rust_ident(&variant_name);
+
+            // The `ReplyError` derive would take the underscore of an escaped variant as part of
+            // the name of the error.
+            if unraw(&safe_variant_name) != variant_name {
+                self.writeln(&format!("#[zlink(rename = \"{}\")]", error.name()))?;
+            }
             if error.fields().count() == 0 {
-                self.writeln(&format!("{},", variant_name))?;
+                self.writeln(&format!("{},", safe_variant_name))?;
             } else {
-                self.writeln(&format!("{} {{", variant_name))?;
+                self.writeln(&format!("{} {{", safe_variant_name))?;
                 self.indent();
                 for field in error.fields() {
                     self.generate_error_field(field)?;
@@ -287,15 +296,12 @@ impl CodeGenerator {
                         self.writeln("#[serde(borrow)]")?;
                     }
 
-                    if field_name != output.name().as_str() {
+                    // Serde takes the name of the field from its identifier, without the `r#` of
+                    // a raw one. Rename the field if that isn't its name.
+                    let safe_field_name = rust_ident(&field_name);
+                    if unraw(&safe_field_name) != output.name().as_str() {
                         self.writeln(&format!("#[serde(rename = \"{}\")]", output.name()))?;
                     }
-
-                    let safe_field_name = if is_rust_keyword(&field_name) {
-                        format!("r#{}", field_name)
-                    } else {
-                        field_name
-                    };
 
                     self.writeln(&format!("pub {}: {},", safe_field_name, rust_type))?;
                 }
@@ -310,7 +316,7 @@ impl CodeGenerator {
     }
 
     fn generate_proxy_trait(&mut self, interface: &Interface<'_>) -> Result<()> {
-        let trait_name = interface_name_to_rust(interface.name());
+        let trait_name = rust_ident(&interface_name_to_rust(interface.name()));
 
         // Generate a stub error type if there are no errors in the interface
         let error_type = if interface.errors().count() > 0 {
@@ -361,11 +367,7 @@ impl CodeGenerator {
         let mut params = String::new();
         for param in method.inputs() {
             let param_name = param.name().to_snake_case();
-            let safe_param_name = if is_rust_keyword(&param_name) {
-                format!("r#{}", param_name)
-            } else {
-                param_name
-            };
+            let safe_param_name = rust_ident(&param_name);
             // Use references for parameters that can be borrowed
             let rust_type = self.type_to_rust_param(param.ty())?;
 
@@ -429,11 +431,7 @@ impl CodeGenerator {
                 Some(flag) => format!("{}_{}", method_name, flag.name()),
                 None => method_name.clone(),
             };
-            let safe_name = if is_rust_keyword(&name) {
-                format!("r#{}", name)
-            } else {
-                name
-            };
+            let safe_name = rust_ident(&name);
 
             // Generate method signature.
             let return_type = if call == Some(CallFlag::More) {
@@ -463,9 +461,10 @@ impl CodeGenerator {
         let field_name = field.name().to_snake_case();
         let rust_type = self.type_to_rust(field.ty())?;
 
-        // Handle field name if it's a Rust keyword.
-        let field_name_attr = if is_rust_keyword(&field_name) || field_name != field.name().as_str()
-        {
+        // Rename the field unless its identifier is spelled like its name. A raw identifier isn't,
+        // although the `ReplyError` derive strips the `r#`.
+        let safe_field_name = rust_ident(&field_name);
+        let field_name_attr = if safe_field_name != field.name().as_str() {
             format!("#[zlink(rename = \"{}\")]", field.name())
         } else {
             String::new()
@@ -474,12 +473,6 @@ impl CodeGenerator {
         if !field_name_attr.is_empty() {
             self.writeln(&field_name_attr)?;
         }
-
-        let safe_field_name = if is_rust_keyword(&field_name) {
-            format!("r#{}", field_name)
-        } else {
-            field_name
-        };
 
         self.writeln(&format!("{}: {},", safe_field_name, rust_type))?;
 
@@ -672,7 +665,7 @@ fn type_to_rust(ty: &Type) -> Result<String> {
             let inner_rust = type_to_rust(inner_type.inner())?;
             format!("Option<{}>", inner_rust)
         }
-        Type::Custom(name) => name.to_pascal_case(),
+        Type::Custom(name) => custom_type_name(name),
         Type::Any => "serde_json::Value".to_string(),
     })
 }
@@ -707,7 +700,7 @@ fn type_to_rust_param(ty: &Type) -> Result<String> {
             // For optional parameters, always wrap in Option
             format!("Option<{}>", inner_rust)
         }
-        Type::Custom(name) => format!("&{}", name.to_pascal_case()),
+        Type::Custom(name) => format!("&{}", custom_type_name(name)),
         Type::Any => "&serde_json::Value".to_string(),
     })
 }
@@ -736,7 +729,7 @@ fn type_to_rust_param_elem(ty: &Type) -> Result<String> {
             let inner_rust = type_to_rust_param_elem(inner_type.inner())?;
             format!("Option<{}>", inner_rust)
         }
-        Type::Custom(name) => name.to_pascal_case(),
+        Type::Custom(name) => custom_type_name(name),
     })
 }
 
@@ -780,8 +773,15 @@ fn type_to_rust_output(ty: &Type) -> Result<String> {
             let inner_rust = type_to_rust_output(inner_type.inner())?;
             format!("Option<{}>", inner_rust)
         }
-        Type::Custom(name) => name.to_pascal_case(),
+        Type::Custom(name) => custom_type_name(name),
     })
+}
+
+/// The Rust name of the custom type `name`.
+///
+/// The definition of the type and every reference to it get the name from here, so they agree.
+fn custom_type_name(name: &str) -> String {
+    rust_ident(&name.to_pascal_case())
 }
 
 fn interface_name_to_rust(name: &str) -> String {
@@ -817,12 +817,37 @@ fn type_needs_borrow(ty: &Type) -> bool {
     }
 }
 
+/// The identifier for the `name`, which is in Rust case already: snake_case for fields, parameters
+/// and methods, PascalCase for types and variants.
+///
+/// A keyword becomes a raw identifier (`r#type`), except for `self`, `Self`, `super` and `crate`,
+/// which can't be raw: those get a trailing underscore (`self_`), as rustc suggests. That can't
+/// clash with the identifier of another name: Varlink names can't end with an underscore, and
+/// converting them to Rust case doesn't add one.
+fn rust_ident(name: &str) -> String {
+    match name {
+        "self" | "Self" | "super" | "crate" => format!("{}_", name),
+        _ if is_rust_keyword(name) => format!("r#{}", name),
+        _ => name.to_string(),
+    }
+}
+
+/// The `ident` without the `r#` of a raw identifier, which isn't part of its name.
+fn unraw(ident: &str) -> &str {
+    ident.strip_prefix("r#").unwrap_or(ident)
+}
+
+/// Whether `s` is a keyword of Rust: one that's in use, or one that's reserved for later.
 fn is_rust_keyword(s: &str) -> bool {
     [
         "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
         "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
         "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait",
         "true", "type", "unsafe", "use", "where", "while",
+        // The reserved ones. Some are keywords in the later editions only, but raw identifiers
+        // work in all of them.
+        "abstract", "become", "box", "do", "final", "gen", "macro", "override", "priv", "try",
+        "typeof", "unsized", "virtual", "yield",
     ]
     .contains(&s)
 }

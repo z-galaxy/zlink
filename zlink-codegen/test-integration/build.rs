@@ -12,6 +12,7 @@ fn main() {
         "camelcase.idl",
         "anytype.idl",
         "flags.idl",
+        "names.idl",
     ];
 
     // Build paths to IDL files.
