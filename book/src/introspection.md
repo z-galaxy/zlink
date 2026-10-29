@@ -94,6 +94,13 @@ the interface's errors. IDL types map the way you'd expect: `?T` → `Option<T>`
 `[string]T` → `HashMap<String, T>`; input parameters use borrowed types (`&str`, `&[T]`) for
 zero-copy calls.
 
+The IDL can't express which flags a method can or must be called with, so systemd marks its methods
+with comments right before them, and so do zlink services: `[Supports 'more' flag]`,
+`[Requires 'more' flag]`, `[Supports 'upgrade' flag]` or `[Requires 'upgrade' flag]`. The generated
+code has a `#[zlink(more)]` or `#[zlink(upgrade)]` proxy method for each method marked this way.
+When a flag is only supported, the regular proxy method is generated too, and the one with the flag
+gets a `_more` or `_upgrade` suffix.
+
 ### From a build script
 
 `zlink-codegen` is also a library, so you can regenerate bindings on every build instead of

@@ -98,4 +98,36 @@ async fn streaming_test() {
     assert_eq!(items[0].as_ref().unwrap().name, "Item 1");
     assert_eq!(items[1].as_ref().unwrap().id, 2);
     assert_eq!(items[2].as_ref().unwrap().id, 3);
+
+    // Test the chain variant of the streaming method: it asks for more replies too, and gets them
+    // all.
+    let responses = [
+        json!({"continues": true, "parameters": {"result": "stream item 1"}}).to_string(),
+        json!({"continues": false, "parameters": {"result": "stream item 2"}}).to_string(),
+    ];
+    let socket =
+        MockSocket::with_responses(&responses.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let mut conn = Connection::new(socket);
+
+    {
+        let replies = conn
+            .chain_get_stream()
+            .unwrap()
+            .send::<StreamReply, Error>()
+            .await
+            .unwrap();
+        futures_util::pin_mut!(replies);
+        let replies = replies.try_collect::<Vec<_>>().await.unwrap();
+        let results: Vec<_> = replies
+            .into_iter()
+            .map(|(reply, _fds)| reply.unwrap().into_parameters().unwrap().result)
+            .collect();
+        assert_eq!(results, ["stream item 1", "stream item 2"]);
+    }
+
+    let written = conn.write().write_half().written_data();
+    let call: serde_json::Value = serde_json::from_slice(written.strip_suffix(&[0]).unwrap())
+        .expect("a single call terminated by a NUL byte");
+    assert_eq!(call["method"], "org.example.Stream.GetStream");
+    assert_eq!(call["more"], true);
 }

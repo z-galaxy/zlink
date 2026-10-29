@@ -262,7 +262,8 @@ impl CodeGenerator {
                 ))?;
 
                 // Add lifetime parameter for output structs that need it
-                let needs_lifetime = method.outputs().any(|o| type_needs_lifetime(o.ty()));
+                let (flags, _) = MethodFlags::parse(method);
+                let needs_lifetime = output_needs_lifetime(method, flags);
 
                 self.writeln("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]")?;
                 if needs_lifetime {
@@ -346,27 +347,18 @@ impl CodeGenerator {
         Ok(())
     }
 
+    /// Generate the proxy methods of the `method`: one for each way of calling it.
     fn generate_proxy_method_signature(
         &mut self,
         method: &Method<'_>,
         error_type: &str,
     ) -> Result<()> {
-        // Add method comments.
-        for comment in method.comments() {
-            self.writeln(&format!("/// {}", comment.text()))?;
-        }
-
+        // The comments that mark the flags don't document the method: its attributes express them.
+        let (flags, docs) = MethodFlags::parse(method);
         let method_name = method.name().to_snake_case();
-        let safe_method_name = if is_rust_keyword(&method_name) {
-            format!("r#{}", method_name)
-        } else {
-            method_name
-        };
-
-        // Generate method signature.
-        let mut signature = format!("async fn {}(&mut self", safe_method_name);
 
         // Add input parameters.
+        let mut params = String::new();
         for param in method.inputs() {
             let param_name = param.name().to_snake_case();
             let safe_param_name = if is_rust_keyword(&param_name) {
@@ -377,39 +369,87 @@ impl CodeGenerator {
             // Use references for parameters that can be borrowed
             let rust_type = self.type_to_rust_param(param.ty())?;
 
-            write!(&mut signature, ",")?;
+            write!(&mut params, ",")?;
             // Add parameter with potential rename attribute.
             if safe_param_name != param.name().as_str() {
-                write!(&mut signature, " #[zlink(rename = \"{}\")]", param.name(),)?;
+                write!(&mut params, " #[zlink(rename = \"{}\")]", param.name(),)?;
             }
 
-            write!(&mut signature, " {}: {}", safe_param_name, rust_type)?;
+            write!(&mut params, " {}: {}", safe_param_name, rust_type)?;
         }
-
-        signature.push_str(") -> zlink::Result<Result<");
 
         // Handle output parameters.
         let output_count = method.outputs().count();
-        if output_count == 0 {
-            signature.push_str("()");
+        let output = if output_count == 0 {
+            "()".to_string()
         } else {
             // Always use the generated output struct for any outputs.
             // Varlink output parameters are always named, so we need a struct even for single
             // outputs.
             let struct_name = format!("{}Output", method.name().to_pascal_case());
             // Add lifetime parameter if the struct needs one
-            let needs_lifetime = method.outputs().any(|o| type_needs_lifetime(o.ty()));
-            if needs_lifetime {
-                signature.push_str(&format!("{}<'_>", struct_name));
+            if output_needs_lifetime(method, flags) {
+                format!("{}<'_>", struct_name)
             } else {
-                signature.push_str(&struct_name);
+                struct_name
             }
+        };
+        let reply = format!("Result<{}, {}>", output, error_type);
+
+        let calls = flags.calls();
+        for &call in &calls {
+            // The regular method, or the only one there is, keeps the plain name. The others get
+            // the name of their flag as a suffix and are renamed back to the Varlink method.
+            let renamed = if calls.len() > 1 { call } else { None };
+
+            // Add method comments.
+            for doc in &docs {
+                self.writeln(&format!("/// {}", doc))?;
+            }
+            if let Some(flag) = renamed {
+                if !docs.is_empty() {
+                    self.writeln("///")?;
+                }
+                self.writeln(&format!("/// {}", flag.doc()))?;
+            }
+
+            // Tell the proxy macro about the flag and the Varlink method.
+            let mut attrs = Vec::new();
+            if let Some(flag) = call {
+                attrs.push(flag.name().to_string());
+            }
+            if renamed.is_some() {
+                attrs.push(format!("rename = \"{}\"", method.name()));
+            }
+            if !attrs.is_empty() {
+                self.writeln(&format!("#[zlink({})]", attrs.join(", ")))?;
+            }
+
+            let name = match renamed {
+                Some(flag) => format!("{}_{}", method_name, flag.name()),
+                None => method_name.clone(),
+            };
+            let safe_name = if is_rust_keyword(&name) {
+                format!("r#{}", name)
+            } else {
+                name
+            };
+
+            // Generate method signature.
+            let return_type = if call == Some(CallFlag::More) {
+                // The method returns a stream of the replies.
+                format!(
+                    "zlink::Result<impl zlink::futures_util::Stream<Item = zlink::Result<{}>>>",
+                    reply
+                )
+            } else {
+                format!("zlink::Result<{}>", reply)
+            };
+            self.writeln(&format!(
+                "async fn {}(&mut self{}) -> {};",
+                safe_name, params, return_type
+            ))?;
         }
-
-        write!(&mut signature, ", {}>>", error_type)?;
-        signature.push(';');
-
-        self.writeln(&signature)?;
 
         Ok(())
     }
@@ -488,6 +528,120 @@ impl Default for CodeGenerator {
         Self::new()
     }
 }
+
+/// Whether the output struct of the `method` has a lifetime, for its fields to borrow from the
+/// connection.
+fn output_needs_lifetime(method: &Method<'_>, flags: MethodFlags) -> bool {
+    // The outputs of the methods taking flags are owned: the replies of a stream must be, and the
+    // caller of an upgrade takes the connection apart right after the reply, which a reply
+    // borrowing from the connection would prevent.
+    !flags.is_flagged() && method.outputs().any(|o| type_needs_lifetime(o.ty()))
+}
+
+/// The flags that a method supports or requires.
+///
+/// The IDL can't express these, so systemd marks its methods with comments right before them.
+#[derive(Clone, Copy, Default)]
+struct MethodFlags {
+    more: FlagSupport,
+    upgrade: FlagSupport,
+}
+
+impl MethodFlags {
+    /// Parse the flags of the `method` from its comments.
+    ///
+    /// Along with the flags, this gives the texts of the other comments: the ones that document the
+    /// method.
+    fn parse<'a>(method: &Method<'a>) -> (Self, Vec<&'a str>) {
+        let mut flags = Self::default();
+        let mut docs = Vec::new();
+
+        for comment in method.comments() {
+            match comment.text().trim() {
+                MORE_SUPPORTED => flags.more = FlagSupport::Supported,
+                MORE_REQUIRED => flags.more = FlagSupport::Required,
+                UPGRADE_SUPPORTED => flags.upgrade = FlagSupport::Supported,
+                UPGRADE_REQUIRED => flags.upgrade = FlagSupport::Required,
+                _ => docs.push(comment.text()),
+            }
+        }
+
+        (flags, docs)
+    }
+
+    /// Whether the method supports or requires any flag.
+    fn is_flagged(self) -> bool {
+        self.more != FlagSupport::Unsupported || self.upgrade != FlagSupport::Unsupported
+    }
+
+    /// The flags that the calls of the method carry, `None` being a call without any.
+    ///
+    /// Each of these gets a proxy method.
+    fn calls(self) -> Vec<Option<CallFlag>> {
+        let mut calls = Vec::new();
+
+        // A method that requires a flag can't be called without it.
+        if self.more != FlagSupport::Required && self.upgrade != FlagSupport::Required {
+            calls.push(None);
+        }
+        if self.more != FlagSupport::Unsupported {
+            calls.push(Some(CallFlag::More));
+        }
+        if self.upgrade != FlagSupport::Unsupported {
+            calls.push(Some(CallFlag::Upgrade));
+        }
+
+        calls
+    }
+}
+
+/// How a method makes use of a flag.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum FlagSupport {
+    /// The method doesn't take the flag.
+    #[default]
+    Unsupported,
+    /// The method can be called with or without the flag.
+    Supported,
+    /// The method can only be called with the flag.
+    Required,
+}
+
+/// A flag that a call can carry.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallFlag {
+    /// The call gets a stream of replies.
+    More,
+    /// The reply to the call upgrades the connection.
+    Upgrade,
+}
+
+impl CallFlag {
+    /// The name of the flag, as the `zlink` attribute has it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::More => "more",
+            Self::Upgrade => "upgrade",
+        }
+    }
+
+    /// The doc line of the proxy method that sets the flag, to tell it from the other ones.
+    fn doc(self) -> &'static str {
+        match self {
+            Self::More => "Calls the method with the `more` flag, streaming its replies.",
+            Self::Upgrade => {
+                "Calls the method with the `upgrade` flag, so a successful reply upgrades the \
+                 connection."
+            }
+        }
+    }
+}
+
+// The comments that mark the flags of a method, as systemd does.
+const MORE_SUPPORTED: &str = "[Supports 'more' flag]";
+const MORE_REQUIRED: &str = "[Requires 'more' flag]";
+const UPGRADE_SUPPORTED: &str = "[Supports 'upgrade' flag]";
+const UPGRADE_REQUIRED: &str = "[Requires 'upgrade' flag]";
 
 fn type_to_rust(ty: &Type) -> Result<String> {
     Ok(match ty {

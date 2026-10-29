@@ -309,3 +309,284 @@ method GetData() -> (items: []any, map: [string]any)
     assert!(code.contains("Vec<serde_json::Value>"));
     assert!(code.contains("std::collections::HashMap<"));
 }
+
+#[test]
+fn flags_proxy_methods() {
+    let code = flags_code();
+
+    // The method supports the `more` flag: besides the regular method, there's a streaming one.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Lists the items.\n",
+            "    async fn list(&mut self) -> zlink::Result<Result<ListOutput, FlagsError>>;\n",
+            "    /// Lists the items.\n",
+            "    ///\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"List\")]\n",
+            "    async fn list_more(&mut self) -> zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<ListOutput, FlagsError>>>>;\n",
+        ),
+    );
+
+    // The method requires the `more` flag: there's only a streaming method, with the plain name.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Watches the items for changes.\n",
+            "    #[zlink(more)]\n",
+            "    async fn watch(&mut self) -> zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<WatchOutput, FlagsError>>>>;\n",
+        ),
+    );
+
+    // The method requires the `upgrade` flag: there's only a method for that, with the plain name.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Downloads an item over the upgraded connection.\n",
+            "    #[zlink(upgrade)]\n",
+            "    async fn download(&mut self, name: &str) -> ",
+            "zlink::Result<Result<DownloadOutput, FlagsError>>;\n",
+        ),
+    );
+
+    // The method supports the `upgrade` flag: besides the regular method, there's one for that.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Gets an item, or downloads it over the upgraded connection.\n",
+            "    async fn fetch(&mut self, name: &str) -> ",
+            "zlink::Result<Result<FetchOutput, FlagsError>>;\n",
+            "    /// Gets an item, or downloads it over the upgraded connection.\n",
+            "    ///\n",
+            "    /// Calls the method with the `upgrade` flag, so a successful reply upgrades the ",
+            "connection.\n",
+            "    #[zlink(upgrade, rename = \"Fetch\")]\n",
+            "    async fn fetch_upgrade(&mut self, name: &str) -> ",
+            "zlink::Result<Result<FetchOutput, FlagsError>>;\n",
+        ),
+    );
+
+    // The method without flags is as it always was.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Pings the service.\n",
+            "    async fn ping(&mut self) -> zlink::Result<Result<(), FlagsError>>;\n",
+        ),
+    );
+
+    // There are no other methods.
+    assert_eq!(code.matches("async fn ").count(), 7);
+}
+
+#[test]
+fn flags_owned_outputs() {
+    // The replies to the calls with flags can't borrow from the connection.
+    let code = flags_code();
+    assert_contains(&code, "pub struct ListOutput {\n    pub item: Item,\n}");
+    assert_contains(
+        &code,
+        "pub struct WatchOutput {\n    pub name: String,\n    pub removed: bool,\n}",
+    );
+    assert_contains(
+        &code,
+        "pub struct DownloadOutput {\n    pub size: i64,\n    pub checksum: String,\n}",
+    );
+    assert!(!code.contains("'a"));
+    assert!(!code.contains("'_"));
+    assert!(!code.contains("serde(borrow)"));
+
+    // The replies to the calls without flags still borrow, in the same interface.
+    let idl = r#"
+interface org.example.mixed
+
+# [Requires 'more' flag]
+method Watch() -> (name: string)
+
+# [Supports 'upgrade' flag]
+method Fetch() -> (names: []string, kinds: [string]string)
+
+method Name() -> (name: string)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    assert_contains(&code, "pub struct WatchOutput {\n    pub name: String,\n}");
+    assert_contains(
+        &code,
+        concat!(
+            "pub struct FetchOutput {\n",
+            "    pub names: Vec<String>,\n",
+            "    pub kinds: std::collections::HashMap<String, String>,\n",
+            "}",
+        ),
+    );
+    assert_contains(
+        &code,
+        "pub struct NameOutput<'a> {\n    #[serde(borrow)]\n    pub name: &'a str,\n}",
+    );
+    // The signatures agree with the structs.
+    assert_contains(
+        &code,
+        "Item = zlink::Result<Result<WatchOutput, MixedError>>>>;",
+    );
+    assert_contains(
+        &code,
+        "async fn fetch(&mut self) -> zlink::Result<Result<FetchOutput, MixedError>>;",
+    );
+    assert_contains(
+        &code,
+        "async fn fetch_upgrade(&mut self) -> zlink::Result<Result<FetchOutput, MixedError>>;",
+    );
+    assert_contains(
+        &code,
+        "async fn name(&mut self) -> zlink::Result<Result<NameOutput<'_>, MixedError>>;",
+    );
+}
+
+#[test]
+fn flags_comments_are_not_docs() {
+    // None of the comments that mark the flags is left in the generated code.
+    let code = flags_code();
+    for comment in [
+        "[Supports 'more' flag]",
+        "[Requires 'more' flag]",
+        "[Supports 'upgrade' flag]",
+        "[Requires 'upgrade' flag]",
+    ] {
+        assert!(!code.contains(comment), "`{comment}` found in:\n{code}");
+    }
+
+    // The other comments stay, in order, including the ones that merely look like the marking
+    // ones. The marking ones are matched trimmed, so the trailing tab doesn't matter.
+    let idl = concat!(
+        "interface org.example.docs\n",
+        "\n",
+        "# Opens the file.\n",
+        "# [Supports 'more' flag]\t\n",
+        "# It stays open until it's closed.\n",
+        "method Open() -> ()\n",
+        "\n",
+        "# [supports 'more' flag]\n",
+        "# [Supports 'more' flags]\n",
+        "# Supports 'more' flag\n",
+        "method Close() -> ()\n",
+    );
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Opens the file.\n",
+            "    /// It stays open until it's closed.\n",
+            "    async fn open(&mut self) -> zlink::Result<Result<(), DocsError>>;\n",
+            "    /// Opens the file.\n",
+            "    /// It stays open until it's closed.\n",
+            "    ///\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"Open\")]\n",
+            "    async fn open_more(&mut self) -> zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<(), DocsError>>>>;\n",
+        ),
+    );
+    assert_contains(
+        &code,
+        concat!(
+            "    /// [supports 'more' flag]\n",
+            "    /// [Supports 'more' flags]\n",
+            "    /// Supports 'more' flag\n",
+            "    async fn close(&mut self) -> zlink::Result<Result<(), DocsError>>;\n",
+        ),
+    );
+    assert_eq!(code.matches("async fn ").count(), 3);
+}
+
+#[test]
+fn flags_proxy_method_names() {
+    let idl = r#"
+interface org.example.names
+
+# [Supports 'more' flag]
+# [Supports 'upgrade' flag]
+method Open(path: string) -> (fd: int)
+
+# [Requires 'more' flag]
+# [Requires 'upgrade' flag]
+method Tunnel() -> ()
+
+# [Supports 'more' flag]
+method Type() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // Both flags are supported: the regular method is followed by the one for each flag.
+    assert_contains(
+        &code,
+        concat!(
+            "    async fn open(&mut self, path: &str) -> ",
+            "zlink::Result<Result<OpenOutput, NamesError>>;\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"Open\")]\n",
+            "    async fn open_more(&mut self, path: &str) -> ",
+            "zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<OpenOutput, NamesError>>>>;\n",
+            "    /// Calls the method with the `upgrade` flag, so a successful reply upgrades the ",
+            "connection.\n",
+            "    #[zlink(upgrade, rename = \"Open\")]\n",
+            "    async fn open_upgrade(&mut self, path: &str) -> ",
+            "zlink::Result<Result<OpenOutput, NamesError>>;\n",
+        ),
+    );
+
+    // Both flags are required: there's no regular method, and none has the plain name.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"Tunnel\")]\n",
+            "    async fn tunnel_more(&mut self) -> ",
+            "zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<(), NamesError>>>>;\n",
+            "    /// Calls the method with the `upgrade` flag, so a successful reply upgrades the ",
+            "connection.\n",
+            "    #[zlink(upgrade, rename = \"Tunnel\")]\n",
+            "    async fn tunnel_upgrade(&mut self) -> zlink::Result<Result<(), NamesError>>;\n",
+        ),
+    );
+    assert!(!code.contains("fn tunnel("));
+
+    // The names that are Rust keywords are only escaped if they're not suffixed.
+    assert_contains(
+        &code,
+        "    async fn r#type(&mut self) -> zlink::Result<Result<(), NamesError>>;\n",
+    );
+    assert_contains(
+        &code,
+        "    #[zlink(more, rename = \"Type\")]\n    async fn type_more(&mut self)",
+    );
+}
+
+/// Generate the code for the IDL of the integration test, whose methods have all kinds of flags.
+fn flags_code() -> String {
+    // Read the IDL file from the integration test to avoid duplication.
+    let idl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("test-integration")
+        .join("flags.idl");
+    let idl = std::fs::read_to_string(idl_path).expect("Failed to read flags.idl");
+
+    let interface = Interface::try_from(idl.as_str()).unwrap();
+    generate_interface(&interface).unwrap()
+}
+
+/// Assert that the `code` contains the `expected` code.
+#[track_caller]
+fn assert_contains(code: &str, expected: &str) {
+    assert!(
+        code.contains(expected),
+        "`{expected}` not found in:\n{code}"
+    );
+}

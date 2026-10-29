@@ -119,6 +119,7 @@ pub(super) fn generate_chain_method(
         has_any_lifetime,
         has_explicit_lifetimes,
         method_attrs.is_oneway,
+        method_attrs.is_streaming,
         crate_path,
     );
     #[cfg(feature = "std")]
@@ -219,8 +220,18 @@ fn generate_method_call_creation(
     has_any_lifetime: bool,
     has_explicit_lifetimes: bool,
     is_oneway: bool,
+    is_streaming: bool,
     crate_path: &TokenStream,
 ) -> MethodCallResult {
+    // The flag that the call carries, if any.
+    let call_flag = if is_oneway {
+        quote! { .set_oneway(true) }
+    } else if is_streaming {
+        quote! { .set_more(true) }
+    } else {
+        quote! {}
+    };
+
     // Separate FD parameters from regular parameters
     let regular_params: Vec<_> = arg_infos.iter().filter(|info| !info.is_fds).collect();
     let regular_arg_names: Vec<_> = regular_params.iter().map(|info| info.name).collect();
@@ -309,11 +320,7 @@ fn generate_method_call_creation(
             });
         };
 
-        let call_creation = if is_oneway {
-            quote! { let call = #crate_path::Call::new(method_call).set_oneway(true); }
-        } else {
-            quote! { let call = #crate_path::Call::new(method_call); }
-        };
+        let call_creation = quote! { let call = #crate_path::Call::new(method_call)#call_flag; };
 
         let method_call_creation = quote! {
             #method_call_creation
@@ -345,11 +352,7 @@ fn generate_method_call_creation(
             let method_call = #wrapper_enum_name::Method;
         };
 
-        let call_creation = if is_oneway {
-            quote! { let call = #crate_path::Call::new(method_call).set_oneway(true); }
-        } else {
-            quote! { let call = #crate_path::Call::new(method_call); }
-        };
+        let call_creation = quote! { let call = #crate_path::Call::new(method_call)#call_flag; };
 
         let method_call_creation = quote! {
             #method_call_creation
