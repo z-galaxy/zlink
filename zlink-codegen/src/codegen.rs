@@ -161,11 +161,11 @@ impl CodeGenerator {
             }
 
             // Varlink enum variants don't have explicit values, just names.
-            let variant_name = variant.name().to_pascal_case();
-            let safe_variant_name = rust_ident(&variant_name);
+            let safe_variant_name = rust_ident(&variant.name().to_pascal_case());
 
-            // Serde would take the underscore of an escaped variant as part of the value.
-            if unraw(&safe_variant_name) != variant_name {
+            // The enum is renamed to snake_case, which doesn't always make the value of the
+            // variant. Say what the value is unless it does.
+            if serde_snake_case(unraw(&safe_variant_name)) != variant.name().as_str() {
                 self.writeln(&format!("#[serde(rename = \"{}\")]", variant.name()))?;
             }
             self.writeln(&format!("{},", safe_variant_name))?;
@@ -228,12 +228,11 @@ impl CodeGenerator {
                 self.writeln(&format!("/// {}", comment.text()))?;
             }
 
-            let variant_name = error.name().to_pascal_case();
-            let safe_variant_name = rust_ident(&variant_name);
+            let safe_variant_name = rust_ident(&error.name().to_pascal_case());
 
-            // The `ReplyError` derive would take the underscore of an escaped variant as part of
-            // the name of the error.
-            if unraw(&safe_variant_name) != variant_name {
+            // The `ReplyError` derive names the error after the variant (without the `r#`), unless
+            // told otherwise.
+            if unraw(&safe_variant_name) != error.name().as_str() {
                 self.writeln(&format!("#[zlink(rename = \"{}\")]", error.name()))?;
             }
             if error.fields().count() == 0 {
@@ -835,6 +834,21 @@ fn snake_case_to_pascal_case(input: &str) -> String {
             first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
         })
         .collect()
+}
+
+/// The value that serde makes of a variant, for an enum with `#[serde(rename_all = "snake_case")]`.
+///
+/// This is `RenameRule::SnakeCase` of `serde_derive` (in `src/internals/case.rs`): an underscore
+/// goes before each uppercase character but the first one, and all the characters are lowercased.
+fn serde_snake_case(variant: &str) -> String {
+    let mut snake = String::new();
+    for (i, ch) in variant.char_indices() {
+        if i > 0 && ch.is_uppercase() {
+            snake.push('_');
+        }
+        snake.push(ch.to_ascii_lowercase());
+    }
+    snake
 }
 
 /// The identifier for the `name`, which is in Rust case already: snake_case for fields, parameters

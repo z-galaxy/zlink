@@ -920,6 +920,116 @@ method OpenFD() -> ()
     );
 }
 
+#[test]
+fn error_names_that_map_back() {
+    let code = names_code();
+
+    // The `ReplyError` derive would name the error `HttpError` after its variant, so it's told the
+    // name.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"HTTPError\")]\n",
+            "    HttpError {\n",
+            "        #[zlink(rename = \"self\")]\n",
+            "        self_: String,\n",
+            "    },\n",
+        ),
+    );
+
+    // Only the errors whose variants are named differently are told the names.
+    let idl = r#"
+interface org.example.errors
+
+# Not found.
+error NotFound()
+
+# Bad UTF-8.
+error InvalidUTF8(offset: int)
+error IOError()
+error HTTP2Error(code: int)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Not found.\n",
+            "    NotFound,\n",
+            "    /// Bad UTF-8.\n",
+            "    #[zlink(rename = \"InvalidUTF8\")]\n",
+            "    InvalidUtf8 {\n",
+            "        offset: i64,\n",
+            "    },\n",
+            "    #[zlink(rename = \"IOError\")]\n",
+            "    IoError,\n",
+            "    #[zlink(rename = \"HTTP2Error\")]\n",
+            "    Http2Error {\n",
+            "        code: i64,\n",
+            "    },\n",
+        ),
+    );
+}
+
+#[test]
+fn enum_values_that_map_back() {
+    let code = names_code();
+
+    // Serde would make `fast` and `http` of the variants `Fast` and `Http`, so it's told the
+    // values. It makes `slow_down` of `SlowDown` already.
+    assert_contains(
+        &code,
+        concat!(
+            "#[serde(rename_all = \"snake_case\")]\n",
+            "pub enum Mode {\n",
+            "    #[serde(rename = \"Fast\")]\n",
+            "    Fast,\n",
+            "    SlowDown,\n",
+            "    #[serde(rename = \"HTTP\")]\n",
+            "    Http,\n",
+            "}\n",
+        ),
+    );
+
+    // What serde makes of the variants is what decides, not how the values look.
+    let idl = r#"
+interface org.example.enums
+
+type Kind (
+    foo,
+    foo_bar,
+    # The fast one.
+    Fast,
+    camelCase,
+    x_1,
+    a1,
+    UPPER
+)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "#[serde(rename_all = \"snake_case\")]\n",
+            "pub enum Kind {\n",
+            "    Foo,\n",
+            "    FooBar,\n",
+            "    /// The fast one.\n",
+            "    #[serde(rename = \"Fast\")]\n",
+            "    Fast,\n",
+            "    #[serde(rename = \"camelCase\")]\n",
+            "    CamelCase,\n",
+            "    #[serde(rename = \"x_1\")]\n",
+            "    X1,\n",
+            "    A1,\n",
+            "    #[serde(rename = \"UPPER\")]\n",
+            "    Upper,\n",
+            "}\n",
+        ),
+    );
+}
+
 /// Generate the code for the IDL of the integration test, whose methods have all kinds of flags.
 fn flags_code() -> String {
     // Read the IDL file from the integration test to avoid duplication.

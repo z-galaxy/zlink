@@ -684,6 +684,55 @@ mod tests {
         assert_eq!(json["parameters"], json!({"self": "a"}));
     }
 
+    #[tokio::test]
+    async fn acronym_error() {
+        // The variant is named `HttpError`, which isn't the name of the error.
+        let mut conn = connection(&[
+            json!({"error": "org.example.names.HTTPError", "parameters": {"self": "a"}}),
+        ]);
+        let error = conn.self_().await.unwrap().unwrap_err();
+        let expected = NamesError::HttpError {
+            self_: "a".to_string(),
+        };
+        assert_eq!(error, expected);
+
+        // The name of the IDL is the one that the error is sent with, too.
+        let json = serde_json::to_value(&expected).unwrap();
+        assert_eq!(json["error"], "org.example.names.HTTPError");
+        assert_eq!(json["parameters"], json!({"self": "a"}));
+    }
+
+    #[test]
+    fn enum_values() {
+        // The values are named as in the IDL, whatever the case of their variants is.
+        let modes = [
+            (Mode::Fast, "Fast"),
+            (Mode::SlowDown, "slow_down"),
+            (Mode::Http, "HTTP"),
+        ];
+        for (mode, value) in modes {
+            assert_eq!(serde_json::to_value(&mode).unwrap(), json!(value));
+            assert_eq!(serde_json::from_value::<Mode>(json!(value)).unwrap(), mode);
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_types_in_calls() {
+        let reply = json!({"parameters": {"node": node_json(), "mode": "slow_down"}});
+        let mut conn = connection(&[reply]);
+        let reply = conn.update(&node(), &Mode::Http).await.unwrap().unwrap();
+        assert_eq!(reply.node, node());
+        assert_eq!(reply.mode, Mode::SlowDown);
+
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "org.example.names.Update");
+        assert_eq!(
+            calls[0]["parameters"],
+            json!({"node": node_json(), "mode": "HTTP"})
+        );
+    }
+
     /// A connection that gets the `replies`.
     fn connection(replies: &[serde_json::Value]) -> Connection<MockSocket> {
         let replies: Vec<_> = replies.iter().map(|reply| reply.to_string()).collect();
