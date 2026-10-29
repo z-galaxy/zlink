@@ -14,12 +14,7 @@ serde = ["dep:serde"]
 [dependencies]
 serde = { version = "1.0.218", default-features = false, features = ["alloc"], optional = true }
 winnow = { version = "0.7", default-features = false }
-
-# The name types need `CheapStr::as_str` to be a `const fn`, which no zcheapstr release has yet.
-[dependencies.zcheapstr]
-git = "https://github.com/z-galaxy/zcheapstr"
-rev = "9fd99aca4b3676d79e34f46020d89e25b1f23c32"
-default-features = false
+zcheapstr = { version = "1.2", default-features = false }
 
 [dev-dependencies]
 serde = { version = "1.0.218", features = ["derive"] }
