@@ -29,7 +29,7 @@ are `std`-only) and disable default features:
 
 ```toml
 [dependencies]
-zlink-core = { version = "0.7", default-features = false, features = ["proxy", "idl-parse", "defmt"] }
+zlink-core = { version = "0.8", default-features = false, features = ["proxy", "idl-parse", "defmt"] }
 ```
 
 Note that either `tracing` or `defmt` must be enabled — for `no_std`, that means `defmt`. This
