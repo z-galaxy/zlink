@@ -632,6 +632,107 @@ mod tests {
         assert_call(&calls[0], "Watch", Some("more"));
     }
 
+    #[tokio::test]
+    async fn keyword_params_and_outputs() {
+        let mut conn = connection(&[json!({"parameters": {"super": "s"}})]);
+        let reply = conn.get_uuid("a", 1).await.unwrap().unwrap();
+        assert_eq!(reply.super_, "s");
+
+        // The parameters are named as in the IDL, not as their identifiers.
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["parameters"], json!({"self": "a", "crate": 1}));
+    }
+
+    #[tokio::test]
+    async fn acronym_method() {
+        let mut conn = connection(&[json!({"parameters": {"super": "s"}})]);
+        conn.get_uuid("a", 1).await.unwrap().unwrap();
+
+        // The macro makes `GetUuid` of `get_uuid`, which isn't the name of the method.
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "org.example.names.GetUUID");
+    }
+
+    #[tokio::test]
+    async fn keyword_method() {
+        let mut conn = connection(&[json!({})]);
+        conn.self_().await.unwrap().unwrap();
+
+        // The method that `self_` calls is `Self`.
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "org.example.names.Self");
+    }
+
+    #[test]
+    fn keyword_fields() {
+        // The fields are named as in the IDL, not as their identifiers.
+        assert_eq!(serde_json::to_value(node()).unwrap(), node_json());
+        assert_eq!(serde_json::from_value::<Node>(node_json()).unwrap(), node());
+    }
+
+    #[test]
+    fn keyword_error_fields() {
+        let error = NamesError::HttpError {
+            self_: "a".to_string(),
+        };
+        let json = serde_json::to_value(&error).unwrap();
+
+        // The field is named as in the IDL, not as its identifier.
+        assert_eq!(json["parameters"], json!({"self": "a"}));
+    }
+
+    #[tokio::test]
+    async fn acronym_error() {
+        // The variant is named `HttpError`, which isn't the name of the error.
+        let mut conn = connection(&[
+            json!({"error": "org.example.names.HTTPError", "parameters": {"self": "a"}}),
+        ]);
+        let error = conn.self_().await.unwrap().unwrap_err();
+        let expected = NamesError::HttpError {
+            self_: "a".to_string(),
+        };
+        assert_eq!(error, expected);
+
+        // The name of the IDL is the one that the error is sent with, too.
+        let json = serde_json::to_value(&expected).unwrap();
+        assert_eq!(json["error"], "org.example.names.HTTPError");
+        assert_eq!(json["parameters"], json!({"self": "a"}));
+    }
+
+    #[test]
+    fn enum_values() {
+        // The values are named as in the IDL, whatever the case of their variants is.
+        let modes = [
+            (Mode::Fast, "Fast"),
+            (Mode::SlowDown, "slow_down"),
+            (Mode::Http, "HTTP"),
+        ];
+        for (mode, value) in modes {
+            assert_eq!(serde_json::to_value(&mode).unwrap(), json!(value));
+            assert_eq!(serde_json::from_value::<Mode>(json!(value)).unwrap(), mode);
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_types_in_calls() {
+        let reply = json!({"parameters": {"node": node_json(), "mode": "slow_down"}});
+        let mut conn = connection(&[reply]);
+        let reply = conn.update(&node(), &Mode::Http).await.unwrap().unwrap();
+        assert_eq!(reply.node, node());
+        assert_eq!(reply.mode, Mode::SlowDown);
+
+        let calls = sent_calls(&conn);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "org.example.names.Update");
+        assert_eq!(
+            calls[0]["parameters"],
+            json!({"node": node_json(), "mode": "HTTP"})
+        );
+    }
+
     /// A connection that gets the `replies`.
     fn connection(replies: &[serde_json::Value]) -> Connection<MockSocket> {
         let replies: Vec<_> = replies.iter().map(|reply| reply.to_string()).collect();
@@ -667,5 +768,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A node of the names interface.
+    fn node() -> Node {
+        Node {
+            self_: "a".to_string(),
+            crate_: 1,
+            super_: Some("b".to_string()),
+            r#type: "c".to_string(),
+            r#try: true,
+            r#gen: Some("d".to_string()),
+        }
+    }
+
+    /// The JSON of the `node`, with the names of the IDL.
+    fn node_json() -> serde_json::Value {
+        json!({
+            "self": "a",
+            "crate": 1,
+            "super": "b",
+            "type": "c",
+            "try": true,
+            "gen": "d",
+        })
     }
 }

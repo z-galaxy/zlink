@@ -1,0 +1,27 @@
+# Names that can't be taken over into Rust code as they are.
+interface org.example.names
+
+# A mode, with values that are named in all kinds of ways.
+type Mode (Fast, slow_down, HTTP)
+
+# A node, with fields that are named after keywords.
+type Node (
+    self: string,
+    crate: int,
+    super: ?string,
+    type: string,
+    try: bool,
+    gen: ?string
+)
+
+# An error with an acronym in its name, and a field that is named after a keyword.
+error HTTPError(self: string)
+
+# A method with an acronym in its name, and parameters and an output named after keywords.
+method GetUUID(self: string, crate: int) -> (super: string)
+
+# A method that is named after a keyword.
+method Self() -> ()
+
+# A method that takes and gives the custom types.
+method Update(node: Node, mode: Mode) -> (node: Node, mode: Mode)

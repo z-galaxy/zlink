@@ -570,6 +570,466 @@ method Type() -> ()
     );
 }
 
+#[test]
+fn keyword_struct_fields() {
+    let code = names_code();
+
+    // The keywords that can be raw identifiers are, and the ones that can't be get an underscore.
+    // The fields keep their names on the wire either way.
+    assert_contains(
+        &code,
+        concat!(
+            "pub struct Node {\n",
+            "    #[serde(rename = \"self\")]\n",
+            "    pub self_: String,\n",
+            "    #[serde(rename = \"crate\")]\n",
+            "    pub crate_: i64,\n",
+            "    #[serde(rename = \"super\")]\n",
+            "    pub super_: Option<String>,\n",
+            "    #[serde(rename = \"type\")]\n",
+            "    pub r#type: String,\n",
+            "    #[serde(rename = \"try\")]\n",
+            "    pub r#try: bool,\n",
+            "    #[serde(rename = \"gen\")]\n",
+            "    pub r#gen: Option<String>,\n",
+            "}\n",
+        ),
+    );
+}
+
+#[test]
+fn keyword_params_and_outputs() {
+    let code = names_code();
+
+    // The parameters are renamed back, the raw identifiers as well as the ones with an underscore.
+    assert_contains(
+        &code,
+        concat!(
+            "async fn get_uuid(&mut self, #[zlink(rename = \"self\")] self_: &str, ",
+            "#[zlink(rename = \"crate\")] crate_: i64) -> ",
+            "zlink::Result<Result<GetUuidOutput<'_>, NamesError>>;\n",
+        ),
+    );
+
+    // The same goes for the outputs, except for the raw identifiers: serde strips their `r#`, so
+    // they need no rename.
+    assert_contains(
+        &code,
+        concat!(
+            "pub struct GetUuidOutput<'a> {\n",
+            "    #[serde(borrow)]\n",
+            "    #[serde(rename = \"super\")]\n",
+            "    pub super_: &'a str,\n",
+            "}\n",
+        ),
+    );
+    let idl = r#"
+interface org.example.outputs
+
+method Get() -> (type: string, super: int, try: bool)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "pub struct GetOutput<'a> {\n",
+            "    #[serde(borrow)]\n",
+            "    pub r#type: &'a str,\n",
+            "    #[serde(rename = \"super\")]\n",
+            "    pub super_: i64,\n",
+            "    pub r#try: bool,\n",
+            "}\n",
+        ),
+    );
+}
+
+#[test]
+fn keyword_error_fields() {
+    let code = names_code();
+
+    assert_contains(
+        &code,
+        concat!(
+            "    HttpError {\n",
+            "        #[zlink(rename = \"self\")]\n",
+            "        self_: String,\n",
+            "    },\n",
+        ),
+    );
+
+    let idl = r#"
+interface org.example.errors
+
+error Failed(type: string, crate: int)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "    Failed {\n",
+            "        #[zlink(rename = \"type\")]\n",
+            "        r#type: String,\n",
+            "        #[zlink(rename = \"crate\")]\n",
+            "        crate_: i64,\n",
+            "    },\n",
+        ),
+    );
+}
+
+#[test]
+fn keyword_method_names() {
+    let code = names_code();
+    assert_contains(
+        &code,
+        "    async fn self_(&mut self) -> zlink::Result<Result<(), NamesError>>;\n",
+    );
+
+    let idl = r#"
+interface org.example.keywords
+
+method Super() -> ()
+method Crate() -> ()
+method Type() -> ()
+method Try() -> ()
+
+# [Supports 'more' flag]
+method Self() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The names are only made identifiers after the suffix of a flag is added to them.
+    assert_contains(
+        &code,
+        concat!(
+            "    async fn super_(&mut self) -> zlink::Result<Result<(), KeywordsError>>;\n",
+            "    async fn crate_(&mut self) -> zlink::Result<Result<(), KeywordsError>>;\n",
+            "    async fn r#type(&mut self) -> zlink::Result<Result<(), KeywordsError>>;\n",
+            "    async fn r#try(&mut self) -> zlink::Result<Result<(), KeywordsError>>;\n",
+            "    async fn self_(&mut self) -> zlink::Result<Result<(), KeywordsError>>;\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"Self\")]\n",
+            "    async fn self_more(&mut self) -> ",
+        ),
+    );
+}
+
+#[test]
+fn keyword_type_names() {
+    let idl = r#"
+interface org.example.keywords
+
+type Self (value: int)
+
+type Kind (Self, other)
+
+error Self(self: string)
+
+method Make(value: Self, values: []Self) -> (value: ?Self)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The definitions and the references to the type agree on its name.
+    assert_contains(&code, "pub struct Self_ {\n    pub value: i64,\n}\n");
+    assert_contains(
+        &code,
+        concat!(
+            "async fn make(&mut self, value: &Self_, values: &[Self_]) -> ",
+            "zlink::Result<Result<MakeOutput, KeywordsError>>;\n",
+        ),
+    );
+    assert_contains(
+        &code,
+        "pub struct MakeOutput {\n    pub value: Option<Self_>,\n}\n",
+    );
+
+    // The variants are renamed back to the names that they have in the IDL.
+    assert_contains(
+        &code,
+        concat!(
+            "pub enum Kind {\n",
+            "    #[serde(rename = \"Self\")]\n",
+            "    Self_,\n",
+            "    Other,\n",
+            "}\n",
+        ),
+    );
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"Self\")]\n",
+            "    Self_ {\n",
+            "        #[zlink(rename = \"self\")]\n",
+            "        self_: String,\n",
+            "    },\n",
+        ),
+    );
+}
+
+#[test]
+fn keyword_trait_name() {
+    let idl = r#"
+interface org.example.Self
+
+method Ping() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    assert_contains(&code, "#[proxy(\"org.example.Self\")]\npub trait Self_ {\n");
+    // The name of the error type is made of the name of the interface, not of the trait.
+    assert_contains(&code, "pub enum SelfError {}\n");
+    assert_contains(&code, "zlink::Result<Result<(), SelfError>>;\n");
+}
+
+#[test]
+fn reserved_keywords() {
+    let reserved = [
+        "abstract", "become", "box", "do", "final", "gen", "macro", "override", "priv", "try",
+        "typeof", "unsized", "virtual", "yield",
+    ];
+    // The contextual keywords are valid identifiers as they are.
+    let contextual = ["union", "macro_rules", "safe", "raw"];
+    let fields: Vec<_> = reserved
+        .iter()
+        .chain(&contextual)
+        .map(|name| format!("{name}: int"))
+        .collect();
+    let idl = format!(
+        "interface org.example.reserved\n\ntype Names ({})\n",
+        fields.join(", ")
+    );
+    let interface = Interface::try_from(idl.as_str()).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    for name in reserved {
+        assert_contains(
+            &code,
+            &format!("    #[serde(rename = \"{name}\")]\n    pub r#{name}: i64,\n"),
+        );
+    }
+    for name in contextual {
+        assert_contains(&code, &format!("    pub {name}: i64,\n"));
+    }
+}
+
+#[test]
+fn method_names_that_map_back() {
+    let code = names_code();
+
+    // The proxy macro would make `GetUuid` of `get_uuid`, so it's told which method it is.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"GetUUID\")]\n",
+            "    async fn get_uuid(&mut self, #[zlink(rename = \"self\")] self_: &str, ",
+            "#[zlink(rename = \"crate\")] crate_: i64) -> ",
+            "zlink::Result<Result<GetUuidOutput<'_>, NamesError>>;\n",
+        ),
+    );
+
+    // It makes `Self` of `self_`, so there's nothing to tell.
+    assert_contains(
+        &code,
+        concat!(
+            "    /// A method that is named after a keyword.\n",
+            "    async fn self_(&mut self) -> zlink::Result<Result<(), NamesError>>;\n",
+        ),
+    );
+
+    // What matters is what the macro makes of the identifier, not what the name looks like.
+    let idl = r#"
+interface org.example.methods
+
+method GetUuid() -> ()
+method HTTPGet() -> ()
+method IPv4Address() -> ()
+method ListUUIDs() -> ()
+method Get2Things() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "    async fn get_uuid(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"HTTPGet\")]\n",
+            "    async fn http_get(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    async fn i_pv4_address(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"ListUUIDs\")]\n",
+            "    async fn list_uui_ds(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    async fn get2_things(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
+#[test]
+fn method_names_of_keywords_in_other_case() {
+    let idl = r#"
+interface org.example.methods
+
+method TYPE() -> ()
+method SELF() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The macro makes `Type` and `Self` of `r#type` and `self_`, not `TYPE` and `SELF`.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"TYPE\")]\n",
+            "    async fn r#type(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    #[zlink(rename = \"SELF\")]\n",
+            "    async fn self_(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
+#[test]
+fn method_names_with_flags_that_map_back() {
+    let idl = r#"
+interface org.example.methods
+
+# [Supports 'more' flag]
+method GetUUID() -> ()
+
+# [Requires 'upgrade' flag]
+method OpenFD() -> ()
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // The attribute of the method that is renamed back anyway has the flag too.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"GetUUID\")]\n",
+            "    async fn get_uuid(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+            "    /// Calls the method with the `more` flag, streaming its replies.\n",
+            "    #[zlink(more, rename = \"GetUUID\")]\n",
+            "    async fn get_uuid_more(&mut self) -> ",
+            "zlink::Result<impl zlink::futures_util::Stream<",
+            "Item = zlink::Result<Result<(), MethodsError>>>>;\n",
+            "    #[zlink(upgrade, rename = \"OpenFD\")]\n",
+            "    async fn open_fd(&mut self) -> zlink::Result<Result<(), MethodsError>>;\n",
+        ),
+    );
+}
+
+#[test]
+fn error_names_that_map_back() {
+    let code = names_code();
+
+    // The `ReplyError` derive would name the error `HttpError` after its variant, so it's told the
+    // name.
+    assert_contains(
+        &code,
+        concat!(
+            "    #[zlink(rename = \"HTTPError\")]\n",
+            "    HttpError {\n",
+            "        #[zlink(rename = \"self\")]\n",
+            "        self_: String,\n",
+            "    },\n",
+        ),
+    );
+
+    // Only the errors whose variants are named differently are told the names.
+    let idl = r#"
+interface org.example.errors
+
+# Not found.
+error NotFound()
+
+# Bad UTF-8.
+error InvalidUTF8(offset: int)
+error IOError()
+error HTTP2Error(code: int)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "    /// Not found.\n",
+            "    NotFound,\n",
+            "    /// Bad UTF-8.\n",
+            "    #[zlink(rename = \"InvalidUTF8\")]\n",
+            "    InvalidUtf8 {\n",
+            "        offset: i64,\n",
+            "    },\n",
+            "    #[zlink(rename = \"IOError\")]\n",
+            "    IoError,\n",
+            "    #[zlink(rename = \"HTTP2Error\")]\n",
+            "    Http2Error {\n",
+            "        code: i64,\n",
+            "    },\n",
+        ),
+    );
+}
+
+#[test]
+fn enum_values_that_map_back() {
+    let code = names_code();
+
+    // Serde would make `fast` and `http` of the variants `Fast` and `Http`, so it's told the
+    // values. It makes `slow_down` of `SlowDown` already.
+    assert_contains(
+        &code,
+        concat!(
+            "#[serde(rename_all = \"snake_case\")]\n",
+            "pub enum Mode {\n",
+            "    #[serde(rename = \"Fast\")]\n",
+            "    Fast,\n",
+            "    SlowDown,\n",
+            "    #[serde(rename = \"HTTP\")]\n",
+            "    Http,\n",
+            "}\n",
+        ),
+    );
+
+    // What serde makes of the variants is what decides, not how the values look.
+    let idl = r#"
+interface org.example.enums
+
+type Kind (
+    foo,
+    foo_bar,
+    # The fast one.
+    Fast,
+    camelCase,
+    x_1,
+    a1,
+    UPPER
+)
+"#;
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+    assert_contains(
+        &code,
+        concat!(
+            "#[serde(rename_all = \"snake_case\")]\n",
+            "pub enum Kind {\n",
+            "    Foo,\n",
+            "    FooBar,\n",
+            "    /// The fast one.\n",
+            "    #[serde(rename = \"Fast\")]\n",
+            "    Fast,\n",
+            "    #[serde(rename = \"camelCase\")]\n",
+            "    CamelCase,\n",
+            "    #[serde(rename = \"x_1\")]\n",
+            "    X1,\n",
+            "    A1,\n",
+            "    #[serde(rename = \"UPPER\")]\n",
+            "    Upper,\n",
+            "}\n",
+        ),
+    );
+}
+
 /// Generate the code for the IDL of the integration test, whose methods have all kinds of flags.
 fn flags_code() -> String {
     // Read the IDL file from the integration test to avoid duplication.
@@ -577,6 +1037,18 @@ fn flags_code() -> String {
         .join("test-integration")
         .join("flags.idl");
     let idl = std::fs::read_to_string(idl_path).expect("Failed to read flags.idl");
+
+    let interface = Interface::try_from(idl.as_str()).unwrap();
+    generate_interface(&interface).unwrap()
+}
+
+/// Generate the code for the IDL of the integration test, whose names need care.
+fn names_code() -> String {
+    // Read the IDL file from the integration test to avoid duplication.
+    let idl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("test-integration")
+        .join("names.idl");
+    let idl = std::fs::read_to_string(idl_path).expect("Failed to read names.idl");
 
     let interface = Interface::try_from(idl.as_str()).unwrap();
     generate_interface(&interface).unwrap()
