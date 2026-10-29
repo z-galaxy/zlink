@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.0 - 2026-10-29
+
+### ✨ Added
+- Generate streaming and upgrade proxy methods.
+
+### 💥 Breaking
+- Name fields and enum variants with FieldName.
+
+### 📝 Documentation
+- List zlink-names among the project's crates.
+- Link to the file descriptor passing docs.
+
+### 🐛 Fixed
+- Keep the Varlink names of errors and enum values.
+- Rename the methods whose names don't map back.
+- Escape the keywords that can't be raw identifiers.
+
+### ⚙️ Other
+- 💸 Add CodSpeed as a sponsor in the README.
+
 ## 0.7.0 - 2026-07-19
 
 ### Breaking
