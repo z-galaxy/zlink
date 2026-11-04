@@ -23,8 +23,43 @@ async fn write() {
     write_conn.write(&item, vec![]).await.unwrap();
     #[cfg(not(feature = "std"))]
     write_conn.write(&item).await.unwrap();
-    assert_eq!(write_conn.buffer.len(), BUFFER_SIZE * 3);
+    // Doubled from `BUFFER_SIZE` until the message fits.
+    assert_eq!(write_conn.buffer.len(), BUFFER_SIZE * 4);
     assert_eq!(write_conn.pos, 0); // Reset after flush.
+}
+
+#[tokio::test]
+async fn enqueue_large_item_serializes_few_times() {
+    use core::cell::Cell;
+    use serde::{Serialize, Serializer};
+
+    // Counts how many times it is serialized.
+    #[derive(Debug)]
+    struct Counted<'a> {
+        item: Vec<u8>,
+        count: &'a Cell<usize>,
+    }
+    impl Serialize for Counted<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.count.set(self.count.get() + 1);
+            self.item.serialize(serializer)
+        }
+    }
+
+    let count = Cell::new(0);
+    // About 1 MiB of JSON: 4096 times the initial buffer.
+    let item = Counted {
+        item: vec![0u8; 512 * 1024],
+        count: &count,
+    };
+    let mut write_conn = WriteConnection::new(TestWriteHalf::new(0), 1);
+    #[cfg(feature = "std")]
+    write_conn.enqueue(&item, vec![]).unwrap();
+    #[cfg(not(feature = "std"))]
+    write_conn.enqueue(&item).unwrap();
+
+    // 256 B doubled 12 times is 1 MiB: 13 attempts, not the ~4096 of growing by 256 B.
+    assert!(count.get() <= 14, "serialized {} times", count.get());
 }
 
 #[tokio::test]

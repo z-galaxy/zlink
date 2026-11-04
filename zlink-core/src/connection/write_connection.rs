@@ -363,12 +363,16 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         Ok(())
     }
 
+    // Double the buffer, so a message that does not fit is serialized again only O(log n) times
+    // rather than once per `BUFFER_SIZE` bytes, which made large messages quadratic.
     fn grow_buffer(&mut self) -> crate::Result<()> {
-        if self.buffer.len() >= super::MAX_BUFFER_SIZE {
+        let len = self.buffer.len();
+        if len >= super::MAX_BUFFER_SIZE {
             return Err(crate::Error::BufferOverflow);
         }
 
-        self.buffer.extend_from_slice(&[0; BUFFER_SIZE]);
+        let new_len = (len * 2).clamp(BUFFER_SIZE, super::MAX_BUFFER_SIZE);
+        self.buffer.resize(new_len, 0);
 
         Ok(())
     }
