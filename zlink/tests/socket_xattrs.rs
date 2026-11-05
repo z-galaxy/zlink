@@ -21,6 +21,8 @@ use zlink::{
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix;
 
 #[tokio::test]
 async fn sockets_carry_varlink_role() {

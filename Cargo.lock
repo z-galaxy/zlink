@@ -2226,6 +2226,7 @@ dependencies = [
  "zlink-core",
  "zlink-smol",
  "zlink-tokio",
+ "zlink-zruntime",
 ]
 
 [[package]]

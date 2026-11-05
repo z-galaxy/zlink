@@ -14,6 +14,8 @@ use zlink::Listener;
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix;
 
 #[tokio::test]
 async fn peer_credentials_unix_socket() {

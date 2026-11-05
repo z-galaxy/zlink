@@ -25,6 +25,8 @@ use zlink::{
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix;
 
 use mock_machined_service::{AcquireMetadata, ListReply, MachinedError, OwnedListReply, ProcessId};
 

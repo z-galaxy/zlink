@@ -12,6 +12,8 @@ use zlink::{Server, introspect};
 use zlink::smol::unix::{bind, connect};
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix::{bind, connect};
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix::{bind, connect};
 
 #[test_log::test(tokio::test)]
 async fn unknown_error() -> Result<(), Box<dyn Error>> {
