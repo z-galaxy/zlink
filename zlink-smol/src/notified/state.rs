@@ -49,11 +49,9 @@ where
     /// Set the value of the notified field and notify all listeners.
     async fn set(&mut self, value: T) {
         self.value = value.clone();
-        self.tx
-            .broadcast_direct(value.into())
-            .await
-            // Since we enabled overflow and disabled awaiting active receivers, this can't fail.
-            .expect("Failed to broadcast value");
+        // In overflow mode, the channel is never full, and the inactive receiver keeps it open, so
+        // the only failure is that there are currently no active receivers and that's ok.
+        let _ = self.tx.broadcast_direct(value.into()).await;
     }
 
     /// The value of the notified field.
@@ -120,5 +118,20 @@ where
                     .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zlink_core::notified::State as _;
+
+    #[test]
+    fn set_without_streams() {
+        smol::block_on(async {
+            let mut state = State::<u32, u32>::new(1);
+            state.set(2).await;
+            assert_eq!(state.get(), 2);
+        });
     }
 }
