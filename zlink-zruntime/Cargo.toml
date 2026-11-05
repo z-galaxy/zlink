@@ -16,11 +16,17 @@ service = ["server", "introspection", "zlink-core/service"]
 idl = ["zlink-core/idl"]
 idl-parse = ["zlink-core/idl-parse"]
 introspection = ["zlink-core/introspection"]
-tracing = ["zlink-core/tracing"]
+tracing = ["zlink-core/tracing", "zruntime/tracing"]
 defmt = ["zlink-core/defmt"]
 
 [dependencies]
 zlink-core = { path = "../zlink-core", version = "=0.8.0", default-features = false, features = ["std"] }
+# Taken from git, for API that zruntime has not released yet, until zlink is released.
+zruntime = { git = "https://github.com/z-galaxy/zruntime", branch = "main", default-features = false, features = [
+    "runtime",
+    "helper",
+    "unix",
+] }
 
 [package.metadata.docs.rs]
 all-features = true
