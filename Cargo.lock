@@ -2341,3 +2341,10 @@ dependencies = [
  "tokio-stream",
  "zlink-core",
 ]
+
+[[package]]
+name = "zlink-zruntime"
+version = "0.8.0"
+dependencies = [
+ "zlink-core",
+]
