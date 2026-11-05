@@ -834,6 +834,24 @@ async fn receive_reply_known_errors() {
     ));
 }
 
+#[tokio::test]
+async fn receive_reply_names_the_mismatched_field() {
+    let socket = MockSocket::with_responses(&[r#"{"parameters":{"resutl":"value"}}"#]);
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+
+    // The error of deserializing the parameters is reported as is: it's the one that says what
+    // is wrong with them.
+    let result = conn.receive_reply::<TestReply, TestError>().await;
+    let Err(crate::Error::Json(error)) = result else {
+        panic!("Expected Error::Json, got {result:?}");
+    };
+    assert_eq!(
+        error.to_string(),
+        "missing field `result` at line 1 column 32",
+    );
+}
+
 #[derive(Debug, PartialEq, ReplyError)]
 #[zlink(interface = "org.example")]
 enum TestError {
