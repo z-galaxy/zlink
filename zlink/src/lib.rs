@@ -1,4 +1,7 @@
-#![cfg_attr(not(any(feature = "tokio", feature = "smol")), no_std)]
+#![cfg_attr(
+    not(any(feature = "tokio", feature = "smol", feature = "zruntime")),
+    no_std
+)]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/z-galaxy/zlink/3660d731d7de8f60c8d82e122b3ece15617185e4/data/logo.png"
 )]
@@ -17,8 +20,8 @@
         [project README](https://github.com/z-galaxy/zlink) for an overview and examples."
 )]
 
-#[cfg(not(any(feature = "tokio", feature = "smol")))]
-compile_error!("At least one runtime feature must be enabled: 'tokio' or 'smol'");
+#[cfg(not(any(feature = "tokio", feature = "smol", feature = "zruntime")))]
+compile_error!("At least one runtime feature must be enabled: 'tokio', 'smol' or 'zruntime'");
 
 // The book examples use the tokio runtime and hence the `tokio`-specific API.
 #[cfg(all(doctest, feature = "tokio"))]
@@ -57,4 +60,12 @@ pub mod smol {
     #[cfg(feature = "server")]
     pub use zlink_smol::notified;
     pub use zlink_smol::unix;
+}
+
+/// API specific to the [zruntime](https://github.com/z-galaxy/zruntime) runtime.
+#[cfg(feature = "zruntime")]
+pub mod zruntime {
+    #[cfg(feature = "server")]
+    pub use zlink_zruntime::notified;
+    pub use zlink_zruntime::unix;
 }

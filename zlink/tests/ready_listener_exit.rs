@@ -16,6 +16,8 @@ use zlink::{
 use zlink::smol::unix::Stream;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix::Stream;
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix::Stream;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 

@@ -26,6 +26,11 @@ use zlink::tokio::{
     notified::{self, traits::State as _},
     unix::{bind, connect},
 };
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::{
+    notified::{self, traits::State as _},
+    unix::{bind, connect},
+};
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ftl() -> Result<(), Box<dyn std::error::Error>> {

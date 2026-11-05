@@ -12,6 +12,8 @@ use zlink::{Call, Listener};
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::zruntime::unix;
 
 #[tokio::test]
 async fn fds_arrive_with_their_call() {

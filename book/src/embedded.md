@@ -46,9 +46,9 @@ rather than copying out of it.
 
 ## Bringing your own transport
 
-On a Linux system, the transport is a Unix socket provided by `zlink-tokio`/`zlink-smol`. On an
-embedded target, *you* provide the transport, by implementing three small traits from
-`zlink_core::connection::socket`:
+On a Linux system, the transport is a Unix socket provided by `zlink-tokio`, `zlink-smol` or
+`zlink-zruntime`. On an embedded target, *you* provide the transport, by implementing three small
+traits from `zlink_core::connection::socket`:
 
 ```rust,noplayground
 use zlink_core::connection::socket::{Socket, ReadHalf, WriteHalf, ReadResult};

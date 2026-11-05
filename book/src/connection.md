@@ -8,7 +8,7 @@ the zlink API.
 ## Picking an async runtime
 
 zlink is async-first and runtime-agnostic at its core, with ready-made integration for the two
-popular runtimes, enabled through cargo features:
+popular runtimes, tokio and smol, and for [zruntime], enabled through cargo features:
 
 ```toml
 # tokio (the default):
@@ -16,14 +16,23 @@ zlink = "0.8"
 
 # ...or smol:
 zlink = { version = "0.8", default-features = false, features = ["smol", "service", "proxy", "tracing"] }
+
+# ...or zruntime:
+zlink = { version = "0.8", default-features = false, features = ["zruntime", "service", "proxy", "tracing"] }
 ```
 
-The features are additive — you can enable both at once. The bulk of the API is runtime-agnostic
+The features are additive — you can enable several at once. The bulk of the API is runtime-agnostic
 and lives at the crate root; only the transport-specific parts (the `unix` and `notified` modules)
-are per-runtime, under `zlink::tokio` and `zlink::smol` respectively. The examples in this book use
-tokio, but they work identically with smol — just replace `zlink::tokio` with `zlink::smol`. If you
-enable neither feature, the crate fails to compile with an explicit error, since the transport
-implementations live in the runtime-integration crates.
+are per-runtime, under `zlink::tokio`, `zlink::smol` and `zlink::zruntime` respectively. The
+examples in this book use tokio, but they work identically with the other runtimes — just replace
+`zlink::tokio` with `zlink::smol` or `zlink::zruntime`. If you enable none of these features, the
+crate fails to compile with an explicit error, since the transport implementations live in the
+runtime-integration crates.
+
+zruntime is a small, single-threaded runtime. The sockets that `connect` and `bind` make with it are
+on a shared runtime, and can be used from any executor: where no `zruntime::block_on` call drives
+them, a helper thread of zruntime does. `connect_local` and `bind_local` make them on the
+`LocalRuntime` the calling thread is running instead, and those stay on that thread.
 
 ## Connecting to a service
 
@@ -173,3 +182,4 @@ Now that we know how connections work, let's climb up the abstraction ladder —
 convenient, type-safe client proxies.
 
 [`serde_prefix_all`]: https://crates.io/crates/serde_prefix_all
+[zruntime]: https://github.com/z-galaxy/zruntime

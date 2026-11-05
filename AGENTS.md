@@ -63,6 +63,8 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 - **zlink-macros**: Contains the attribute and derive macros. Not used directly.
 - **zlink-tokio**: Tokio runtime integration and transport implementations. Not used directly.
 - **zlink-smol**: smol runtime integration and transport implementations. Not used directly.
+- **zlink-zruntime**: zruntime runtime integration and transport implementations. Not used
+  directly.
 - **zlink**: Main unified API crate that re-exports appropriate subcrates based on cargo features.
 
 ### Key Components

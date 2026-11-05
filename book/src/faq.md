@@ -80,8 +80,8 @@ are ready-made starting points.
 
 No. zlink is async-first by design — IPC is I/O-bound, and the APIs (streaming replies, pipelining,
 serving many connections from one task) lean heavily on async. If you're in a synchronous program,
-you can wrap calls with your runtime's `block_on` (e.g. `tokio`'s current-thread runtime or
-`smol::block_on`).
+you can wrap calls with your runtime's `block_on` (e.g. `tokio`'s current-thread runtime,
+`smol::block_on` or `zruntime::block_on`).
 
 [zbus]: https://github.com/z-galaxy/zbus
 [rustc-100013]: https://github.com/rust-lang/rust/issues/100013

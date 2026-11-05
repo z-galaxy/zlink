@@ -8,6 +8,7 @@ members = [
     "zlink-names",
     "zlink-tokio",
     "zlink-smol",
+    "zlink-zruntime",
     "zlink-macros",
 ]
 resolver = "2"
