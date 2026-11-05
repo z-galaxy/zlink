@@ -2346,6 +2346,7 @@ dependencies = [
 name = "zlink-zruntime"
 version = "0.8.0"
 dependencies = [
+ "tempfile",
  "zlink-core",
  "zruntime",
 ]
