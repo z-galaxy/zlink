@@ -36,13 +36,15 @@ The zlink project is a Cargo workspace consisting of several crates:
 * **[`zlink-macros`]**: The attribute and derive macros.
 * **[`zlink-tokio`]**: [tokio]-based transport implementation and runtime integration.
 * **[`zlink-smol`]**: [smol]-based transport implementation and runtime integration.
+* **[`zlink-zruntime`]**: [zruntime]-based transport implementation and runtime integration.
 * **[`zlink-idl`]**: Varlink interface definition language (IDL) types and parser.
 * **[`zlink-names`]**: Types for Varlink names (interfaces, types and fields) and their validation.
 * **[`zlink-codegen`]**: Generates Rust code from Varlink IDL files.
 
 Since `zlink` re-exports everything you need, this book will only use the `zlink` crate in its
 examples. You enable your async runtime(s) through the additive cargo features `tokio` (the
-default) and `smol`, with the runtime-specific API of each residing in a module of the same name.
+default), `smol` and `zruntime`, with the runtime-specific API of each residing in a module of the
+same name.
 
 ## Getting help
 
@@ -64,10 +66,12 @@ in the [`#zlink:matrix.org`] Matrix room. If something doesn't seem right, pleas
 [`zlink-macros`]: https://docs.rs/zlink-macros/
 [`zlink-tokio`]: https://docs.rs/zlink-tokio/
 [`zlink-smol`]: https://docs.rs/zlink-smol/
+[`zlink-zruntime`]: https://docs.rs/zlink-zruntime/
 [`zlink-idl`]: https://docs.rs/zlink-idl/
 [`zlink-names`]: https://docs.rs/zlink-names/
 [`zlink-codegen`]: https://docs.rs/zlink-codegen/
 [tokio]: https://tokio.rs/
 [smol]: https://github.com/smol-rs/smol
+[zruntime]: https://github.com/z-galaxy/zruntime
 [`#zlink:matrix.org`]: https://matrix.to/#/#zlink:matrix.org
 [file an issue]: https://github.com/z-galaxy/zlink/issues/new
