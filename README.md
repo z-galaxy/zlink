@@ -29,7 +29,7 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Unix domain sockets**: Communicate over Unix domain socket transports.
 - **File descriptor passing**: Pass file descriptors along with messages over Unix domain
   sockets, [compatible with systemd's `sd-varlink`][fd-passing].
-- **Runtime choice**: Use either the Tokio or smol async runtime.
+- **Runtime choice**: Use the Tokio, smol or zruntime async runtime.
 - **Code generation**: Generate Rust code from Varlink IDL files.
 
 📖 To learn all about using zlink (and Varlink) step by step, check out
@@ -47,6 +47,7 @@ The zlink project consists of several subcrates:
 - **[`zlink-macros`]**: Contains the attribute and derive macros.
 - **[`zlink-tokio`]**: `Tokio`-based transport implementations and runtime integration.
 - **[`zlink-smol`]**: `smol`-based transport implementations and runtime integration.
+- **[`zlink-zruntime`]**: `zruntime`-based transport implementations and runtime integration.
 - **[`zlink-codegen`]**: Code generation tool for creating Rust bindings from Varlink IDL files.
 
 ## Examples
@@ -393,6 +394,7 @@ enum ProcessError {
 
 - `tokio` (default): Enable tokio runtime integration, under the `tokio` module.
 - `smol`: Enable smol runtime integration, under the `smol` module.
+- `zruntime`: Enable zruntime runtime integration, under the `zruntime` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
@@ -441,6 +443,7 @@ This project is licensed under the [MIT License][license].
 [`zlink-names`]: https://docs.rs/zlink-names
 [`zlink-tokio`]: https://docs.rs/zlink-tokio
 [`zlink-smol`]: https://docs.rs/zlink-smol
+[`zlink-zruntime`]: https://docs.rs/zlink-zruntime
 [`zlink-codegen`]: https://docs.rs/zlink-codegen
 [`zlink-macros`]: https://docs.rs/zlink-macros
 [`Server::run` docs]: https://docs.rs/zlink/latest/zlink/struct.Server.html#method.run
