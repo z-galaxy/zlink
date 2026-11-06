@@ -1,10 +1,15 @@
 //! What receiving calls costs a server: reading and deserializing calls and replying to each,
 //! from a client that sends each call once the reply to the one before it is in, and from one that
-//! sends all of them at once ahead of their replies. The client is a task of a single-threaded
-//! runtime and the server the future it blocks on, talking through in-memory channels, so these
-//! ids wait on no timer, socket or other thread; the client's share of the work runs on the same
-//! thread and is measured along with the server's. What pipelining saves a client, which waits on
-//! a timer, is in `benchmarks.rs`.
+//! sends all of them at once ahead of their replies. The client and the server are tasks of a
+//! single-threaded runtime, talking through in-memory channels, so these benchmarks wait on no
+//! timer, socket or other thread; the client's share of the work runs on the same thread and is
+//! measured along with the server's. What pipelining saves a client, which waits on a timer, is in
+//! `benchmarks.rs`.
+//!
+//! The server is a task, rather than the future the runtime blocks on, so that whenever one of the
+//! two waits for the other, the runtime has the other one to run: each time the runtime runs out of
+//! tasks, it reads the clock to account for the time it was busy, and under CPU simulation, each
+//! read is a system call, which the simulation leaves out of the measure.
 
 use common::{BiPipeSocket, NUM_CALLS, TestMethod};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
@@ -62,28 +67,32 @@ fn server_receiving(c: &mut Criterion) {
                 Connection::new(server_socket)
             },
             |mut server_conn| async move {
-                // Benchmark: Server receives calls one at a time.
-                for _ in 0..NUM_CALLS {
-                    // Measure the time to receive and deserialize each call.
-                    #[cfg(feature = "std")]
-                    let (call, _fds): (Call<TestMethod>, _) =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    #[cfg(not(feature = "std"))]
-                    let call: Call<TestMethod> =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    black_box(call);
+                // Benchmark: Server receives calls one at a time, in a task of its own.
+                tokio::spawn(async move {
+                    for _ in 0..NUM_CALLS {
+                        // Measure the time to receive and deserialize each call.
+                        #[cfg(feature = "std")]
+                        let (call, _fds): (Call<TestMethod>, _) =
+                            server_conn.read_mut().receive_call().await.unwrap();
+                        #[cfg(not(feature = "std"))]
+                        let call: Call<TestMethod> =
+                            server_conn.read_mut().receive_call().await.unwrap();
+                        black_box(call);
 
-                    // Send reply so client can continue.
-                    let reply = Reply::new(Some(ComputeReply { result: 42 }));
-                    #[cfg(feature = "std")]
-                    server_conn
-                        .write_mut()
-                        .send_reply(&reply, vec![])
-                        .await
-                        .unwrap();
-                    #[cfg(not(feature = "std"))]
-                    server_conn.write_mut().send_reply(&reply).await.unwrap();
-                }
+                        // Send reply so client can continue.
+                        let reply = Reply::new(Some(ComputeReply { result: 42 }));
+                        #[cfg(feature = "std")]
+                        server_conn
+                            .write_mut()
+                            .send_reply(&reply, vec![])
+                            .await
+                            .unwrap();
+                        #[cfg(not(feature = "std"))]
+                        server_conn.write_mut().send_reply(&reply).await.unwrap();
+                    }
+                })
+                .await
+                .unwrap();
             },
             criterion::BatchSize::SmallInput,
         );
@@ -132,34 +141,38 @@ fn server_receiving(c: &mut Criterion) {
                 Connection::new(server_socket)
             },
             |mut server_conn| async move {
-                // Benchmark: Server receives all calls from the batch.
+                // Benchmark: Server receives all calls from the batch, in a task of its own.
                 // This implicitly tests zero-byte detection as messages arrive together.
-                let mut calls = Vec::new();
+                tokio::spawn(async move {
+                    let mut calls = Vec::new();
 
-                // Receive all calls - they're already in the buffer.
-                for _ in 0..NUM_CALLS {
-                    #[cfg(feature = "std")]
-                    let (call, _fds): (Call<TestMethod>, _) =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    #[cfg(not(feature = "std"))]
-                    let call: Call<TestMethod> =
-                        server_conn.read_mut().receive_call().await.unwrap();
-                    calls.push(call);
-                }
-                black_box(&calls);
+                    // Receive all calls - they're already in the buffer.
+                    for _ in 0..NUM_CALLS {
+                        #[cfg(feature = "std")]
+                        let (call, _fds): (Call<TestMethod>, _) =
+                            server_conn.read_mut().receive_call().await.unwrap();
+                        #[cfg(not(feature = "std"))]
+                        let call: Call<TestMethod> =
+                            server_conn.read_mut().receive_call().await.unwrap();
+                        calls.push(call);
+                    }
+                    black_box(&calls);
 
-                // Send replies.
-                for _ in 0..NUM_CALLS {
-                    let reply = Reply::new(Some(ComputeReply { result: 42 }));
-                    #[cfg(feature = "std")]
-                    server_conn
-                        .write_mut()
-                        .send_reply(&reply, vec![])
-                        .await
-                        .unwrap();
-                    #[cfg(not(feature = "std"))]
-                    server_conn.write_mut().send_reply(&reply).await.unwrap();
-                }
+                    // Send replies.
+                    for _ in 0..NUM_CALLS {
+                        let reply = Reply::new(Some(ComputeReply { result: 42 }));
+                        #[cfg(feature = "std")]
+                        server_conn
+                            .write_mut()
+                            .send_reply(&reply, vec![])
+                            .await
+                            .unwrap();
+                        #[cfg(not(feature = "std"))]
+                        server_conn.write_mut().send_reply(&reply).await.unwrap();
+                    }
+                })
+                .await
+                .unwrap();
             },
             criterion::BatchSize::SmallInput,
         );
