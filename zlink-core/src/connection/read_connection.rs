@@ -123,42 +123,49 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         ReplyParams: Deserialize<'r> + Debug,
         ReplyError: Deserialize<'r> + Debug,
     {
+        // A successful reply is deserialized right away, along with the `error` field that only
+        // error replies have. Error replies, and replies that fail to deserialize, are then
+        // deserialized again as the kind they are, so serde can tell what doesn't match in them.
+        #[derive(Debug, Deserialize)]
+        struct ReplyMsg<ReplyParams> {
+            error: Option<String>,
+            parameters: Option<ReplyParams>,
+            continues: Option<bool>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct ErrorName {
+            error: Option<String>,
+        }
         #[derive(Debug, Deserialize)]
         #[serde(untagged)]
-        enum ReplyMsg<'m, ReplyParams, ReplyError> {
+        enum KnownError<'m, ReplyError> {
             #[serde(borrow)]
             Varlink(varlink_service::Error<'m>),
             Error(ReplyError),
-            // Any other error, which `Reply` would take for a successful reply since it ignores
-            // the `error` field.
-            UnknownError {
-                error: String,
-            },
-            Reply(Reply<ReplyParams>),
         }
 
-        let recv_result = self
-            .read_message::<ReplyMsg<'_, ReplyParams, ReplyError>>()
-            .await?;
+        self.read_message(|msg: serde_json::Result<ReplyMsg<ReplyParams>>, json| {
+            let error = match msg {
+                Ok(msg) => match msg.error {
+                    Some(error) => error,
+                    None => return Ok(Ok(Reply::new(msg.parameters).set_continues(msg.continues))),
+                },
+                Err(e) => match serde_json::from_slice::<ErrorName>(json) {
+                    Ok(ErrorName { error: Some(error) }) => error,
+                    // Not an error reply, so `e` tells what's wrong with it.
+                    _ => return Err(e.into()),
+                },
+            };
 
-        #[cfg(feature = "std")]
-        let (msg, fds) = recv_result;
-        #[cfg(not(feature = "std"))]
-        let msg = recv_result;
-
-        let result = match msg {
-            // Varlink service interface error need to be returned as the top-level error.
-            ReplyMsg::Varlink(e) => Err(crate::Error::VarlinkService(e.into())),
-            // So do the errors that the client doesn't know.
-            ReplyMsg::UnknownError { error } => Err(crate::Error::UnknownErrorReply(error)),
-            ReplyMsg::Error(e) => Ok(Err(e)),
-            ReplyMsg::Reply(reply) => Ok(Ok(reply)),
-        };
-
-        #[cfg(feature = "std")]
-        return result.map(|r| (r, fds));
-        #[cfg(not(feature = "std"))]
-        return result;
+            match serde_json::from_slice(json) {
+                // Varlink service interface error need to be returned as the top-level error.
+                Ok(KnownError::Varlink(e)) => Err(crate::Error::VarlinkService(e.into())),
+                Ok(KnownError::Error(e)) => Ok(Err(e)),
+                // So do the errors that the client doesn't know.
+                Err(_) => Err(crate::Error::UnknownErrorReply(error)),
+            }
+        })
+        .await
     }
 
     /// Receive a method call over the socket.
@@ -174,11 +181,17 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     where
         Method: Deserialize<'m> + Debug,
     {
-        self.read_message::<Call<Method>>().await
+        self.read_message(|call, _| Ok(call?)).await
     }
 
     // Receives the next message, reading from the socket first if no complete one is buffered.
-    async fn read_message<'m, M>(&'m mut self) -> Result<RecvResult<M>>
+    //
+    // `f` is passed the result of deserializing the message as `M`, along with the bytes of the
+    // message to deserialize it again as needed, e.g. as another type when it isn't an `M`.
+    async fn read_message<'m, M, T>(
+        &'m mut self,
+        f: impl FnOnce(serde_json::Result<M>, &'m [u8]) -> Result<T>,
+    ) -> Result<RecvResult<T>>
     where
         M: Deserialize<'m> + Debug,
     {
@@ -208,23 +221,24 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         }
 
         let msg = match msg {
-            Some(Ok(msg)) if is_json_whitespace(&self.buffer[json_end..null_index]) => msg,
-            Some(Ok(_)) => {
+            Some(Ok(_)) if !is_json_whitespace(&self.buffer[json_end..null_index]) => {
                 return Err(crate::Error::Json(serde::de::Error::custom(
                     "trailing characters after the message",
                 )));
             }
-            Some(Err(e)) => return Err(e.into()),
+            Some(msg) => msg,
             None => return Err(crate::Error::UnexpectedEof),
         };
         let buffer = &self.buffer[start..null_index];
-        // The message isn't necessarily valid UTF-8 even though it was deserialized: the
+        // The message isn't necessarily valid UTF-8, even if it was deserialized: the
         // deserializer doesn't check the values that the message type ignores.
         trace!(
             "connection {}: received a message: {}",
             self.id,
             from_utf8(buffer).unwrap_or("<invalid UTF-8>")
         );
+
+        let msg = f(msg, buffer)?;
 
         #[cfg(feature = "std")]
         {
