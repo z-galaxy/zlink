@@ -49,7 +49,9 @@ where
     ///
     /// These are connections that something else served before, such as a server that stopped
     /// (see [`Server::run_until`]), which may have read method calls off them that it didn't
-    /// handle: the server handles those first.
+    /// handle: the server handles those first. It writes what they have left to write before
+    /// anything else, if anything, as a connection that was handed over in the middle of writing a
+    /// reply has.
     pub fn with_connections<Connections>(mut self, connections: Connections) -> Self
     where
         Connections: IntoIterator<Item = Connection<Listener::Socket>>,
@@ -119,7 +121,13 @@ where
         Stop: Future<Output = ()>,
     {
         let mut listener = self.listener.take().unwrap();
-        let mut connections = core::mem::take(&mut self.connections);
+        let mut connections = Vec::with_capacity(self.connections.len());
+        for mut conn in core::mem::take(&mut self.connections) {
+            match conn.flush().await {
+                Ok(()) => connections.push(conn),
+                Err(e) => warn!("Error writing to client {}: {:?}", conn.id(), e),
+            }
+        }
         let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
         let mut reply_stream_futures = Vec::new();
         // Vec for futures from `Connection::receive_call`. Reused across iterations to avoid
