@@ -58,6 +58,9 @@ defmt = [
     "zlink-smol?/defmt",
     "zlink-zruntime?/defmt",
 ]
+# The hand-over of a connection to another process, such as the next instance of a service that
+# restarts, through zoter, on Linux: elsewhere, it builds nothing.
+handover = ["zlink-core/handover"]
 
 [dependencies]
 zlink-core = { path = "../zlink-core", version = "=0.8.0", default-features = false }
@@ -100,6 +103,19 @@ required-features = ["introspection", "idl-parse", "tokio"]
 [[example]]
 name = "resolved"
 required-features = ["proxy", "tokio"]
+
+# The tests of the hand-over restart services through zoter's fake service manager.
+[target.'cfg(target_os = "linux")'.dev-dependencies.zoter]
+git = "https://github.com/z-galaxy/zoter"
+branch = "main"
+features = ["testing"]
+
+# And take a connection over on a local zruntime runtime, from the git source of zlink-zruntime's.
+[target.'cfg(target_os = "linux")'.dev-dependencies.zruntime]
+git = "https://github.com/z-galaxy/zruntime"
+branch = "ai/jolly-rubin-3tk4qc"
+default-features = false
+features = ["runtime"]
 
 [package.metadata.docs.rs]
 all-features = true

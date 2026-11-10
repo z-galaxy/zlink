@@ -2233,6 +2233,8 @@ dependencies = [
  "zlink-smol",
  "zlink-tokio",
  "zlink-zruntime",
+ "zoter",
+ "zruntime",
 ]
 
 [[package]]
@@ -2367,7 +2369,9 @@ name = "zoter"
 version = "0.1.0"
 source = "git+https://github.com/z-galaxy/zoter?branch=main#87ba92f236c861e065e660adf0b130138b6da455"
 dependencies = [
+ "libc",
  "rustix",
+ "tracing",
 ]
 
 [[package]]

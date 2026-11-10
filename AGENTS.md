@@ -83,6 +83,9 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 - `tracing` (default): Enable `tracing`-based logging.
 - `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
   used.
+- `handover`: Enable handing connections over to other processes, such as the next instance of a
+  service that restarts under systemd, through zoter (`connection::Handover`). Linux only: it
+  builds nothing elsewhere.
 
 #### IDL and Introspection
 
