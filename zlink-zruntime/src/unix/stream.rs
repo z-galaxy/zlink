@@ -129,6 +129,16 @@ impl TryFrom<StdUnixStream> for Stream {
     }
 }
 
+/// The socket is on the local runtime the calling thread is running, and the conversion fails
+/// where the thread is running none.
+impl TryFrom<StdUnixStream> for Stream<Local> {
+    type Error = crate::Error;
+
+    fn try_from(stream: StdUnixStream) -> Result<Self> {
+        unix::UnixStream::from_std(&super::running_local()?, stream)?.try_into()
+    }
+}
+
 impl<M> AsFd for Stream<M>
 where
     M: Mode,
@@ -264,7 +274,10 @@ mod tests {
     #[test]
     fn into_std_leaves_the_socket_open() {
         let (ours, theirs) = StdUnixStream::pair().unwrap();
-        let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
+        let ours = Stream::<Shared>::try_from(ours)
+            .unwrap()
+            .into_std()
+            .unwrap();
 
         check_open(ours, theirs);
     }
@@ -273,7 +286,7 @@ mod tests {
     #[test]
     fn halves_join_back_into_an_open_socket() {
         let (ours, theirs) = StdUnixStream::pair().unwrap();
-        let (read, write) = Stream::try_from(ours).unwrap().split();
+        let (read, write) = Stream::<Shared>::try_from(ours).unwrap().split();
         let ours = Stream::join(read, write).unwrap().into_std().unwrap();
 
         check_open(ours, theirs);
@@ -282,14 +295,28 @@ mod tests {
     /// The halves of two different sockets aren't joined.
     #[test]
     fn halves_of_two_sockets_are_not_joined() {
-        let (read, _) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+        let (read, _) = Stream::<Shared>::try_from(StdUnixStream::pair().unwrap().0)
             .unwrap()
             .split();
-        let (_, write) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+        let (_, write) = Stream::<Shared>::try_from(StdUnixStream::pair().unwrap().0)
             .unwrap()
             .split();
 
         assert!(Stream::join(read, write).is_err());
+    }
+
+    /// A std socket becomes a stream on the local runtime the calling thread is running, which the
+    /// conversion fails without.
+    #[test]
+    fn local_streams_are_on_the_running_local_runtime() {
+        assert!(Stream::<Local>::try_from(StdUnixStream::pair().unwrap().0).is_err());
+
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        Runtime::<Local>::new().unwrap().block_on(async {
+            let ours = Stream::<Local>::try_from(ours).unwrap().into_std().unwrap();
+
+            check_open(ours, theirs);
+        });
     }
 
     /// Connections on a shared runtime, and connecting, must be usable from multi-threaded
@@ -301,7 +328,7 @@ mod tests {
         assert!(zruntime::block_on(future).is_err());
 
         let (stream, _peer) = StdUnixStream::pair().unwrap();
-        let connection = Connection::new(Stream::try_from(stream).unwrap());
+        let connection = Connection::new(Stream::<Shared>::try_from(stream).unwrap());
         assert_send(&connection);
     }
 
