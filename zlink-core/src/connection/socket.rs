@@ -66,6 +66,19 @@ pub trait WriteHalf: core::fmt::Debug {
     ) -> impl Future<Output = crate::Result<()>>;
 }
 
+/// A socket that is a Unix domain socket, which it can be given up as.
+///
+/// A connection over such a socket can be handed over to another process (with the `handover`
+/// feature, on Linux). The runtime crates implement this for their Unix domain sockets.
+#[cfg(feature = "std")]
+pub trait IntoStd: Socket {
+    /// The std Unix domain socket that this socket is.
+    ///
+    /// The socket is left open, as it is but for no longer being watched by a runtime, if it was,
+    /// so that something else can go on with it, such as another process.
+    fn into_std(self) -> crate::Result<std::os::unix::net::UnixStream>;
+}
+
 /// Trait for fetching peer credentials from a socket.
 ///
 /// This trait provides the low-level capability to fetch credentials from a socket's underlying
