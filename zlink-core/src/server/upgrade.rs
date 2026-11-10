@@ -134,7 +134,7 @@ mod tests {
             #[cfg(feature = "std")]
             let fds: &[std::os::fd::OwnedFd] = &[];
             let _ = write
-                .write(
+                .write_all(
                     &buf[..result.bytes_read()],
                     #[cfg(feature = "std")]
                     fds,

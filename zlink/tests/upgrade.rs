@@ -140,7 +140,7 @@ where
     Write: WriteHalf,
 {
     write
-        .write(
+        .write_all(
             data,
             &[] as &[OwnedFd],
             #[cfg(target_os = "linux")]

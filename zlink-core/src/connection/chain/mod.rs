@@ -737,7 +737,7 @@ mod tests {
                 #[cfg(target_os = "linux")] credentials: Option<
                     &crate::connection::PassedCredentials,
                 >,
-            ) -> crate::Result<()> {
+            ) -> crate::Result<usize> {
                 self.mock
                     .write(
                         buf,

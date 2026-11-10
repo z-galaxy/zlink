@@ -83,8 +83,8 @@ impl ReadHalf for UartRead {
 }
 
 impl WriteHalf for UartWrite {
-    async fn write(&mut self, buf: &[u8]) -> zlink_core::Result<()> {
-        // write all of `buf`
+    async fn write(&mut self, buf: &[u8]) -> zlink_core::Result<usize> {
+        // write as much of `buf` as the transport takes at once, and say how much that was
         # todo!()
     }
 }
@@ -97,7 +97,9 @@ underneath; anything that can carry bytes in order will do.
 
 Two requirements to keep in mind for the async plumbing: the futures returned by `read`/`write`
 must be cancel-safe, and they should behave as `Unpin` would require — zlink avoids boxing them
-(that would mean allocation), so they get polled in place.
+(that would mean allocation), so they get polled in place. A `write` that is dropped before it
+completes must not have written anything, which is why it writes what the transport accepts in a
+single operation, rather than all of `buf`: zlink writes the rest with the next `write`.
 
 For tests — embedded or not — `zlink-core` also ships a mock transport,
 `zlink_core::test_utils::mock_socket::MockSocket`, that replays pre-configured replies; the

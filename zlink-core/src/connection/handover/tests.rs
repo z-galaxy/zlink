@@ -1,4 +1,9 @@
-use core::mem;
+use core::{
+    future::Future,
+    mem,
+    pin::pin,
+    task::{Context, Waker},
+};
 use std::{
     io::{PipeReader, Read, Write},
     os::unix::net::UnixStream,
@@ -328,6 +333,80 @@ async fn unwritten_messages_go_first() {
     check_pipe(fd, read_end);
 }
 
+/// What a flush wrote before it was dropped doesn't go again: the connection that goes on from it
+/// writes the rest, along with the file descriptors that didn't go yet.
+#[tokio::test]
+async fn partly_written_messages_go_on_from_where_they_stopped() {
+    let mut conn = WriteConnection::new(MockWriteHalf::new().writing_in_chunks(4), 0);
+    let (read_a, write_a) = pipe();
+    let (read_b, write_b) = pipe();
+    conn.enqueue(&Method::A, vec![write_a]).unwrap();
+    conn.enqueue(&Method::B, vec![write_b]).unwrap();
+    // The first write takes 4 bytes of the first message, with its file descriptor, and the flush
+    // is dropped as the second waits for room.
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(pin!(conn.flush()).poll(&mut cx).is_pending());
+
+    let (write, unwritten, fds) = conn.into_unwritten();
+    assert_eq!(write.written_data(), b"{\"me");
+    check_written_fd(&write, read_a);
+    assert_eq!(
+        unwritten,
+        b"thod\":\"org.example.A\"}\0{\"method\":\"org.example.B\"}\0"
+    );
+    let positions: Vec<_> = fds.iter().map(|msg| (msg.offset, msg.len)).collect();
+    assert_eq!(positions, [(23, 27)]);
+
+    let mut conn = WriteConnection::with_unwritten(MockWriteHalf::new(), 1, unwritten, fds);
+    conn.flush().await.unwrap();
+    let write = conn.write_half();
+    assert_eq!(
+        write.written_data(),
+        b"thod\":\"org.example.A\"}\0{\"method\":\"org.example.B\"}\0"
+    );
+    assert_eq!(write.fd_positions(), [23]);
+    check_written_fd(write, read_b);
+}
+
+/// A message of a record that comes with a list of no file descriptors is written as any other,
+/// in as many writes as it takes, and so are the messages after it.
+#[tokio::test]
+async fn unwritten_messages_with_no_fds_go() {
+    let (socket, _peer) = UnixStream::pair().unwrap();
+    let (read_b, write_b) = pipe();
+    let unwritten = b"{\"method\":\"org.example.A\"}\0{\"method\":\"org.example.B\"}\0";
+    let handover = Handover {
+        socket,
+        unreceived: Vec::new(),
+        unreceived_fds: VecDeque::new(),
+        received_credentials: None,
+        unwritten: unwritten.to_vec(),
+        unwritten_fds: [
+            MessageFds {
+                fds: Vec::new(),
+                offset: 0,
+                len: 27,
+            },
+            MessageFds {
+                fds: vec![write_b],
+                offset: 27,
+                len: 27,
+            },
+        ]
+        .into(),
+    };
+    let restored = round_trip(&handover).unwrap();
+
+    let write = MockWriteHalf::new().writing_in_chunks(5);
+    let mut conn =
+        WriteConnection::with_unwritten(write, 1, restored.unwritten, restored.unwritten_fds);
+    conn.flush().await.unwrap();
+    let write = conn.write_half();
+    assert_eq!(write.written_data(), unwritten);
+    assert_eq!(write.fd_positions(), [27]);
+    check_written_fd(write, read_b);
+}
+
 #[derive(Debug, PartialEq, Deserialize, serde::Serialize)]
 #[serde(tag = "method")]
 enum Method {
@@ -379,6 +458,19 @@ fn pipe() -> (PipeReader, OwnedFd) {
     let (read, write) = std::io::pipe().unwrap();
 
     (read, write.into())
+}
+
+/// Check that `write` wrote a single list of file descriptors, of the write end of the pipe that
+/// `read` is the read end of.
+fn check_written_fd(write: &MockWriteHalf, read: PipeReader) {
+    let written = write.fds_written();
+    let [fds] = written.as_slice() else {
+        panic!("{written:?}");
+    };
+    let [fd] = fds.as_slice() else {
+        panic!("{fds:?}");
+    };
+    check_pipe(fd, read);
 }
 
 /// Check that `fd` is of the write end of the pipe that `read` is the read end of.

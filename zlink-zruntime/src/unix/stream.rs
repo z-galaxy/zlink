@@ -225,30 +225,22 @@ where
         buf: &[u8],
         fds: &[impl AsFd],
         #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // Convert to BorrowedFd for rustix.
-        let borrowed_fds: Vec<BorrowedFd<'_>> = fds.iter().map(|f| f.as_fd()).collect();
+        let fds: Vec<BorrowedFd<'_>> = fds.iter().map(|f| f.as_fd()).collect();
 
-        let mut pos = 0;
-        while pos < buf.len() {
-            // Use FDs on first write, empty slice on subsequent writes.
-            let fds_to_send = if pos == 0 { &borrowed_fds[..] } else { &[] };
-
-            pos += self
-                .0
-                .write_with(|stream| {
-                    crate::unix_utils::sendmsg(
-                        stream,
-                        &buf[pos..],
-                        fds_to_send,
-                        #[cfg(target_os = "linux")]
-                        creds,
-                    )
-                })
-                .await?;
-        }
-
-        Ok(())
+        self.0
+            .write_with(|stream| {
+                crate::unix_utils::sendmsg(
+                    stream,
+                    buf,
+                    &fds,
+                    #[cfg(target_os = "linux")]
+                    creds,
+                )
+            })
+            .await
+            .map_err(Into::into)
     }
 }
 

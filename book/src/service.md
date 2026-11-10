@@ -305,7 +305,7 @@ where
         let (_read, mut write) = socket.split();
         let fds = &[] as &[OwnedFd];
         let _ = write
-            .write(&self.0, fds, #[cfg(target_os = "linux")] None)
+            .write_all(&self.0, fds, #[cfg(target_os = "linux")] None)
             .await;
     }
 }
