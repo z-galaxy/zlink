@@ -1,6 +1,6 @@
 [package]
 name = "zlink-names"
-version = "0.8.0"
+version = "0.9.0"
 description = "Varlink names and their validation"
 edition.workspace = true
 rust-version.workspace = true

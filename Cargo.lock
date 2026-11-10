@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "zlink"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "colored 3.0.0",
@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-codegen"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "doc-comment",
@@ -2252,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "base64",
  "bytes",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-idl"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "winnow",
  "zlink-names",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-macros"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "futures-util",
  "proc-macro2",
@@ -2312,7 +2312,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-names"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-smol"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-broadcast",
  "async-channel",
@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-tokio"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "futures-util",
  "pin-project-lite",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "zlink-zruntime"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "futures-core",
  "pin-project-lite",
