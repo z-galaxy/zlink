@@ -113,7 +113,7 @@ features = ["testing"]
 # And take a connection over on a local zruntime runtime, from the git source of zlink-zruntime's.
 [target.'cfg(target_os = "linux")'.dev-dependencies.zruntime]
 git = "https://github.com/z-galaxy/zruntime"
-branch = "ai/jolly-rubin-3tk4qc"
+branch = "main"
 default-features = false
 features = ["runtime"]
 
