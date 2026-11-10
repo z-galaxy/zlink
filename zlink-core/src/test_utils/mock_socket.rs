@@ -103,6 +103,14 @@ impl MockSocket {
 
         self
     }
+
+    /// Have the write half take `len` bytes and then no more (see
+    /// [`MockWriteHalf::stalling_after`]).
+    pub fn stalling_after(mut self, len: usize) -> Self {
+        self.write = self.write.stalling_after(len);
+
+        self
+    }
 }
 
 impl Socket for MockSocket {
@@ -231,6 +239,8 @@ pub struct MockWriteHalf {
     chunk: Option<usize>,
     /// How much the next write takes before it waits for room.
     room: usize,
+    /// Whether a write that waits for room waits forever.
+    stalls: bool,
     #[cfg(feature = "std")]
     fds_written: RefCell<Vec<Vec<OwnedFd>>>,
     /// Where each list of `fds_written` went, in `written`.
@@ -247,6 +257,7 @@ impl MockWriteHalf {
             written: Vec::new(),
             chunk: None,
             room: 0,
+            stalls: false,
             #[cfg(feature = "std")]
             fds_written: RefCell::new(Vec::new()),
             #[cfg(feature = "std")]
@@ -262,6 +273,16 @@ impl MockWriteHalf {
     pub fn writing_in_chunks(mut self, chunk: usize) -> Self {
         self.chunk = Some(chunk);
         self.room = chunk;
+
+        self
+    }
+
+    /// Have the write half take `len` bytes and then no more, as a socket does whose peer stops
+    /// reading: the write after them waits for room forever, without ever waking its task.
+    pub fn stalling_after(mut self, len: usize) -> Self {
+        self.chunk = Some(len);
+        self.room = len;
+        self.stalls = true;
 
         self
     }
@@ -315,6 +336,9 @@ impl WriteHalf for MockWriteHalf {
         let len = match self.chunk {
             Some(chunk) => {
                 if self.room == 0 {
+                    if self.stalls {
+                        core::future::pending::<()>().await;
+                    }
                     wait_for_room().await;
                     self.room = chunk;
                 }

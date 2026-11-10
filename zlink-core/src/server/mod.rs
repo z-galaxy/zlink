@@ -49,9 +49,8 @@ where
     ///
     /// These are connections that something else served before, such as a server that stopped
     /// (see [`Server::run_until`]), which may have read method calls off them that it didn't
-    /// handle: the server handles those first. It writes what they have left to write before
-    /// anything else, if anything, as a connection that was handed over in the middle of writing a
-    /// reply has.
+    /// handle: the server handles those first. Before anything else, it writes what they still have
+    /// to write, such as the rest of a reply that a stopped server interrupted.
     pub fn with_connections<Connections>(mut self, connections: Connections) -> Self
     where
         Connections: IntoIterator<Item = Connection<Listener::Socket>>,
@@ -99,16 +98,22 @@ where
 
     /// Run the server until `stop` completes, and then stop it gracefully.
     ///
-    /// The server serves its connections as [`Server::run`] does until `stop` completes, which it
-    /// only looks at between method calls, so that the calls under way get their replies first.
-    /// It then stops accepting connections and taking method calls, and gives back its listener,
-    /// its service and the connections that it served, each between two method calls (see
-    /// [`Stopped`]). Dropping them shuts the server down, and serving them on carries on from
-    /// where it stopped, as another server does that is given the connections (see
-    /// [`Server::with_connections`]). The method calls that the server read but didn't handle stay
-    /// in their connections, for whoever serves them on. The connections whose replies still
-    /// stream, and those that were upgraded to another protocol, are closed, as nothing generic can
-    /// carry on with them.
+    /// The server serves its connections as [`Server::run`] does until `stop` completes. It checks
+    /// `stop` between method calls, so that the calls in progress are handled first, and while it
+    /// waits to write to a client, so that a client that doesn't read its replies can't block the
+    /// shutdown. It then stops accepting connections and reading method calls, and returns its
+    /// listener, its service and the connections that it served, each between two method calls
+    /// (see [`Stopped`]). Dropping them shuts the server down, and serving them again continues
+    /// from where it stopped, as another server does that is given the connections (see
+    /// [`Server::with_connections`]): the method calls that the server read but didn't handle stay
+    /// in their connections, and so does the unwritten part of an interrupted reply, which is
+    /// written first. The connections whose replies still stream, and those that were upgraded to
+    /// another protocol, are closed, as nothing generic can continue them.
+    ///
+    /// A write is interrupted whenever it has to wait for the client, as it does for a reply larger
+    /// than the socket buffer, even if the client is reading. Dropping the connection then loses
+    /// the rest of the reply, so flush the connections before dropping them (see
+    /// [`Connection::flush`]), with a timeout of your choice.
     ///
     /// If the listener stops accepting connections, the server returns once it's done with all of
     /// them, as [`Server::run`] does, without any connection to give back.
@@ -120,13 +125,24 @@ where
     where
         Stop: Future<Output = ()>,
     {
+        let stop = pin!(stop);
+        let mut stop = stop.fuse();
+        let mut stopped = false;
         let mut listener = self.listener.take().unwrap();
         let mut connections = Vec::with_capacity(self.connections.len());
         for mut conn in core::mem::take(&mut self.connections) {
-            match conn.flush().await {
-                Ok(()) => connections.push(conn),
-                Err(e) => warn!("Error writing to client {}: {:?}", conn.id(), e),
+            // Once stopped, the server returns the remaining connections as they are.
+            if !stopped {
+                match unless_stopped(conn.flush(), &mut stop).await {
+                    Some(Ok(())) => (),
+                    Some(Err(e)) => {
+                        warn!("Error writing to client {}: {:?}", conn.id(), e);
+                        continue;
+                    }
+                    None => stopped = true,
+                }
             }
+            connections.push(conn);
         }
         let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
         let mut reply_stream_futures = Vec::new();
@@ -138,10 +154,8 @@ where
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
         let mut listener_closed = false;
-        let stop = pin!(stop);
-        let mut stop = stop.fuse();
 
-        loop {
+        while !stopped {
             if listener_closed
                 && connections.is_empty()
                 && reply_streams.is_empty()
@@ -191,7 +205,6 @@ where
                 upgrade_select_all.push(future);
             }
 
-            let mut stopped = false;
             futures_util::select_biased! {
                 // 0. Stop, which comes first so that nothing more is taken once it's time to.
                 () = stop => stopped = true,
@@ -219,12 +232,32 @@ where
 
                         let next = match call {
                             Ok(call) => {
+                                let conn = &mut connections[idx];
                                 #[cfg(feature = "std")]
-                                let handling = self.handle_call(call, &mut connections[idx], fds);
+                                let handling = self.handle_call(call, conn, fds);
                                 #[cfg(not(feature = "std"))]
-                                let handling = self.handle_call(call, &mut connections[idx]);
+                                let handling = self.handle_call(call, conn);
                                 match while_serving_upgrades(handling, &mut upgrades).await {
-                                    Ok(next) => Some(next),
+                                    Ok(next) => {
+                                        // Write the reply, unless the server stops first, so that
+                                        // a client that doesn't read it can't block the shutdown.
+                                        let writing = unless_stopped(conn.flush(), &mut stop);
+                                        match while_serving_upgrades(writing, &mut upgrades).await {
+                                            Some(Ok(())) => Some(next),
+                                            Some(Err(e)) => {
+                                                warn!(
+                                                    "Error writing to client {}: {:?}",
+                                                    conn.id(),
+                                                    e
+                                                );
+                                                None
+                                            }
+                                            None => {
+                                                stopped = true;
+                                                Some(next)
+                                            }
+                                        }
+                                    }
                                     Err(e) => {
                                         warn!("Error writing to connection: {:?}", e);
                                         None
@@ -243,12 +276,22 @@ where
                                 let conn = connections.swap_remove(idx);
                                 reply_streams.push(ReplyStream::new(stream, conn));
                             }
-                            Some(NextStep::Upgrade(state)) => {
+                            // The socket is handed over only once the reply that confirms the
+                            // upgrade was written in full.
+                            Some(NextStep::Upgrade(state)) if !stopped => {
                                 let conn = connections.swap_remove(idx);
                                 let id = conn.id();
                                 trace!("Client {} upgraded, handing over its socket", id);
                                 let socket = Upgraded::new(conn);
                                 upgrades.push((id, Box::pin(state.take_over(socket))));
+                            }
+                            Some(NextStep::Upgrade(_)) => {
+                                let conn = connections.swap_remove(idx);
+                                debug!(
+                                    "Stopped before confirming the upgrade of client {}, closing \
+                                     it",
+                                    conn.id()
+                                );
                             }
                             Some(NextStep::Close) | None => {
                                 connections.swap_remove(idx);
@@ -280,10 +323,16 @@ where
                                     Err(error) => conn.send_error(&error).await,
                                 }
                             };
-                            let send_result = while_serving_upgrades(sending, &mut upgrades).await;
-                            if let Err(e) = send_result {
-                                warn!("Error writing to client {}: {:?}", id, e);
-                                reply_streams.swap_remove(idx);
+                            // Write the reply, unless the server stops first, which closes the
+                            // connection anyway.
+                            let sending = unless_stopped(sending, &mut stop);
+                            match while_serving_upgrades(sending, &mut upgrades).await {
+                                Some(Ok(())) => (),
+                                Some(Err(e)) => {
+                                    warn!("Error writing to client {}: {:?}", id, e);
+                                    reply_streams.swap_remove(idx);
+                                }
+                                None => stopped = true,
                             }
                         }
                         None => {
@@ -294,20 +343,18 @@ where
                     }
                 }
             }
-            if stopped {
-                debug!(
-                    "Stopping the server, giving back {} connections and closing {} that stream \
-                     replies or were upgraded",
-                    connections.len(),
-                    reply_streams.len() + upgrades.len(),
-                );
-
-                break;
-            }
         }
         // The futures borrow the connections and the reply streams.
         read_futures.clear();
         reply_stream_futures.clear();
+        if stopped {
+            debug!(
+                "Stopping the server, giving back {} connections and closing {} that stream \
+                 replies or were upgraded",
+                connections.len(),
+                reply_streams.len() + upgrades.len(),
+            );
+        }
 
         Ok(Stopped {
             listener,
@@ -316,6 +363,7 @@ where
         })
     }
 
+    /// Handle `call`, enqueuing its reply, if any, for the server to write.
     async fn handle_call(
         &mut self,
         call: Call<Service::MethodCall<'_>>,
@@ -338,9 +386,9 @@ where
             MethodReply::Upgrade(params, state) => (params, Some(state)),
             MethodReply::Error(err) => {
                 #[cfg(feature = "std")]
-                conn.send_error(&err, reply_fds).await?;
+                conn.enqueue(&err, reply_fds)?;
                 #[cfg(not(feature = "std"))]
-                conn.send_error(&err).await?;
+                conn.enqueue(&err)?;
 
                 return Ok(NextStep::Receive);
             }
@@ -353,9 +401,9 @@ where
 
         let reply = Reply::new(params).set_continues(Some(false));
         #[cfg(feature = "std")]
-        conn.send_reply(&reply, reply_fds).await?;
+        conn.enqueue(&reply, reply_fds)?;
         #[cfg(not(feature = "std"))]
-        conn.send_reply(&reply).await?;
+        conn.enqueue(&reply)?;
 
         // A successful reply confirms an upgrade, whether or not it comes with the state to take
         // the connection over with.
@@ -394,8 +442,9 @@ where
     pub listener: Listener,
     /// The service.
     pub service: Service,
-    /// The connections that the server served, each between two method calls, with the method
-    /// calls that the server read off them but didn't handle, if any.
+    /// The connections that the server served, each between two method calls. They keep the method
+    /// calls that the server read but didn't handle, and the unwritten part of an interrupted
+    /// reply (see [`Server::run_until`]).
     pub connections: Vec<Connection<Listener::Socket>>,
 }
 
@@ -430,6 +479,26 @@ where
         }
 
         Poll::Pending
+    })
+    .await
+}
+
+/// The output of `future`, unless `stop` completes first.
+///
+/// `future` is polled first, so that it completes if it doesn't have to wait.
+async fn unless_stopped<Fut, Stop>(future: Fut, stop: &mut Stop) -> Option<Fut::Output>
+where
+    Fut: Future,
+    Stop: Future<Output = ()> + Unpin,
+{
+    let mut future = pin!(future);
+
+    poll_fn(|cx| {
+        if let Poll::Ready(output) = future.as_mut().poll(cx) {
+            return Poll::Ready(Some(output));
+        }
+
+        stop.poll_unpin(cx).map(|()| None)
     })
     .await
 }
@@ -469,7 +538,7 @@ mod tests {
     use core::{
         cell::{Cell, RefCell},
         future::{Future, poll_fn},
-        pin::pin,
+        pin::{Pin, pin},
         task::{Context, Poll, Waker},
     };
 
@@ -623,6 +692,123 @@ mod tests {
                 "{:?}: {:?}",
                 core::str::from_utf8(call),
                 stopped.connections
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_cuts_off_a_reply_that_waits_for_its_client() {
+        // The client reads 4 bytes of the reply and makes room for more after a while, by which
+        // time the stop that the call raised has completed.
+        let reads: [&[u8]; 1] = [b"{\"method\":\"org.example.Count\"}\0"];
+        let socket = MockSocket::with_reads(
+            &reads,
+            #[cfg(feature = "std")]
+            Vec::new(),
+        )
+        .writing_in_chunks(4);
+        let calls = Rc::new(Calls::stopping_after(1));
+        let server = Server::new(ReadyListener::new(socket), Stopping(calls.clone()));
+        let stopped = server.run_until(calls.stop.raised()).await.unwrap();
+        let [mut conn] = <[_; 1]>::try_from(stopped.connections).unwrap();
+        assert_eq!(conn.write().write_half().written_data(), b"{\"co");
+
+        // The connection has the rest of the reply to write, which goes once.
+        conn.flush().await.unwrap();
+        assert_eq!(
+            conn.write().write_half().written_data(),
+            b"{\"continues\":false}\0"
+        );
+    }
+
+    #[test]
+    fn stop_cuts_off_a_streamed_reply_that_its_client_never_reads() {
+        // The stream raises the stop as it yields its reply, which the client reads 4 bytes of and
+        // no more.
+        let reads: [&[u8]; 1] = [b"{\"method\":\"org.example.StreamAndStop\",\"more\":true}\0"];
+        let socket = MockSocket::with_reads(
+            &reads,
+            #[cfg(feature = "std")]
+            Vec::new(),
+        )
+        .stalling_after(4);
+        let calls = Rc::new(Calls::stopping_after(0));
+        let server = Server::new(ReadyListener::new(socket), Stopping(calls.clone()));
+
+        // Nothing wakes the server once the client stops reading, so it stops in as many polls as
+        // it takes to get there, or never.
+        let mut run = pin!(server.run_until(calls.stop.raised()));
+        let mut cx = Context::from_waker(Waker::noop());
+        for _ in 0..100 {
+            if let Poll::Ready(stopped) = run.as_mut().poll(&mut cx) {
+                // The connection whose replies stream is closed.
+                assert!(stopped.unwrap().connections.is_empty());
+
+                return;
+            }
+        }
+        panic!("the server didn't stop");
+    }
+
+    #[tokio::test]
+    async fn stop_cuts_off_what_given_connections_have_left_to_write() {
+        // Each connection has a reply left to write, which its client reads 4 bytes of and makes
+        // room for more of after a while, by which time the stop has completed.
+        let connections = [(); 2].map(|()| {
+            let mut conn = Connection::new(MockSocket::with_responses(&[]).writing_in_chunks(4));
+            let reply = Reply::<()>::new(None).set_continues(Some(false));
+            #[cfg(feature = "std")]
+            conn.enqueue(&reply, Vec::new()).unwrap();
+            #[cfg(not(feature = "std"))]
+            conn.enqueue(&reply).unwrap();
+
+            conn
+        });
+        let server = Server::new(Sockets(None), Stopping(Rc::new(Calls::stopping_after(0))))
+            .with_connections(connections);
+        let stopped = server.run_until(core::future::ready(())).await.unwrap();
+
+        // The server stopped as it waited to write the rest of the first reply, and gave the
+        // second connection back as it was.
+        let mut connections = stopped.connections;
+        let written: Vec<_> = connections
+            .iter()
+            .map(|conn| conn.write().write_half().written_data())
+            .collect();
+        assert_eq!(written, [&b"{\"co"[..], b""]);
+        for conn in &mut connections {
+            conn.flush().await.unwrap();
+            assert_eq!(
+                conn.write().write_half().written_data(),
+                b"{\"continues\":false}\0"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn upgrade_is_taken_over_once_its_reply_went_in_full() {
+        // The reply that confirms the upgrade goes in full, and the server then stops, closing the
+        // upgraded connection, or the client reads 4 bytes of it and makes room for more after a
+        // while, by which time the stop has completed, and the server closes the connection without
+        // handing it over.
+        for chunked in [false, true] {
+            let reads: [&[u8]; 1] = [b"{\"method\":\"org.example.Upgrade\",\"upgrade\":true}\0"];
+            let mut socket = MockSocket::with_reads(
+                &reads,
+                #[cfg(feature = "std")]
+                Vec::new(),
+            );
+            if chunked {
+                socket = socket.writing_in_chunks(4);
+            }
+            let calls = Rc::new(Calls::stopping_after(1));
+            let server = Server::new(ReadyListener::new(socket), Stopping(calls.clone()));
+            let stopped = server.run_until(calls.stop.raised()).await.unwrap();
+            assert!(stopped.connections.is_empty(), "chunked: {chunked}");
+            assert_eq!(
+                calls.taken_over.get(),
+                usize::from(!chunked),
+                "chunked: {chunked}"
             );
         }
     }
@@ -854,11 +1040,12 @@ mod tests {
     }
 
     // How many calls `Stopping` handled, and the flag that it raises once it handled as many as it
-    // was told to.
+    // was told to, and how many upgraded connections it took over.
     #[derive(Debug)]
     struct Calls {
         handled: Cell<usize>,
         counted: Cell<usize>,
+        taken_over: Cell<usize>,
         stop_after: usize,
         stop: Flag,
     }
@@ -868,14 +1055,15 @@ mod tests {
             Self {
                 handled: Cell::new(0),
                 counted: Cell::new(0),
+                taken_over: Cell::new(0),
                 stop_after,
                 stop: Flag::default(),
             }
         }
     }
 
-    // Counts the calls that it handles, streams replies that never come, and parks the upgraded
-    // connections.
+    // Counts the calls that it handles, streams replies that never come, or a single one that
+    // raises the stop, and parks the upgraded connections.
     #[derive(Debug)]
     struct Stopping(Rc<Calls>);
 
@@ -886,6 +1074,8 @@ mod tests {
         Count,
         #[serde(rename = "org.example.Stream")]
         Stream,
+        #[serde(rename = "org.example.StreamAndStop")]
+        StreamAndStop,
         #[serde(rename = "org.example.Upgrade")]
         Upgrade,
     }
@@ -898,7 +1088,7 @@ mod tests {
             Self: 'ser;
         type ReplyStreamParams = ();
         type ReplyStreamError = Infallible;
-        type ReplyStream = futures_util::stream::Pending<ReplyStreamItem<(), Infallible>>;
+        type ReplyStream = Replies;
         type ReplyError<'ser>
             = varlink_service::Error<'ser>
         where
@@ -922,8 +1112,9 @@ mod tests {
 
                     MethodReply::Single(None)
                 }
-                StoppingMethod::Stream => MethodReply::Multi(futures_util::stream::pending()),
-                StoppingMethod::Upgrade => MethodReply::Upgrade(None, Parked),
+                StoppingMethod::Stream => MethodReply::Multi(Replies(None)),
+                StoppingMethod::StreamAndStop => MethodReply::Multi(Replies(Some(calls.clone()))),
+                StoppingMethod::Upgrade => MethodReply::Upgrade(None, Parked(calls.clone())),
             };
 
             #[cfg(feature = "std")]
@@ -933,13 +1124,42 @@ mod tests {
         }
     }
 
-    // Takes over an upgraded connection, and keeps it until it's dropped.
+    // The replies that a call of `Stopping` streams: a single one, which raises the stop of the
+    // calls as it comes, and then none, ever.
     #[derive(Debug)]
-    struct Parked;
+    struct Replies(Option<Rc<Calls>>);
+
+    impl futures_util::Stream for Replies {
+        type Item = ReplyStreamItem<(), Infallible>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let Some(calls) = self.0.take() else {
+                return Poll::Pending;
+            };
+            calls.stop.raise();
+            let reply = Ok(Reply::new(None).set_continues(Some(true)));
+
+            #[cfg(feature = "std")]
+            return Poll::Ready(Some((reply, Vec::new())));
+            #[cfg(not(feature = "std"))]
+            return Poll::Ready(Some(reply));
+        }
+    }
+
+    // Takes over an upgraded connection, counting it among those of the calls, and keeps it until
+    // it's dropped.
+    #[derive(Debug)]
+    struct Parked(Rc<Calls>);
 
     impl TakeOver<MockSocket> for Parked {
-        async fn take_over(self, _socket: Upgraded<MockSocket>) {
-            core::future::pending().await
+        fn take_over(self, socket: Upgraded<MockSocket>) -> impl Future<Output = ()> {
+            let calls = &self.0;
+            calls.taken_over.set(calls.taken_over.get() + 1);
+
+            async move {
+                let _socket = socket;
+                core::future::pending().await
+            }
         }
     }
 

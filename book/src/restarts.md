@@ -7,23 +7,37 @@ over to the next one, which goes on with them from where they were.
 ## Stopping gracefully
 
 `Server::run_until` runs a server until a future of yours completes, such as one that waits for
-`SIGTERM`. It only looks at it between method calls, so the calls under way get their replies
-first. The server then accepts no more connections, nor takes any more method calls, and gives back
-its listener, its service and its connections, as `zlink::Stopped`:
+`SIGTERM`. It checks the future between method calls, so the calls in progress are handled first,
+and while it waits to write to a client, so a client that doesn't read its replies can't block the
+shutdown. The server then stops accepting connections and reading method calls, and returns its
+listener, its service and its connections, as `zlink::Stopped`. If it interrupted a reply that the
+socket couldn't take at once, the unwritten part stays in the connection, which writes it when it's
+flushed. A service that shuts down can give its clients a moment to read it:
 
 ```rust,noplayground
 # async fn example<Svc: zlink::Service<zlink::tokio::unix::Stream>>(
 #     server: zlink::Server<zlink::tokio::unix::Listener, Svc>,
 #     sigterm: impl Future<Output = ()>,
 # ) -> Result<(), Box<dyn std::error::Error>> {
-// What the server gives back shuts it down as it's dropped, as it is here.
-let _ = server.run_until(sigterm).await?;
+use std::time::Duration;
+
+// What the server returns shuts it down when it's dropped, as it is here once the clients had a
+// second at most to read the rest of their replies.
+let mut stopped = server.run_until(sigterm).await?;
+let flushes = async {
+    for conn in &mut stopped.connections {
+        // A client that went away has nothing left to read.
+        let _ = conn.flush().await;
+    }
+};
+let _ = tokio::time::timeout(Duration::from_secs(1), flushes).await;
 # Ok(())
 # }
 ```
 
-A server that is given connections (`Server::with_connections`) goes on with them from where they
-were, starting with the method calls that were read off them but not handled.
+A server that is given connections (`Server::with_connections`) continues them from where they
+were: it first writes what they still have to write, and then handles the method calls that were
+read but not handled.
 
 ## Restarting under systemd
 
@@ -37,6 +51,8 @@ passes changes the environment, which no other thread may read or write meanwhil
 takes them before its runtime starts any:
 
 ```rust,noplayground
+use std::time::Duration;
+
 use zlink::{Connection, Server, Stopped, connection::Handover, tokio::unix::Listener};
 use zoter::{Passed, Store};
 
@@ -84,9 +100,17 @@ async fn run(
         store.notifier().notify("READY=1")?;
     }
 
-    let Stopped { connections, .. } = server.run_until(sigterm).await?;
-    // Without a store that takes a hand-over, the service shuts down as it does without systemd.
+    let Stopped { mut connections, .. } = server.run_until(sigterm).await?;
+    // Without a store that takes a hand-over, the service shuts down as it does without systemd,
+    // giving its clients a second at most to read the rest of their replies.
     let Some(handover) = store.and_then(|store| store.handover().ok()) else {
+        let flushes = async {
+            for conn in &mut connections {
+                let _ = conn.flush().await;
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(1), flushes).await;
+
         return Ok(());
     };
     let handovers = connections
