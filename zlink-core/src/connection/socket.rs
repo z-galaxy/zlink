@@ -21,6 +21,14 @@ pub trait Socket: core::fmt::Debug {
 
     /// Split the socket into read and write halves.
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf);
+
+    /// Join `read` and `write`, the halves that [`Socket::split`] split a socket into, back into
+    /// it (the opposite of [`Socket::split`]).
+    ///
+    /// It fails if the halves aren't of one socket.
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self>
+    where
+        Self: Sized;
 }
 
 /// The read half of a socket.
@@ -128,6 +136,10 @@ pub mod impl_for_doc {
 
         fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
             (ReadHalf, WriteHalf)
+        }
+
+        fn join(_read: Self::ReadHalf, _write: Self::WriteHalf) -> crate::Result<Self> {
+            Ok(Socket)
         }
     }
 

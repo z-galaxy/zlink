@@ -94,6 +94,17 @@ where
 
         (ReadHalf(read), WriteHalf(write))
     }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Result<Self> {
+        let stream = read.0.reunite(write.0).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the halves are of two different sockets",
+            )
+        })?;
+
+        Ok(Self(stream))
+    }
 }
 
 impl<M> TryFrom<unix::UnixStream<M>> for Stream<M>
@@ -256,6 +267,29 @@ mod tests {
         let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
 
         check_open(ours, theirs);
+    }
+
+    /// The socket that its halves are joined back into is open both ways, as a std socket.
+    #[test]
+    fn halves_join_back_into_an_open_socket() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let (read, write) = Stream::try_from(ours).unwrap().split();
+        let ours = Stream::join(read, write).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
+
+    /// The halves of two different sockets aren't joined.
+    #[test]
+    fn halves_of_two_sockets_are_not_joined() {
+        let (read, _) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+            .unwrap()
+            .split();
+        let (_, write) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+            .unwrap()
+            .split();
+
+        assert!(Stream::join(read, write).is_err());
     }
 
     /// Connections on a shared runtime, and connecting, must be usable from multi-threaded

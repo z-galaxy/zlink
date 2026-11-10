@@ -406,6 +406,10 @@ impl<R: ReadHalf, W: WriteHalf> Socket for TrackingSocket<R, W> {
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
         (self.read, self.write)
     }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self> {
+        Ok(Self { read, write })
+    }
 }
 
 /// Write half wrapper for testing that provides access to MockWriteHalf.

@@ -68,6 +68,11 @@ impl Socket for UartSocket {
         // hand out the two directions of your transport
         # todo!()
     }
+
+    fn join(read: UartRead, write: UartWrite) -> zlink_core::Result<Self> {
+        // put the two directions back together
+        # todo!()
+    }
 }
 
 impl ReadHalf for UartRead {
