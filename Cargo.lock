@@ -2377,7 +2377,7 @@ dependencies = [
 [[package]]
 name = "zruntime"
 version = "0.2.2"
-source = "git+https://github.com/z-galaxy/zruntime?branch=ai%2Fjolly-rubin-3tk4qc#82a573035dc3a92b9af8e444f2c7f299a4d02a1c"
+source = "git+https://github.com/z-galaxy/zruntime?branch=main#33da7549a2c836c86193038a7ba950d7a72e3490"
 dependencies = [
  "futures-core",
  "futures-io",
