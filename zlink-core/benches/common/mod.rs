@@ -109,10 +109,10 @@ impl WriteHalf for BiPipeWriteHalf {
         #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
             &zlink_core::connection::PassedCredentials,
         >,
-    ) -> zlink_core::Result<()> {
+    ) -> zlink_core::Result<usize> {
         self.sender
             .send(buf.to_vec())
             .map_err(|_| zlink_core::Error::UnexpectedEof)?;
-        Ok(())
+        Ok(buf.len())
     }
 }

@@ -50,17 +50,21 @@ pub trait ReadHalf: core::fmt::Debug {
 
 /// The write half of a socket.
 pub trait WriteHalf: core::fmt::Debug {
-    /// Write to the socket.
+    /// Write as much of `buf` to the socket as it accepts at once.
     ///
-    /// The `fds` parameter contains file descriptors to send along with the data (std only).
+    /// It returns the number of bytes written, which can be fewer than `buf` holds. The `fds`
+    /// parameter contains file descriptors to send along with the data (std only).
     ///
     /// Notes for implementers:
     ///
-    /// * The returned future has the same requirements as that of [`ReadHalf::read`].
-    /// * The file descriptors must be sent along with the first byte of `buf`. If `buf` takes more
-    ///   than one `sendmsg` call to write, they are sent with the first one only. When there are
-    ///   file descriptors to pass, `buf` starts with the first byte of the message they belong to,
-    ///   in line with the [file descriptor passing] convention. Implementations for Unix domain
+    /// * The returned future has the same requirements as that of [`ReadHalf::read`]. To be cancel
+    ///   safe, it must write nothing if it's dropped before it completes, so it writes in a single
+    ///   operation, such as one `sendmsg` call.
+    /// * It waits until the socket accepts some of `buf`, and then writes at least one byte of it,
+    ///   unless `buf` is empty or the write fails.
+    /// * The file descriptors must be sent along with the first byte of `buf`. When there are file
+    ///   descriptors to pass, `buf` starts with the first byte of the message they belong to, in
+    ///   line with the [file descriptor passing] convention. Implementations for Unix domain
     ///   sockets can use the hidden `zlink_core::unix_utils::sendmsg` helper, which does that.
     ///
     /// [file descriptor passing]: crate::connection#file-descriptor-passing
@@ -71,7 +75,48 @@ pub trait WriteHalf: core::fmt::Debug {
         #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
             &crate::connection::PassedCredentials,
         >,
-    ) -> impl Future<Output = crate::Result<()>>;
+    ) -> impl Future<Output = crate::Result<usize>>;
+
+    /// Write all of `buf` to the socket, calling [`WriteHalf::write`] as many times as needed.
+    ///
+    /// The file descriptors are sent with the first call, along with the first byte of `buf`, and
+    /// the credentials with every call.
+    ///
+    /// Unlike that of [`WriteHalf::write`], the returned future isn't cancel safe: if it's dropped
+    /// before it completes, part of `buf` may have been written, with no way to tell how much.
+    fn write_all(
+        &mut self,
+        buf: &[u8],
+        #[cfg(feature = "std")] fds: &[impl AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
+    ) -> impl Future<Output = crate::Result<()>> {
+        async move {
+            let mut pos = 0;
+            while pos < buf.len() {
+                // The file descriptors go with the first byte alone.
+                #[cfg(feature = "std")]
+                let fds = if pos == 0 { fds } else { &fds[..0] };
+                let written = self
+                    .write(
+                        &buf[pos..],
+                        #[cfg(feature = "std")]
+                        fds,
+                        #[cfg(all(feature = "std", target_os = "linux"))]
+                        credentials,
+                    )
+                    .await?;
+                // A socket that accepts nothing would have us loop forever.
+                if written == 0 {
+                    return Err(crate::Error::SocketWrite);
+                }
+                pos += written;
+            }
+
+            Ok(())
+        }
+    }
 }
 
 /// A socket that is a Unix domain socket, which it can be given up as.
@@ -165,7 +210,7 @@ pub mod impl_for_doc {
             #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
                 &crate::connection::PassedCredentials,
             >,
-        ) -> crate::Result<()> {
+        ) -> crate::Result<usize> {
             unreachable!("This is only for doc tests")
         }
     }

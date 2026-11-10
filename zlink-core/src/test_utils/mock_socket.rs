@@ -92,14 +92,24 @@ impl MockSocket {
                 #[cfg(feature = "std")]
                 fds,
             },
-            write: MockWriteHalf {
-                written: Vec::new(),
-                #[cfg(feature = "std")]
-                fds_written: RefCell::new(Vec::new()),
-                #[cfg(all(feature = "std", target_os = "linux"))]
-                credentials_written: Vec::new(),
-            },
+            write: MockWriteHalf::new(),
         }
+    }
+
+    /// Have the write half write in chunks of `chunk` bytes (see
+    /// [`MockWriteHalf::writing_in_chunks`]).
+    pub fn writing_in_chunks(mut self, chunk: usize) -> Self {
+        self.write = self.write.writing_in_chunks(chunk);
+
+        self
+    }
+
+    /// Have the write half take `len` bytes and then no more (see
+    /// [`MockWriteHalf::stalling_after`]).
+    pub fn stalling_after(mut self, len: usize) -> Self {
+        self.write = self.write.stalling_after(len);
+
+        self
     }
 }
 
@@ -225,22 +235,56 @@ impl connection::socket::FetchPeerCredentials for MockReadHalf {
 #[doc(hidden)]
 pub struct MockWriteHalf {
     written: Vec<u8>,
+    /// How much a write takes before the next one waits for room, if it ever does.
+    chunk: Option<usize>,
+    /// How much the next write takes before it waits for room.
+    room: usize,
+    /// Whether a write that waits for room waits forever.
+    stalls: bool,
     #[cfg(feature = "std")]
     fds_written: RefCell<Vec<Vec<OwnedFd>>>,
+    /// Where each list of `fds_written` went, in `written`.
+    #[cfg(feature = "std")]
+    fd_positions: Vec<usize>,
     #[cfg(all(feature = "std", target_os = "linux"))]
     credentials_written: Vec<crate::connection::PassedCredentials>,
 }
 
 impl MockWriteHalf {
     /// Create a new mock write half.
-    #[cfg(feature = "std")]
     pub fn new() -> Self {
         Self {
             written: Vec::new(),
+            chunk: None,
+            room: 0,
+            stalls: false,
+            #[cfg(feature = "std")]
             fds_written: RefCell::new(Vec::new()),
+            #[cfg(feature = "std")]
+            fd_positions: Vec::new(),
             #[cfg(all(feature = "std", target_os = "linux"))]
             credentials_written: Vec::new(),
         }
+    }
+
+    /// Have the write half write in chunks of `chunk` bytes, as a socket does whose peer reads
+    /// slowly: it takes `chunk` bytes, and then has the write after them wait for room, waking its
+    /// task at once, before it takes `chunk` more.
+    pub fn writing_in_chunks(mut self, chunk: usize) -> Self {
+        self.chunk = Some(chunk);
+        self.room = chunk;
+
+        self
+    }
+
+    /// Have the write half take `len` bytes and then no more, as a socket does whose peer stops
+    /// reading: the write after them waits for room forever, without ever waking its task.
+    pub fn stalling_after(mut self, len: usize) -> Self {
+        self.chunk = Some(len);
+        self.room = len;
+        self.stalls = true;
+
+        self
     }
 
     /// Get all data that has been written to this mock.
@@ -260,6 +304,13 @@ impl MockWriteHalf {
         self.fds_written.borrow().len()
     }
 
+    /// Where each list of [`MockWriteHalf::fds_written`] went: the position of the byte that it
+    /// was written with, in [`MockWriteHalf::written_data`] (std only).
+    #[cfg(feature = "std")]
+    pub fn fd_positions(&self) -> &[usize] {
+        &self.fd_positions
+    }
+
     /// All credentials that have been written.
     #[cfg(all(feature = "std", target_os = "linux"))]
     pub fn credentials_written(&self) -> &[crate::connection::PassedCredentials] {
@@ -267,7 +318,6 @@ impl MockWriteHalf {
     }
 }
 
-#[cfg(feature = "std")]
 impl Default for MockWriteHalf {
     fn default() -> Self {
         Self::new()
@@ -282,8 +332,23 @@ impl WriteHalf for MockWriteHalf {
         #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
             &crate::connection::PassedCredentials,
         >,
-    ) -> crate::Result<()> {
-        self.written.extend_from_slice(buf);
+    ) -> crate::Result<usize> {
+        let len = match self.chunk {
+            Some(chunk) => {
+                if self.room == 0 {
+                    if self.stalls {
+                        core::future::pending::<()>().await;
+                    }
+                    wait_for_room().await;
+                    self.room = chunk;
+                }
+                let len = buf.len().min(self.room);
+                self.room -= len;
+
+                len
+            }
+            None => buf.len(),
+        };
 
         #[cfg(feature = "std")]
         {
@@ -300,6 +365,7 @@ impl WriteHalf for MockWriteHalf {
                     })
                     .collect::<crate::Result<Vec<_>>>()?;
                 self.fds_written.borrow_mut().push(owned_fds);
+                self.fd_positions.push(self.written.len());
             }
 
             #[cfg(target_os = "linux")]
@@ -314,9 +380,26 @@ impl WriteHalf for MockWriteHalf {
                     ));
             }
         }
+        self.written.extend_from_slice(&buf[..len]);
 
-        Ok(())
+        Ok(len)
     }
+}
+
+/// Wait once, waking the task at once, as a write does for room in a socket that its peer makes
+/// room in as it reads.
+async fn wait_for_room() {
+    let mut waited = false;
+    core::future::poll_fn(|cx| {
+        if waited {
+            return core::task::Poll::Ready(());
+        }
+        waited = true;
+        cx.waker().wake_by_ref();
+
+        core::task::Poll::Pending
+    })
+    .await
 }
 
 /// Mock write half that asserts the expected write length.
@@ -375,7 +458,7 @@ impl WriteHalf for TestWriteHalf {
         #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
             &crate::connection::PassedCredentials,
         >,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<usize> {
         assert_eq!(buf.len(), self.expected_len);
 
         #[cfg(feature = "std")]
@@ -390,7 +473,7 @@ impl WriteHalf for TestWriteHalf {
             self.write_count += 1;
         }
 
-        Ok(())
+        Ok(buf.len())
     }
 }
 
@@ -424,14 +507,14 @@ impl CountingWriteHalf {
 impl WriteHalf for CountingWriteHalf {
     async fn write(
         &mut self,
-        _buf: &[u8],
+        buf: &[u8],
         #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
         #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
             &crate::connection::PassedCredentials,
         >,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<usize> {
         self.count += 1;
-        Ok(())
+        Ok(buf.len())
     }
 }
 
@@ -485,6 +568,28 @@ mod tests {
         assert_eq!(write.fd_write_count(), 1);
         assert_eq!(write.fds_written().len(), 1);
         assert_eq!(write.fds_written()[0].len(), 1);
+    }
+
+    #[tokio::test]
+    async fn write_all_writes_in_as_many_writes_as_it_takes() {
+        use std::os::unix::net::UnixStream;
+
+        let mut write = MockWriteHalf::new().writing_in_chunks(3);
+        let (r1, _w1) = UnixStream::pair().unwrap();
+
+        write
+            .write_all(
+                b"0123456789",
+                &[r1.as_fd()],
+                #[cfg(target_os = "linux")]
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(write.written_data(), b"0123456789");
+        // The file descriptors go with the first byte alone.
+        assert_eq!(write.fd_positions(), [0]);
     }
 
     #[tokio::test]

@@ -141,46 +141,35 @@ impl socket::WriteHalf for WriteHalf {
         buf: &[u8],
         fds: &[impl AsFd],
         #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         use std::{future::poll_fn, task::Poll};
 
         // Convert to BorrowedFd for rustix.
-        let borrowed_fds: Vec<BorrowedFd<'_>> = fds.iter().map(|f| f.as_fd()).collect();
+        let fds: Vec<BorrowedFd<'_>> = fds.iter().map(|f| f.as_fd()).collect();
 
-        let mut pos = 0;
-        while pos < buf.len() {
-            // Use FDs on first write, empty slice on subsequent writes.
-            let fds_to_send = if pos == 0 { &borrowed_fds[..] } else { &[] };
-
-            let n: usize = poll_fn(|cx| {
-                loop {
-                    let stream: &UnixStream = self.0.as_ref();
-                    match stream.try_io(tokio::io::Interest::WRITABLE, || {
-                        crate::unix_utils::sendmsg(
-                            stream,
-                            &buf[pos..],
-                            fds_to_send,
-                            #[cfg(target_os = "linux")]
-                            creds,
-                        )
-                    }) {
-                        Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            match stream.poll_write_ready(cx) {
-                                Poll::Pending => return Poll::Pending,
-                                Poll::Ready(res) => res?,
-                            }
+        poll_fn(|cx| {
+            loop {
+                let stream: &UnixStream = self.0.as_ref();
+                match stream.try_io(tokio::io::Interest::WRITABLE, || {
+                    crate::unix_utils::sendmsg(
+                        stream,
+                        buf,
+                        &fds,
+                        #[cfg(target_os = "linux")]
+                        creds,
+                    )
+                }) {
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        match stream.poll_write_ready(cx) {
+                            Poll::Pending => return Poll::Pending,
+                            Poll::Ready(res) => res?,
                         }
-                        Err(e) => return Poll::Ready(Err(e.into())),
                     }
+                    v => return Poll::Ready(v.map_err(Into::into)),
                 }
-            })
-            .await?;
-
-            pos += n;
-        }
-
-        Ok(())
+            }
+        })
+        .await
     }
 }
 

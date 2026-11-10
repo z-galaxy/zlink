@@ -711,6 +711,29 @@ where
     pub fn set_credentials(&mut self, credentials: Option<PassedCredentials>) {
         self.write.set_credentials(credentials);
     }
+
+    /// Enqueue `value`, such as a reply, along with `fds`, for the next flush to send.
+    #[cfg(feature = "server")]
+    pub(crate) fn enqueue<T>(
+        &mut self,
+        value: &T,
+        #[cfg(feature = "std")] fds: alloc::vec::Vec<std::os::fd::OwnedFd>,
+    ) -> Result<()>
+    where
+        T: Serialize + ?Sized + Debug,
+    {
+        trace!("connection {}: enqueuing: {:?}", self.id(), value);
+        #[cfg(all(feature = "std", target_os = "macos"))]
+        self.drain_held_fds();
+        #[cfg(feature = "std")]
+        {
+            self.write.enqueue(value, fds)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            self.write.enqueue(value)
+        }
+    }
 }
 
 impl<S> From<S> for Connection<S>

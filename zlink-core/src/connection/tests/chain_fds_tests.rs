@@ -424,7 +424,7 @@ impl WriteHalf for TrackingWriteHalf {
         buf: &[u8],
         fds: &[impl AsFd],
         #[cfg(target_os = "linux")] credentials: Option<&crate::connection::PassedCredentials>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         self.mock
             .write(
                 buf,
@@ -456,7 +456,7 @@ impl WriteHalf for WriteOperationTracker {
         buf: &[u8],
         fds: &[impl AsFd],
         #[cfg(target_os = "linux")] credentials: Option<&crate::connection::PassedCredentials>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // Record this write operation.
         self.operations.push(WriteOperation {
             data: buf.to_vec(),

@@ -19,12 +19,15 @@ use std::os::fd::OwnedFd;
 /// # Cancel safety
 ///
 /// All async methods of this type are cancel safe unless explicitly stated otherwise in its
-/// documentation.
+/// documentation. If the future of a method that writes is dropped before it completes, the
+/// unwritten data stays queued, and the next flush or send writes it first.
 #[derive(Debug)]
 pub struct WriteConnection<Write: WriteHalf> {
     pub(super) socket: Write,
     pub(super) buffer: Vec<u8>,
     pub(super) pos: usize,
+    /// How much of the queued data, `buffer[..pos]`, was written.
+    written: usize,
     id: usize,
     #[cfg(feature = "std")]
     pending_fds: VecDeque<MessageFds>,
@@ -46,6 +49,7 @@ impl<Write: WriteHalf> WriteConnection<Write> {
             id,
             buffer: alloc::vec![0; BUFFER_SIZE],
             pos: 0,
+            written: 0,
             #[cfg(feature = "std")]
             pending_fds: VecDeque::new(),
             #[cfg(all(feature = "std", target_os = "linux"))]
@@ -182,95 +186,16 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     }
 
     /// Send out the enqueued calls.
+    ///
+    /// If the returned future is dropped before it completes, the unwritten data stays queued, and
+    /// the next flush or send writes it first.
     pub async fn flush(&mut self) -> crate::Result<()> {
-        if self.pos == 0 {
-            return Ok(());
+        while self.written < self.pos {
+            self.write_next().await?;
         }
-
-        #[allow(unused_mut)]
-        let mut sent_pos = 0;
-
-        #[cfg(feature = "std")]
-        {
-            // While there are FDs, send one message at a time.
-            while !self.pending_fds.is_empty() {
-                // Get the first FD entry.
-                let pending = self.pending_fds.front().unwrap();
-                let fd_offset = pending.offset;
-                let msg_len = pending.len;
-
-                // If there are bytes before the FD message, send them first without FDs.
-                if sent_pos < fd_offset {
-                    trace!(
-                        "connection {}: flushing {} bytes before FD message",
-                        self.id,
-                        fd_offset - sent_pos
-                    );
-                    self.socket
-                        .write(
-                            &self.buffer[sent_pos..fd_offset],
-                            &[] as &[OwnedFd],
-                            #[cfg(target_os = "linux")]
-                            self.credentials.as_ref(),
-                        )
-                        .await?;
-                }
-
-                // Send this message with its FDs.
-                let msg_end = fd_offset + msg_len;
-                let MessageFds {
-                    fds,
-                    offset: _,
-                    len: _,
-                } = self.pending_fds.pop_front().unwrap();
-                trace!(
-                    "connection {}: flushing {} bytes with {} FDs",
-                    self.id,
-                    msg_len,
-                    fds.len()
-                );
-                self.socket
-                    .write(
-                        &self.buffer[fd_offset..msg_end],
-                        &fds,
-                        #[cfg(target_os = "linux")]
-                        self.credentials.as_ref(),
-                    )
-                    .await?;
-                sent_pos = msg_end;
-
-                // On macOS, keep sent FDs alive until the read half confirms receipt via
-                // `recvmsg`. See the comment on the `held_fds` field for details.
-                #[cfg(target_os = "macos")]
-                self.held_fds.push_back(fds);
-            }
-        }
-
-        // No more FDs, send all remaining bytes at once.
-        if sent_pos < self.pos {
-            trace!(
-                "connection {}: flushing {} bytes",
-                self.id,
-                self.pos - sent_pos
-            );
-            #[cfg(feature = "std")]
-            {
-                self.socket
-                    .write(
-                        &self.buffer[sent_pos..self.pos],
-                        &[] as &[OwnedFd],
-                        #[cfg(target_os = "linux")]
-                        self.credentials.as_ref(),
-                    )
-                    .await?;
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                self.socket.write(&self.buffer[sent_pos..self.pos]).await?;
-            }
-        }
-
         self.pos = 0;
+        self.written = 0;
+
         Ok(())
     }
 
@@ -320,9 +245,17 @@ impl<Write: WriteHalf> WriteConnection<Write> {
 
     /// Consume the connection into the write half of the socket, what was enqueued but not
     /// written, and the file descriptors of its messages, positioned in it.
+    ///
+    /// If a flush was cancelled after a partial write, only the unwritten part is included.
     #[cfg(all(feature = "handover", target_os = "linux"))]
     pub(super) fn into_unwritten(mut self) -> (Write, Vec<u8>, VecDeque<MessageFds>) {
         self.buffer.truncate(self.pos);
+        self.buffer.drain(..self.written);
+        // The FDs of a partly written message went with its first bytes, and its entry with them,
+        // so the remaining entries all start at or after `written`.
+        for msg in &mut self.pending_fds {
+            msg.offset -= self.written;
+        }
 
         (self.socket, self.buffer, self.pending_fds)
     }
@@ -389,6 +322,61 @@ impl<Write: WriteHalf> WriteConnection<Write> {
                 len: len + 1, // Include null terminator.
                 fds,
             });
+        }
+
+        Ok(())
+    }
+
+    /// Write part of the unwritten data: up to the next message with file descriptors, or that
+    /// message, with its file descriptors, if it's next.
+    async fn write_next(&mut self) -> crate::Result<()> {
+        let start = self.written;
+        #[cfg(feature = "std")]
+        let (end, fds, of_msg) = match self.pending_fds.front() {
+            // The file descriptors go with the first byte of their message.
+            Some(msg) if msg.offset == start => (start + msg.len, &msg.fds[..], true),
+            Some(msg) => (msg.offset, &[][..], false),
+            None => (self.pos, &[][..], false),
+        };
+        #[cfg(feature = "std")]
+        trace!(
+            "connection {}: flushing {} bytes with {} FDs",
+            self.id,
+            end - start,
+            fds.len()
+        );
+        #[cfg(not(feature = "std"))]
+        let end = self.pos;
+        #[cfg(not(feature = "std"))]
+        trace!("connection {}: flushing {} bytes", self.id, end - start);
+
+        let written = self
+            .socket
+            .write(
+                &self.buffer[start..end],
+                #[cfg(feature = "std")]
+                fds,
+                #[cfg(all(feature = "std", target_os = "linux"))]
+                self.credentials.as_ref(),
+            )
+            .await?;
+        // A socket that accepts nothing would have us loop forever.
+        if written == 0 {
+            return Err(crate::Error::SocketWrite);
+        }
+        self.written += written;
+
+        // The message's FDs went with its first bytes, so drop its entry, even an empty one, which
+        // a hand-over can bring (see `WriteConnection::with_unwritten`).
+        #[cfg(feature = "std")]
+        if of_msg {
+            // On macOS, keep sent FDs alive until the read half confirms receipt via `recvmsg`.
+            // See the comment on the `held_fds` field for details.
+            #[cfg(target_os = "macos")]
+            self.held_fds
+                .extend(self.pending_fds.pop_front().map(|msg| msg.fds));
+            #[cfg(not(target_os = "macos"))]
+            self.pending_fds.pop_front();
         }
 
         Ok(())

@@ -7,6 +7,11 @@ use crate::{
     connection::write_connection::WriteConnection,
     test_utils::mock_socket::{MockWriteHalf, TestWriteHalf},
 };
+use core::{
+    future::Future,
+    pin::pin,
+    task::{Context, Waker},
+};
 use serde::{Deserialize, Serialize};
 use std::os::unix::net::UnixStream;
 
@@ -322,4 +327,48 @@ async fn fd_ownership_with_borrowed_fd() {
     }
 
     assert_eq!(write_conn.write_half().fd_write_count(), 1);
+}
+
+/// The file descriptors of a message go with its first bytes alone, however many writes it takes.
+#[tokio::test]
+async fn fds_go_with_the_first_bytes_of_their_message() {
+    let (r1, _w1) = UnixStream::pair().unwrap();
+    let (r2, _w2) = UnixStream::pair().unwrap();
+    let (r3, _w3) = UnixStream::pair().unwrap();
+    let mut write_conn = WriteConnection::new(MockWriteHalf::new().writing_in_chunks(5), 0);
+    let call = Call::new(TestMethod::Test { value: 42 });
+    write_conn.enqueue_call(&call, vec![]).unwrap();
+    let second = write_conn.pos;
+    write_conn.enqueue_call(&call, vec![r1.into()]).unwrap();
+    let third = write_conn.pos;
+    write_conn
+        .enqueue_call(&call, vec![r2.into(), r3.into()])
+        .unwrap();
+    let enqueued = write_conn.buffer[..write_conn.pos].to_vec();
+
+    write_conn.flush().await.unwrap();
+    let write = write_conn.write_half();
+    assert_eq!(write.written_data(), enqueued);
+    assert_eq!(write.fd_positions(), [second, third]);
+    let counts: Vec<_> = write.fds_written().iter().map(Vec::len).collect();
+    assert_eq!(counts, [1, 2]);
+}
+
+/// The file descriptors of a message go once, even if the flush that sent them with the first bytes
+/// of the message is dropped before the rest of it is written.
+#[tokio::test]
+async fn dropped_flush_sends_fds_once() {
+    let (r1, _w1) = UnixStream::pair().unwrap();
+    let mut write_conn = WriteConnection::new(MockWriteHalf::new().writing_in_chunks(5), 0);
+    let call = Call::new(TestMethod::Test { value: 42 });
+    write_conn.enqueue_call(&call, vec![r1.into()]).unwrap();
+    let enqueued = write_conn.buffer[..write_conn.pos].to_vec();
+
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(pin!(write_conn.flush()).poll(&mut cx).is_pending());
+    assert_eq!(write_conn.write_half().fd_write_count(), 1);
+    write_conn.flush().await.unwrap();
+    let write = write_conn.write_half();
+    assert_eq!(write.written_data(), enqueued);
+    assert_eq!(write.fd_positions(), [0]);
 }

@@ -1,8 +1,14 @@
 #![cfg(test)]
 
+use core::{
+    future::Future,
+    pin::pin,
+    task::{Context, Waker},
+};
+
 use crate::{
     connection::{BUFFER_SIZE, write_connection::WriteConnection},
-    test_utils::mock_socket::TestWriteHalf,
+    test_utils::mock_socket::{MockWriteHalf, TestWriteHalf},
 };
 
 #[tokio::test]
@@ -323,4 +329,47 @@ async fn into_write_half() {
     // The message that was enqueued but not flushed is dropped.
     let write = write_conn.into_write_half();
     assert_eq!(write.count(), 1);
+}
+
+#[tokio::test]
+async fn flush_writes_what_the_socket_takes_bit_by_bit() {
+    let mut write_conn = WriteConnection::new(MockWriteHalf::new().writing_in_chunks(3), 1);
+    for value in [1234u32, 56, 789] {
+        #[cfg(feature = "std")]
+        write_conn.enqueue(&value, vec![]).unwrap();
+        #[cfg(not(feature = "std"))]
+        write_conn.enqueue(&value).unwrap();
+    }
+
+    write_conn.flush().await.unwrap();
+    assert_eq!(
+        write_conn.socket.written_data(),
+        [&b"1234\0"[..], b"56\0", b"789\0"].concat()
+    );
+    assert_eq!(write_conn.pos, 0);
+}
+
+#[tokio::test]
+async fn dropped_flush_goes_on_from_where_it_stopped() {
+    let mut write_conn = WriteConnection::new(MockWriteHalf::new().writing_in_chunks(4), 1);
+    #[cfg(feature = "std")]
+    write_conn.enqueue(&123456789u32, vec![]).unwrap();
+    #[cfg(not(feature = "std"))]
+    write_conn.enqueue(&123456789u32).unwrap();
+
+    // The first write takes 4 bytes, and the flush is dropped as the second waits for room.
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(pin!(write_conn.flush()).poll(&mut cx).is_pending());
+    assert_eq!(write_conn.socket.written_data(), b"1234");
+
+    // The rest goes first, and only once, ahead of what's enqueued next.
+    #[cfg(feature = "std")]
+    write_conn.enqueue(&42u32, vec![]).unwrap();
+    #[cfg(not(feature = "std"))]
+    write_conn.enqueue(&42u32).unwrap();
+    write_conn.flush().await.unwrap();
+    assert_eq!(
+        write_conn.socket.written_data(),
+        [&b"123456789\0"[..], b"42\0"].concat()
+    );
 }
