@@ -71,6 +71,12 @@ impl TryFrom<StdUnixStream> for Stream {
 
 impl socket::UnixSocket for Stream {}
 
+impl socket::IntoStd for Stream {
+    fn into_std(self) -> Result<StdUnixStream> {
+        self.0.into_std().map_err(Into::into)
+    }
+}
+
 impl AsFd for Stream {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
@@ -179,6 +185,7 @@ impl socket::UnixSocket for WriteHalf {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use socket::IntoStd;
     use std::{
         io::Write,
         os::{
@@ -186,6 +193,15 @@ mod tests {
             unix::net::UnixStream as StdUnixStream,
         },
     };
+
+    /// The std socket that a stream is given up as is open both ways.
+    #[tokio::test]
+    async fn into_std_leaves_the_socket_open() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
 
     /// Verify that FD passing works when sender and receiver use **separate** connections (as in
     /// cross-process communication). On macOS, same-connection FD passing requires a workaround
@@ -229,6 +245,19 @@ mod tests {
             let mut buf = String::new();
             std::io::Read::read_to_string(&mut stream, &mut buf).unwrap();
             assert_eq!(buf, name, "FD data mismatch for {name:?}");
+        }
+    }
+
+    /// Check that `ours` and `theirs`, the two ends of a connected pair, are both open both ways.
+    fn check_open(ours: StdUnixStream, theirs: StdUnixStream) {
+        use std::io::{Read, Write};
+
+        ours.set_nonblocking(false).unwrap();
+        for (mut from, mut to) in [(&ours, &theirs), (&theirs, &ours)] {
+            from.write_all(b"ping").unwrap();
+            let mut buf = [0; 4];
+            to.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"ping");
         }
     }
 }
