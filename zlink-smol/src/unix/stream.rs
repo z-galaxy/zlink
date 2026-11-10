@@ -78,6 +78,12 @@ impl AsFd for Stream {
 
 impl socket::UnixSocket for Stream {}
 
+impl socket::IntoStd for Stream {
+    fn into_std(self) -> Result<StdUnixStream> {
+        self.0.into_inner().map_err(Into::into)
+    }
+}
+
 /// The [`ReadHalf`] implementation using Unix Domain Sockets.
 #[derive(Debug)]
 pub struct ReadHalf(Arc<Async<StdUnixStream>>);
@@ -169,3 +175,31 @@ impl AsFd for WriteHalf {
 }
 
 impl socket::UnixSocket for WriteHalf {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use socket::IntoStd;
+
+    /// The std socket that a stream is given up as is open both ways.
+    #[test]
+    fn into_std_leaves_the_socket_open() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
+
+    /// Check that `ours` and `theirs`, the two ends of a connected pair, are both open both ways.
+    fn check_open(ours: StdUnixStream, theirs: StdUnixStream) {
+        use std::io::{Read, Write};
+
+        ours.set_nonblocking(false).unwrap();
+        for (mut from, mut to) in [(&ours, &theirs), (&theirs, &ours)] {
+            from.write_all(b"ping").unwrap();
+            let mut buf = [0; 4];
+            to.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"ping");
+        }
+    }
+}
