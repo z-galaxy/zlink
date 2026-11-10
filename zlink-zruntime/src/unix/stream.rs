@@ -129,6 +129,17 @@ where
 
 impl<M> socket::UnixSocket for Stream<M> where M: Mode {}
 
+/// On a shared runtime, this may block for a moment, until a thread running the runtime returns
+/// from a wait that watches the socket.
+impl<M> socket::IntoStd for Stream<M>
+where
+    M: Mode,
+{
+    fn into_std(self) -> Result<StdUnixStream> {
+        Ok(self.0.into_std())
+    }
+}
+
 /// The [`ReadHalf`] implementation using Unix Domain Sockets.
 ///
 /// [`ReadHalf`]: socket::ReadHalf
@@ -234,8 +245,18 @@ impl<M> socket::UnixSocket for WriteHalf<M> where M: Mode {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use socket::IntoStd;
 
     fn assert_send<T: Send>(_: &T) {}
+
+    /// The std socket that a stream is given up as is open both ways.
+    #[test]
+    fn into_std_leaves_the_socket_open() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
 
     /// Connections on a shared runtime, and connecting, must be usable from multi-threaded
     /// executors.
@@ -255,5 +276,18 @@ mod tests {
     #[test]
     fn connect_local_needs_a_local_runtime() {
         assert!(zruntime::block_on(connect_local("/nonexistent.sock")).is_err());
+    }
+
+    /// Check that `ours` and `theirs`, the two ends of a connected pair, are both open both ways.
+    fn check_open(ours: StdUnixStream, theirs: StdUnixStream) {
+        use std::io::{Read, Write};
+
+        ours.set_nonblocking(false).unwrap();
+        for (mut from, mut to) in [(&ours, &theirs), (&theirs, &ours)] {
+            from.write_all(b"ping").unwrap();
+            let mut buf = [0; 4];
+            to.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"ping");
+        }
     }
 }
