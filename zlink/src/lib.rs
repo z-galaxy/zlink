@@ -34,6 +34,9 @@ mod doctests {
     doc_comment::doctest!("../../book/src/client.md");
     #[cfg(feature = "service")]
     doc_comment::doctest!("../../book/src/service.md");
+    // Its example of a restart hands over through zoter, which is for Linux alone.
+    #[cfg(all(feature = "service", feature = "handover", target_os = "linux"))]
+    doc_comment::doctest!("../../book/src/restarts.md");
     #[cfg(feature = "proxy")]
     doc_comment::doctest!("../../book/src/pipelining.md");
     doc_comment::doctest!("../../book/src/design.md");
