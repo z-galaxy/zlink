@@ -71,6 +71,10 @@
 
 #[cfg(feature = "std")]
 mod credentials;
+#[cfg(all(feature = "handover", target_os = "linux"))]
+mod handover;
+#[cfg(all(feature = "handover", target_os = "linux"))]
+pub use handover::Handover;
 mod read_connection;
 #[cfg(feature = "std")]
 pub use credentials::Credentials;

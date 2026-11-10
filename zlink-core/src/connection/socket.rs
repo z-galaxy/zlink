@@ -21,6 +21,14 @@ pub trait Socket: core::fmt::Debug {
 
     /// Split the socket into read and write halves.
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf);
+
+    /// Join `read` and `write`, the halves that [`Socket::split`] split a socket into, back into
+    /// it (the opposite of [`Socket::split`]).
+    ///
+    /// It fails if the halves aren't of one socket.
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self>
+    where
+        Self: Sized;
 }
 
 /// The read half of a socket.
@@ -64,6 +72,19 @@ pub trait WriteHalf: core::fmt::Debug {
             &crate::connection::PassedCredentials,
         >,
     ) -> impl Future<Output = crate::Result<()>>;
+}
+
+/// A socket that is a Unix domain socket, which it can be given up as.
+///
+/// A connection over such a socket can be handed over to another process (with the `handover`
+/// feature, on Linux). The runtime crates implement this for their Unix domain sockets.
+#[cfg(feature = "std")]
+pub trait IntoStd: Socket {
+    /// The std Unix domain socket that this socket is.
+    ///
+    /// The socket is left open, as it is but for no longer being watched by a runtime, if it was,
+    /// so that something else can go on with it, such as another process.
+    fn into_std(self) -> crate::Result<std::os::unix::net::UnixStream>;
 }
 
 /// Trait for fetching peer credentials from a socket.
@@ -115,6 +136,10 @@ pub mod impl_for_doc {
 
         fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
             (ReadHalf, WriteHalf)
+        }
+
+        fn join(_read: Self::ReadHalf, _write: Self::WriteHalf) -> crate::Result<Self> {
+            Ok(Socket)
         }
     }
 

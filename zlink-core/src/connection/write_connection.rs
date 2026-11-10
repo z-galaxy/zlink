@@ -296,6 +296,37 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         self.credentials = credentials;
     }
 
+    /// A connection that writes `data` first, along with `fds`, the file descriptors of its
+    /// messages, and then what is sent through it, over `socket`.
+    ///
+    /// `data` is what was enqueued for another connection over the socket but not written, as
+    /// [`WriteConnection::into_unwritten`] gives it.
+    #[cfg(all(feature = "handover", target_os = "linux"))]
+    pub(super) fn with_unwritten(
+        socket: Write,
+        id: usize,
+        mut data: Vec<u8>,
+        fds: VecDeque<MessageFds>,
+    ) -> Self {
+        let pos = data.len();
+        data.resize(pos.max(BUFFER_SIZE), 0);
+        let mut conn = Self::new(socket, id);
+        conn.buffer = data;
+        conn.pos = pos;
+        conn.pending_fds = fds;
+
+        conn
+    }
+
+    /// Consume the connection into the write half of the socket, what was enqueued but not
+    /// written, and the file descriptors of its messages, positioned in it.
+    #[cfg(all(feature = "handover", target_os = "linux"))]
+    pub(super) fn into_unwritten(mut self) -> (Write, Vec<u8>, VecDeque<MessageFds>) {
+        self.buffer.truncate(self.pos);
+
+        (self.socket, self.buffer, self.pending_fds)
+    }
+
     pub(super) async fn write<T>(
         &mut self,
         value: &T,
@@ -381,11 +412,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
 /// Information about file descriptors pending to be sent with a message.
 #[cfg(feature = "std")]
 #[derive(Debug)]
-struct MessageFds {
+pub(super) struct MessageFds {
     /// File descriptors to send with this message.
-    fds: Vec<OwnedFd>,
+    pub(super) fds: Vec<OwnedFd>,
     /// Buffer offset where the message starts.
-    offset: usize,
+    pub(super) offset: usize,
     /// Length of the message including the null terminator.
-    len: usize,
+    pub(super) len: usize,
 }

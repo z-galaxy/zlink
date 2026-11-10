@@ -401,6 +401,9 @@ enum ProcessError {
 - `tracing` (default): Enable `tracing`-based logging.
 - `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
   used.
+- `handover`: Enable handing connections over to other processes, such as the next instance of a
+  service that restarts under systemd, through [zoter](https://github.com/z-galaxy/zoter). It
+  builds nothing on platforms other than Linux.
 
 The runtime features are additive: both can be enabled at the same time, with the
 runtime-specific API (currently the `unix` and `notified` modules) of each residing in its own

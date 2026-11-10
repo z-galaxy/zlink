@@ -121,7 +121,9 @@ async fn relative_bind_path_is_never_used_for_xattrs() {
 #[tokio::test]
 async fn ready_listener_does_not_support_xattrs() {
     let (socket, _peer) = StdUnixStream::pair().unwrap();
-    let listener = zlink::ReadyListener::new(unix::Stream::try_from(socket).unwrap());
+    // The type names the shared flavour of zruntime's, as a std socket becomes a stream of either.
+    let stream: unix::Stream = unix::Stream::try_from(socket).unwrap();
+    let listener = zlink::ReadyListener::new(stream);
 
     match listener.set_xattr("user.zlink.test", "1").unwrap_err() {
         Error::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::Unsupported),

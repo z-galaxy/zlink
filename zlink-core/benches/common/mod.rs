@@ -17,8 +17,8 @@ pub enum TestMethod {
 // Bidirectional mock socket for in-memory communication.
 #[derive(Debug)]
 pub struct BiPipeSocket {
-    client_to_server: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-    server_to_client: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    read: BiPipeReadHalf,
+    write: BiPipeWriteHalf,
 }
 
 impl BiPipeSocket {
@@ -26,17 +26,22 @@ impl BiPipeSocket {
         let (c2s_tx, c2s_rx) = tokio::sync::mpsc::unbounded_channel();
         let (s2c_tx, s2c_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let client = BiPipeSocket {
-            client_to_server: c2s_tx,
-            server_to_client: s2c_rx,
-        };
+        (Self::new(c2s_tx, s2c_rx), Self::new(s2c_tx, c2s_rx))
+    }
 
-        let server = BiPipeSocket {
-            client_to_server: s2c_tx,
-            server_to_client: c2s_rx,
-        };
-
-        (client, server)
+    // The socket that sends through `sender` and receives through `receiver`.
+    fn new(
+        sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+        receiver: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    ) -> Self {
+        Self {
+            read: BiPipeReadHalf {
+                receiver,
+                buffer: Vec::new(),
+                pos: 0,
+            },
+            write: BiPipeWriteHalf { sender },
+        }
     }
 }
 
@@ -45,16 +50,11 @@ impl Socket for BiPipeSocket {
     type WriteHalf = BiPipeWriteHalf;
 
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
-        (
-            BiPipeReadHalf {
-                receiver: self.server_to_client,
-                buffer: Vec::new(),
-                pos: 0,
-            },
-            BiPipeWriteHalf {
-                sender: self.client_to_server,
-            },
-        )
+        (self.read, self.write)
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> zlink_core::Result<Self> {
+        Ok(Self { read, write })
     }
 }
 

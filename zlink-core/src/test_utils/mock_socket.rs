@@ -23,10 +23,8 @@ use rustix::fd::{BorrowedFd, OwnedFd};
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockSocket {
-    /// The data returned by each read.
-    messages: Vec<Vec<u8>>,
-    #[cfg(feature = "std")]
-    fds: Vec<Vec<OwnedFd>>,
+    read: MockReadHalf,
+    write: MockWriteHalf,
 }
 
 impl MockSocket {
@@ -47,11 +45,11 @@ impl MockSocket {
             })
             .collect();
 
-        Self {
+        Self::with_messages(
             messages,
             #[cfg(feature = "std")]
             fds,
-        }
+        )
     }
 
     /// Create a mock socket whose read half returns each of `reads` verbatim, in a read of its own.
@@ -61,11 +59,11 @@ impl MockSocket {
     ///
     /// In std mode, the i-th FD vec is returned with the i-th read.
     pub fn with_reads(reads: &[&[u8]], #[cfg(feature = "std")] fds: Vec<Vec<OwnedFd>>) -> Self {
-        Self {
-            messages: reads.iter().map(|r| r.to_vec()).collect(),
+        Self::with_messages(
+            reads.iter().map(|r| r.to_vec()).collect(),
             #[cfg(feature = "std")]
             fds,
-        }
+        )
     }
 
     /// Create a mock socket with responses and no file descriptors.
@@ -79,6 +77,30 @@ impl MockSocket {
             Vec::new(),
         )
     }
+
+    /// A mock socket whose read half returns each of `messages` in a read of its own, along with
+    /// the FDs at its index in `fds`, in std mode.
+    fn with_messages(
+        messages: Vec<Vec<u8>>,
+        #[cfg(feature = "std")] fds: Vec<Vec<OwnedFd>>,
+    ) -> Self {
+        Self {
+            read: MockReadHalf {
+                messages,
+                msg_index: 0,
+                pos_in_msg: 0,
+                #[cfg(feature = "std")]
+                fds,
+            },
+            write: MockWriteHalf {
+                written: Vec::new(),
+                #[cfg(feature = "std")]
+                fds_written: RefCell::new(Vec::new()),
+                #[cfg(all(feature = "std", target_os = "linux"))]
+                credentials_written: Vec::new(),
+            },
+        }
+    }
 }
 
 impl Socket for MockSocket {
@@ -86,22 +108,11 @@ impl Socket for MockSocket {
     type WriteHalf = MockWriteHalf;
 
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
-        (
-            MockReadHalf {
-                messages: self.messages,
-                msg_index: 0,
-                pos_in_msg: 0,
-                #[cfg(feature = "std")]
-                fds: self.fds,
-            },
-            MockWriteHalf {
-                written: Vec::new(),
-                #[cfg(feature = "std")]
-                fds_written: RefCell::new(Vec::new()),
-                #[cfg(all(feature = "std", target_os = "linux"))]
-                credentials_written: Vec::new(),
-            },
-        )
+        (self.read, self.write)
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self> {
+        Ok(Self { read, write })
     }
 }
 

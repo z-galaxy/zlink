@@ -49,6 +49,26 @@ impl Socket for Stream {
 
         (ReadHalf(Arc::clone(&stream)), WriteHalf(stream))
     }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Result<Self> {
+        let invalid = || {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the halves are of two different sockets",
+            )
+        };
+        let ReadHalf(stream) = read;
+        {
+            let WriteHalf(other) = write;
+            if !Arc::ptr_eq(&stream, &other) {
+                return Err(invalid().into());
+            }
+        }
+        // The halves are all that hold the socket, so the read half holds it alone now.
+        let stream = Arc::into_inner(stream).ok_or_else(invalid)?;
+
+        Ok(Self(stream))
+    }
 }
 
 impl TryFrom<Async<StdUnixStream>> for Stream {
@@ -77,6 +97,12 @@ impl AsFd for Stream {
 }
 
 impl socket::UnixSocket for Stream {}
+
+impl socket::IntoStd for Stream {
+    fn into_std(self) -> Result<StdUnixStream> {
+        self.0.into_inner().map_err(Into::into)
+    }
+}
 
 /// The [`ReadHalf`] implementation using Unix Domain Sockets.
 #[derive(Debug)]
@@ -169,3 +195,54 @@ impl AsFd for WriteHalf {
 }
 
 impl socket::UnixSocket for WriteHalf {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use socket::IntoStd;
+
+    /// The std socket that a stream is given up as is open both ways.
+    #[test]
+    fn into_std_leaves_the_socket_open() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let ours = Stream::try_from(ours).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
+
+    /// The socket that its halves are joined back into is open both ways, as a std socket.
+    #[test]
+    fn halves_join_back_into_an_open_socket() {
+        let (ours, theirs) = StdUnixStream::pair().unwrap();
+        let (read, write) = Stream::try_from(ours).unwrap().split();
+        let ours = Stream::join(read, write).unwrap().into_std().unwrap();
+
+        check_open(ours, theirs);
+    }
+
+    /// The halves of two different sockets aren't joined.
+    #[test]
+    fn halves_of_two_sockets_are_not_joined() {
+        let (read, _) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+            .unwrap()
+            .split();
+        let (_, write) = Stream::try_from(StdUnixStream::pair().unwrap().0)
+            .unwrap()
+            .split();
+
+        assert!(Stream::join(read, write).is_err());
+    }
+
+    /// Check that `ours` and `theirs`, the two ends of a connected pair, are both open both ways.
+    fn check_open(ours: StdUnixStream, theirs: StdUnixStream) {
+        use std::io::{Read, Write};
+
+        ours.set_nonblocking(false).unwrap();
+        for (mut from, mut to) in [(&ours, &theirs), (&theirs, &ours)] {
+            from.write_all(b"ping").unwrap();
+            let mut buf = [0; 4];
+            to.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"ping");
+        }
+    }
+}

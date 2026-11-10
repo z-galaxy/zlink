@@ -16,8 +16,9 @@ use zlink::{
 use zlink::smol::unix::Stream;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix::Stream;
+// The shared flavour of zruntime's, as a std socket becomes a stream of either.
 #[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::unix::Stream;
+type Stream = zlink::zruntime::unix::Stream;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 

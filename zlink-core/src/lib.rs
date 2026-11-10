@@ -39,7 +39,7 @@ pub use error::{Error, Result};
 mod server;
 #[cfg(feature = "server")]
 pub use server::{
-    Server,
+    Server, Stopped,
     listener::{Listener, ReadyListener},
     service::{self, Service},
 };

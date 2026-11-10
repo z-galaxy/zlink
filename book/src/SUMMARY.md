@@ -5,6 +5,7 @@
 - [Establishing connections](connection.md)
 - [Writing a client proxy](client.md)
 - [Writing a service](service.md)
+- [Restarting without dropping clients](restarts.md)
 - [Pipelining method calls](pipelining.md)
 - [Design for efficiency](design.md)
 - [Introspection & code generation](introspection.md)

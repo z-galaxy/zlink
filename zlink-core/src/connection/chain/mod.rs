@@ -718,6 +718,10 @@ mod tests {
             fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
                 (self.read, self.write)
             }
+
+            fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self> {
+                Ok(Self { read, write })
+            }
         }
 
         #[derive(Debug)]

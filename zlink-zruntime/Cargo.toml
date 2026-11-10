@@ -1,6 +1,6 @@
 [package]
 name = "zlink-zruntime"
-version = "0.8.0"
+version = "0.9.0"
 description = "zlink library for the zruntime runtime"
 edition.workspace = true
 rust-version.workspace = true
@@ -27,9 +27,10 @@ defmt = ["zlink-core/defmt"]
 [dependencies]
 futures-core = { version = "0.3.34", default-features = false, optional = true }
 pin-project-lite = { version = "0.2.16", optional = true }
-zlink-core = { path = "../zlink-core", version = "=0.8.0", default-features = false, features = ["std"] }
-# Taken from git, for API that zruntime has not released yet, until zlink is released.
-zruntime = { git = "https://github.com/z-galaxy/zruntime", branch = "main", default-features = false, features = [
+zlink-core = { path = "../zlink-core", version = "=0.9.0", default-features = false, features = ["std"] }
+# Taken from git, for API that zruntime has not released yet, until zlink is released: from the
+# branch that reunites the halves of a Unix stream, until it's merged.
+zruntime = { git = "https://github.com/z-galaxy/zruntime", branch = "ai/jolly-rubin-3tk4qc", default-features = false, features = [
     "runtime",
     "helper",
     "unix",

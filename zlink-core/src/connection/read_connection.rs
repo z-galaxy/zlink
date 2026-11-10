@@ -356,19 +356,19 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     /// first, exactly as it was read, along with the file descriptors that came with it (`std`
     /// only). It's where the data of another protocol starts when switching the socket over to
     /// one, e.g. after a method call that asked for an upgrade (see [`Call::upgrade`]).
-    pub fn into_read_half(mut self) -> Rewind<Read> {
-        // Reuse the buffer for the data that wasn't received.
-        self.buffer.truncate(self.read_pos);
-        self.buffer.drain(..self.msg_pos);
+    pub fn into_read_half(self) -> Rewind<Read> {
         #[cfg(feature = "std")]
-        self.move_pending_fds_to_start();
+        {
+            let (socket, data, fds) = self.into_unreceived();
 
-        Rewind::new(
-            self.socket,
-            self.buffer,
-            #[cfg(feature = "std")]
-            self.pending_fds,
-        )
+            Rewind::new(socket, data, fds)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let (socket, data) = self.into_unreceived();
+
+            Rewind::new(socket, data)
+        }
     }
 
     /// The credentials passed through over the socket with the latest message (if any).
@@ -378,6 +378,74 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         Read: super::socket::UnixSocket,
     {
         self.received_credentials.as_ref()
+    }
+}
+
+impl<Read: ReadHalf> ReadConnection<Read> {
+    /// A connection that receives `data` first, along with `fds`, the file descriptors that came
+    /// with it, and `credentials`, those that came with the latest read, and then reads from
+    /// `socket`.
+    ///
+    /// `data` is what another connection read from the socket but didn't receive, as
+    /// [`ReadConnection::into_unreceived`] gives it, and `credentials` are those that
+    /// [`ReadConnection::take_received_credentials`] took from it.
+    #[cfg(all(feature = "handover", target_os = "linux"))]
+    pub(super) fn with_unreceived(
+        socket: Read,
+        id: usize,
+        mut data: Vec<u8>,
+        fds: VecDeque<PendingFds>,
+        credentials: Option<std::sync::Arc<PassedCredentials>>,
+    ) -> Self {
+        let read_pos = data.len();
+        // The complete messages end with the last NUL byte.
+        let msgs_end = data.iter().rposition(|b| *b == b'\0').map_or(0, |i| i + 1);
+        data.resize(read_pos.max(BUFFER_SIZE), 0);
+        let mut conn = Self::new(socket, id);
+        conn.buffer = data;
+        conn.read_pos = read_pos;
+        conn.msgs_end = msgs_end;
+        conn.pending_fds = fds;
+        conn.received_credentials = credentials;
+
+        conn
+    }
+
+    /// Take the credentials that came with the latest read, which
+    /// [`ReadConnection::received_credentials`] gives for each message received until the next
+    /// read, those of what was read but not received included.
+    #[cfg(all(feature = "handover", target_os = "linux"))]
+    pub(super) fn take_received_credentials(
+        &mut self,
+    ) -> Option<std::sync::Arc<PassedCredentials>> {
+        self.received_credentials.take()
+    }
+
+    /// Consume the connection into the read half of the socket, what was read from it but not
+    /// received, and the file descriptors that came with that (`std` only), positioned in it.
+    #[cfg(feature = "std")]
+    pub(super) fn into_unreceived(mut self) -> (Read, Vec<u8>, VecDeque<PendingFds>) {
+        self.unreceived_to_start();
+
+        (self.socket, self.buffer, self.pending_fds)
+    }
+
+    /// Consume the connection into the read half of the socket and what was read from it but not
+    /// received.
+    #[cfg(not(feature = "std"))]
+    pub(super) fn into_unreceived(mut self) -> (Read, Vec<u8>) {
+        self.unreceived_to_start();
+
+        (self.socket, self.buffer)
+    }
+
+    // Moves what wasn't received to the start of the buffer, which holds nothing else then.
+    fn unreceived_to_start(&mut self) {
+        // Reuse the buffer for the data that wasn't received.
+        self.buffer.truncate(self.read_pos);
+        self.buffer.drain(..self.msg_pos);
+        #[cfg(feature = "std")]
+        self.move_pending_fds_to_start();
     }
 }
 
