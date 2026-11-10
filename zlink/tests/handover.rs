@@ -3,8 +3,9 @@
 //! restarts under systemd: a client that stays connected throughout gets the replies to its calls
 //! from both instances, those that it sent as the first one stopped included, along with their
 //! file descriptors. It runs on whichever runtime the features enable, tokio first, as the other
-//! tests do. The calls read but not received go over with the credentials that came with them, and
-//! a connection on a local zruntime runtime goes on on one too.
+//! tests do. The calls read but not received go over with the credentials that came with them, a
+//! reply that the first instance interrupted as it stopped is finished by the next one, and a
+//! connection on a local zruntime runtime goes on on one too.
 
 #![cfg(all(feature = "handover", feature = "service", target_os = "linux"))]
 
@@ -15,9 +16,11 @@ use std::{
     os::{fd::OwnedFd, unix::net::UnixStream as StdUnixStream},
     rc::Rc,
     task::{Poll, Waker},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
+use tokio::time::timeout;
 use zlink::{
     Call, Connection, ReadyListener, Server, Stopped,
     connection::Handover,
@@ -126,23 +129,70 @@ async fn credentials_of_calls_read_but_not_received_go_over() {
     let sender = (creds.process_id(), creds.unix_user_id());
 
     // The connection goes over through its record, which the next instance takes it over from.
-    let (record, fds) = {
-        let handover = server.hand_over().unwrap();
-        let mut record = vec![0; handover.saved_len().unwrap()];
-        handover.save(&mut record).unwrap();
-        let fds: Vec<OwnedFd> = handover
-            .fds()
-            .iter()
-            .map(|fd| fd.try_clone_to_owned().unwrap())
-            .collect();
-
-        (record, fds)
-    };
+    let (record, fds) = saved(&server.hand_over().unwrap());
     let handover = Handover::restore(&record, fds).unwrap();
     let mut server = Connection::<Stream>::take_over(handover).unwrap();
     server.receive_call::<Methods>().await.unwrap();
     let creds = server.read().received_credentials().unwrap();
     assert_eq!((creds.process_id(), creds.unix_user_id()), sender);
+}
+
+/// A reply larger than the socket buffer, to a client that doesn't read it, is interrupted as the
+/// first instance stops, and the next instance writes the rest of it once the client reads: the
+/// client gets the reply, and its file descriptor, exactly once.
+#[test_log::test(tokio::test(flavor = "current_thread"))]
+async fn a_reply_cut_off_by_the_stop_goes_on_in_the_next_instance() {
+    let (server_end, client_end) = StdUnixStream::pair().unwrap();
+    let mut client = Connection::new(Stream::try_from(client_end).unwrap());
+    client
+        .send_call(&Call::new(Methods::Large), Vec::new())
+        .await
+        .unwrap();
+
+    // The call raises the stop, so the first instance stops while it waits for the client to read
+    // the reply, rather than waiting forever, and hands the connection over with the unwritten part
+    // of the reply.
+    let stop = Rc::new(Flag::default());
+    let listener = ReadyListener::new(Stream::try_from(server_end).unwrap());
+    let server = Server::new(listener, Counter::new(0, stop.clone()));
+    let stopped = timeout(Duration::from_secs(10), server.run_until(stop.raised()));
+    let Stopped {
+        listener,
+        service,
+        connections,
+        ..
+    } = stopped.await.expect("the server didn't stop").unwrap();
+    let [conn] = <[_; 1]>::try_from(connections).unwrap();
+    let (record, fds) = saved(&conn.hand_over().unwrap());
+    let json: serde_json::Value = serde_json::from_slice(&record).unwrap();
+    // The file descriptor went with the first bytes of the reply, and the rest of it is unwritten.
+    assert_ne!(json["unwritten"], "");
+    assert_eq!(json["unwrittenFds"], serde_json::json!([]));
+
+    let conn = Connection::<Stream>::take_over(Handover::restore(&record, fds).unwrap()).unwrap();
+    let stop = Rc::new(Flag::default());
+    let server = Server::new(listener, Counter::new(service.count.get(), stop.clone()))
+        .with_connections([conn]);
+    let calls = async {
+        let (reply, fds) = client.receive_reply::<Text, CounterError>().await.unwrap();
+        let text = reply.unwrap().into_parameters().unwrap().text;
+        // The reply to the next call comes next.
+        client
+            .send_call(&Call::new(Methods::Count), Vec::new())
+            .await
+            .unwrap();
+        let count = received_count(&mut client).await;
+
+        (text, fds, count)
+    };
+    let (stopped, (text, fds, count)) = tokio::join!(server.run_until(stop.raised()), calls);
+    stopped.unwrap();
+    assert!(text == large_text(), "a text of {} bytes", text.len());
+    let [fd] = <[_; 1]>::try_from(fds).unwrap();
+    let mut passed = String::new();
+    StdUnixStream::from(fd).read_to_string(&mut passed).unwrap();
+    assert_eq!(passed, "passed");
+    assert_eq!(count, 1);
 }
 
 /// A connection on a local zruntime runtime is taken over on the local runtime of the thread that
@@ -175,6 +225,24 @@ async fn received_count(client: &mut Connection<Stream>) -> u32 {
     reply.unwrap().into_parameters().unwrap().count
 }
 
+/// The record of `handover`, and duplicates of its file descriptors, as zoter saves them.
+fn saved(handover: &Handover) -> (Vec<u8>, Vec<OwnedFd>) {
+    let mut record = vec![0; handover.saved_len().unwrap()];
+    handover.save(&mut record).unwrap();
+    let fds = handover
+        .fds()
+        .iter()
+        .map(|fd| fd.try_clone_to_owned().unwrap())
+        .collect();
+
+    (record, fds)
+}
+
+/// A text larger than the buffer of a socket.
+fn large_text() -> String {
+    "x".repeat(4 << 20)
+}
+
 /// A store of the manager, under the key that the instances hand over under.
 fn store(manager: &Manager) -> Store {
     Store::new(
@@ -192,6 +260,8 @@ enum Methods {
     Count,
     #[serde(rename = "org.example.counter.Read")]
     Read,
+    #[serde(rename = "org.example.counter.Large")]
+    Large,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
@@ -210,8 +280,9 @@ enum CounterError {
     NoFd,
 }
 
-/// Counts the calls to `count`, and reads the contents of the file descriptor passed to `read`.
-/// It raises `stop` as it answers its first call to `count`.
+/// Counts the calls to `count`, reads the contents of the file descriptor passed to `read`, and
+/// answers `large` with a large text and a file descriptor. It raises `stop` as it answers its
+/// first call to `count`, and calls to `large`.
 struct Counter {
     count: Cell<u32>,
     stop: Rc<Flag>,
@@ -251,6 +322,16 @@ impl Counter {
         StdUnixStream::from(fd).read_to_string(&mut text).unwrap();
 
         Ok(Text { text })
+    }
+
+    /// A text larger than the buffer of a socket, with a file descriptor to read `passed` from.
+    #[zlink(return_fds)]
+    async fn large(&self) -> (Text, Vec<OwnedFd>) {
+        self.stop.raise();
+        let (read, mut write) = StdUnixStream::pair().unwrap();
+        write.write_all(b"passed").unwrap();
+
+        (Text { text: large_text() }, vec![read.into()])
     }
 }
 
