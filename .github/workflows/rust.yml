@@ -96,6 +96,9 @@ jobs:
           cargo test --release --all-features
           cargo test -p zlink-core --release --no-default-features \
           --features idl-parse,service,proxy,defmt
+          # Test the tokio support
+          cargo test -p zlink --release --no-default-features \
+          --features tracing,tokio,proxy,introspection,idl-parse,service,handover
           # Test the smol support
           cargo test -p zlink --release --no-default-features \
           --features tracing,smol,proxy,introspection,idl-parse,service,handover

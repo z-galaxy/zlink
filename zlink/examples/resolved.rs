@@ -6,13 +6,16 @@ use futures_util::{StreamExt, pin_mut};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use zlink::{ReplyError, proxy};
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup tracing subscriber
     tracing_subscriber::fmt::init();
 
+    zlink::zruntime::block_on(resolve())
+}
+
+async fn resolve() -> Result<(), Box<dyn std::error::Error>> {
     let mut connection =
-        zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+        zlink::zruntime::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     let args: Vec<_> = args().skip(1).collect();
 

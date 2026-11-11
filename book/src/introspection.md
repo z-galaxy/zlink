@@ -23,9 +23,12 @@ connection can be introspected — just bring the trait into scope:
 ```rust,no_run
 use zlink::varlink_service::Proxy as _;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = zlink::zruntime::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // Who are you?
     let info = conn.get_info().await?.map_err(|e| e.to_string())?;

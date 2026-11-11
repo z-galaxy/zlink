@@ -9,7 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["tokio", "service", "proxy", "tracing"]
+default = ["zruntime", "service", "proxy", "tracing"]
 tokio = ["dep:zlink-tokio"]
 smol = ["dep:zlink-smol"]
 zruntime = ["dep:zlink-zruntime"]
@@ -98,11 +98,11 @@ rustix = { version = "1.1.2", features = ["process"] }
 
 [[example]]
 name = "varlink-inspect"
-required-features = ["introspection", "idl-parse", "tokio"]
+required-features = ["introspection", "idl-parse", "zruntime"]
 
 [[example]]
 name = "resolved"
-required-features = ["proxy", "tokio"]
+required-features = ["proxy", "zruntime"]
 
 # The tests of the hand-over restart services through zoter's fake service manager.
 [target.'cfg(target_os = "linux")'.dev-dependencies.zoter]

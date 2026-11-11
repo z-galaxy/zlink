@@ -392,9 +392,9 @@ enum ProcessError {
 
 ### Main Features
 
-- `tokio` (default): Enable tokio runtime integration, under the `tokio` module.
+- `zruntime` (default): Enable zruntime runtime integration, under the `zruntime` module.
+- `tokio`: Enable tokio runtime integration, under the `tokio` module.
 - `smol`: Enable smol runtime integration, under the `smol` module.
-- `zruntime`: Enable zruntime runtime integration, under the `zruntime` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
