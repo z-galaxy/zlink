@@ -15,12 +15,12 @@ use zlink::{
     service::{TakeOver, Upgraded},
 };
 
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::rt::unix::{Stream, bind, connect};
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::unix::{Stream, bind, connect};
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix::{Stream, bind, connect};
-#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::unix::{Stream, bind, connect};
 
 #[test_log::test(tokio::test)]
 async fn upgrade() -> Result<(), Box<dyn Error>> {

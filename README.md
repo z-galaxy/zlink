@@ -47,7 +47,7 @@ The zlink project consists of several subcrates:
 - **[`zlink-macros`]**: Contains the attribute and derive macros.
 - **[`zlink-tokio`]**: `Tokio`-based transport implementations and runtime integration.
 - **[`zlink-smol`]**: `smol`-based transport implementations and runtime integration.
-- **[`zlink-zruntime`]**: `zruntime`-based transport implementations and runtime integration.
+- **[`zlink-rt`]**: `zruntime`-based transport implementations and runtime integration.
 - **[`zlink-codegen`]**: Code generation tool for creating Rust bindings from Varlink IDL files.
 
 ## Examples
@@ -394,7 +394,7 @@ enum ProcessError {
 
 - `tokio` (default): Enable tokio runtime integration, under the `tokio` module.
 - `smol`: Enable smol runtime integration, under the `smol` module.
-- `zruntime`: Enable zruntime runtime integration, under the `zruntime` module.
+- `zruntime`: Enable zruntime runtime integration, under the `rt` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
@@ -446,7 +446,7 @@ This project is licensed under the [MIT License][license].
 [`zlink-names`]: https://docs.rs/zlink-names
 [`zlink-tokio`]: https://docs.rs/zlink-tokio
 [`zlink-smol`]: https://docs.rs/zlink-smol
-[`zlink-zruntime`]: https://docs.rs/zlink-zruntime
+[`zlink-rt`]: https://docs.rs/zlink-rt
 [`zlink-codegen`]: https://docs.rs/zlink-codegen
 [`zlink-macros`]: https://docs.rs/zlink-macros
 [`Server::run` docs]: https://docs.rs/zlink/latest/zlink/struct.Server.html#method.run

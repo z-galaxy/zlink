@@ -67,8 +67,8 @@ pub mod smol {
 
 /// API specific to the [zruntime](https://github.com/z-galaxy/zruntime) runtime.
 #[cfg(feature = "zruntime")]
-pub mod zruntime {
+pub mod rt {
     #[cfg(feature = "server")]
-    pub use zlink_zruntime::notified;
-    pub use zlink_zruntime::unix;
+    pub use zlink_rt::notified;
+    pub use zlink_rt::unix;
 }

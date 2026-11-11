@@ -8,12 +8,12 @@ use std::{error::Error, path::Path};
 use tokio::select;
 use zlink::{Server, introspect};
 
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::rt::unix::{bind, connect};
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::unix::{bind, connect};
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix::{bind, connect};
-#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::unix::{bind, connect};
 
 #[test_log::test(tokio::test)]
 async fn unknown_error() -> Result<(), Box<dyn Error>> {

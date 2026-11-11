@@ -23,9 +23,9 @@ zlink = { version = "0.8", default-features = false, features = ["zruntime", "se
 
 The features are additive — you can enable several at once. The bulk of the API is runtime-agnostic
 and lives at the crate root; only the transport-specific parts (the `unix` and `notified` modules)
-are per-runtime, under `zlink::tokio`, `zlink::smol` and `zlink::zruntime` respectively. The
+are per-runtime, under `zlink::tokio`, `zlink::smol` and `zlink::rt` respectively. The
 examples in this book use tokio, but they work identically with the other runtimes — just replace
-`zlink::tokio` with `zlink::smol` or `zlink::zruntime`. If you enable none of these features, the
+`zlink::tokio` with `zlink::smol` or `zlink::rt`. If you enable none of these features, the
 crate fails to compile with an explicit error, since the transport implementations live in the
 runtime-integration crates.
 

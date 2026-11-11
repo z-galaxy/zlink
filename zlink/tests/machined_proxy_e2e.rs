@@ -21,12 +21,12 @@ use zlink::{
     varlink_service::{self, Proxy},
 };
 
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::rt::unix;
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
-#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::unix;
 
 use mock_machined_service::{AcquireMetadata, ListReply, MachinedError, OwnedListReply, ProcessId};
 

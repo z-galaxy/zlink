@@ -12,18 +12,18 @@ authors.workspace = true
 default = ["tokio", "service", "proxy", "tracing"]
 tokio = ["dep:zlink-tokio"]
 smol = ["dep:zlink-smol"]
-zruntime = ["dep:zlink-zruntime"]
+zruntime = ["dep:zlink-rt"]
 server = [
     "zlink-core/server",
     "zlink-tokio?/server",
     "zlink-smol?/server",
-    "zlink-zruntime?/server",
+    "zlink-rt?/server",
 ]
 proxy = [
     "zlink-core/proxy",
     "zlink-tokio?/proxy",
     "zlink-smol?/proxy",
-    "zlink-zruntime?/proxy",
+    "zlink-rt?/proxy",
 ]
 service = [
     "server",
@@ -31,32 +31,32 @@ service = [
     "zlink-core/service",
     "zlink-tokio?/service",
     "zlink-smol?/service",
-    "zlink-zruntime?/service",
+    "zlink-rt?/service",
 ]
-idl = ["zlink-core/idl", "zlink-tokio?/idl", "zlink-smol?/idl", "zlink-zruntime?/idl"]
+idl = ["zlink-core/idl", "zlink-tokio?/idl", "zlink-smol?/idl", "zlink-rt?/idl"]
 idl-parse = [
     "zlink-core/idl-parse",
     "zlink-tokio?/idl-parse",
     "zlink-smol?/idl-parse",
-    "zlink-zruntime?/idl-parse",
+    "zlink-rt?/idl-parse",
 ]
 introspection = [
     "zlink-core/introspection",
     "zlink-tokio?/introspection",
     "zlink-smol?/introspection",
-    "zlink-zruntime?/introspection",
+    "zlink-rt?/introspection",
 ]
 tracing = [
     "zlink-core/tracing",
     "zlink-tokio?/tracing",
     "zlink-smol?/tracing",
-    "zlink-zruntime?/tracing",
+    "zlink-rt?/tracing",
 ]
 defmt = [
     "zlink-core/defmt",
     "zlink-tokio?/defmt",
     "zlink-smol?/defmt",
-    "zlink-zruntime?/defmt",
+    "zlink-rt?/defmt",
 ]
 # The hand-over of a connection to another process, such as the next instance of a service that
 # restarts, through zoter, on Linux: elsewhere, it builds nothing.
@@ -66,7 +66,7 @@ handover = ["zlink-core/handover"]
 zlink-core = { path = "../zlink-core", version = "=0.9.0", default-features = false }
 zlink-tokio = { path = "../zlink-tokio", version = "=0.9.0", default-features = false, optional = true }
 zlink-smol = { path = "../zlink-smol", version = "=0.9.0", default-features = false, optional = true }
-zlink-zruntime = { path = "../zlink-zruntime", version = "=0.9.0", default-features = false, optional = true }
+zlink-rt = { path = "../zlink-rt", version = "=0.9.0", default-features = false, optional = true }
 
 [dev-dependencies]
 doc-comment = "0.3.3"
@@ -109,7 +109,7 @@ required-features = ["proxy", "tokio"]
 version = "0.1.0"
 features = ["testing"]
 
-# And take a connection over on a local zruntime runtime, from the git source of zlink-zruntime's.
+# And take a connection over on a local zruntime runtime, from the git source of zlink-rt's.
 [target.'cfg(target_os = "linux")'.dev-dependencies.zruntime]
 git = "https://github.com/z-galaxy/zruntime"
 branch = "main"

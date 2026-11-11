@@ -34,7 +34,7 @@ use zlink::smol::unix::Stream;
 use zlink::tokio::unix::Stream;
 // The shared flavour of zruntime's, as a std socket becomes a stream of either.
 #[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-type Stream = zlink::zruntime::unix::Stream;
+type Stream = zlink::rt::unix::Stream;
 
 #[test_log::test(tokio::test(flavor = "current_thread"))]
 async fn connections_go_on_in_the_next_instance() {
@@ -200,7 +200,7 @@ async fn a_reply_cut_off_by_the_stop_goes_on_in_the_next_instance() {
 #[cfg(feature = "zruntime")]
 #[test]
 fn a_connection_on_a_local_runtime_goes_on() {
-    type LocalStream = zlink::zruntime::unix::Stream<zruntime::Local>;
+    type LocalStream = zlink::rt::unix::Stream<zruntime::Local>;
 
     zruntime::LocalRuntime::new().unwrap().block_on(async {
         let (server_end, client_end) = StdUnixStream::pair().unwrap();

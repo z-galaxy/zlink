@@ -16,6 +16,11 @@ use zlink::{
     varlink_service::{self, OwnedInfo, Proxy as _},
 };
 
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::rt::{
+    notified::{self, traits::State as _},
+    unix::{bind, connect},
+};
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::{
     notified::{self, traits::State as _},
@@ -23,11 +28,6 @@ use zlink::smol::{
 };
 #[cfg(feature = "tokio")]
 use zlink::tokio::{
-    notified::{self, traits::State as _},
-    unix::{bind, connect},
-};
-#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::{
     notified::{self, traits::State as _},
     unix::{bind, connect},
 };

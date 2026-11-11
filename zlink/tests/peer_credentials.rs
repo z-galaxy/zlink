@@ -10,12 +10,12 @@ use std::os::fd::AsRawFd;
 use tempfile::TempDir;
 use zlink::Listener;
 
+#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
+use zlink::rt::unix;
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::unix;
 #[cfg(feature = "tokio")]
 use zlink::tokio::unix;
-#[cfg(all(feature = "zruntime", not(any(feature = "tokio", feature = "smol"))))]
-use zlink::zruntime::unix;
 
 #[tokio::test]
 async fn peer_credentials_unix_socket() {

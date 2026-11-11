@@ -2230,9 +2230,9 @@ dependencies = [
  "tokio",
  "tracing-subscriber",
  "zlink-core",
+ "zlink-rt",
  "zlink-smol",
  "zlink-tokio",
- "zlink-zruntime",
  "zoter",
  "zruntime",
 ]
@@ -2321,6 +2321,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zlink-rt"
+version = "0.9.0"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tempfile",
+ "zlink-core",
+ "zruntime",
+]
+
+[[package]]
 name = "zlink-smol"
 version = "0.9.0"
 dependencies = [
@@ -2351,17 +2362,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "zlink-core",
-]
-
-[[package]]
-name = "zlink-zruntime"
-version = "0.9.0"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tempfile",
- "zlink-core",
- "zruntime",
 ]
 
 [[package]]
