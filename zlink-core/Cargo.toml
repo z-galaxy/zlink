@@ -56,14 +56,8 @@ libc = { version = "0.2", optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 # The bytes of the record of a hand-over, in base64.
 base64 = { version = "0.23.1", default-features = false, features = ["alloc"], optional = true }
-
-# Taken from git, as it's not released yet, until zlink is released.
-[target.'cfg(target_os = "linux")'.dependencies.zoter]
-git = "https://github.com/z-galaxy/zoter"
-branch = "main"
-version = "0.1.0"
-default-features = false
-optional = true
+# The traits through which a connection is handed over to the next instance of a service.
+zoter = { version = "0.1.0", default-features = false, optional = true }
 
 [dev-dependencies]
 doc-comment = "0.3.3"
