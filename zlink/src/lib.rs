@@ -12,10 +12,10 @@
     missing_docs
 )]
 #![warn(unreachable_pub)]
-// The README examples use the tokio runtime and hence the `tokio`-specific API.
-#![cfg_attr(feature = "tokio", doc = include_str!("../README.md"))]
+// The README examples use the zruntime runtime and hence the `zruntime`-specific API.
+#![cfg_attr(feature = "zruntime", doc = include_str!("../README.md"))]
 #![cfg_attr(
-    not(feature = "tokio"),
+    not(feature = "zruntime"),
     doc = "An asynchronous [Varlink](https://varlink.org/) API. See the \
         [project README](https://github.com/z-galaxy/zlink) for an overview and examples."
 )]
