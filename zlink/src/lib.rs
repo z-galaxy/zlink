@@ -23,8 +23,8 @@
 #[cfg(not(any(feature = "tokio", feature = "smol", feature = "zruntime")))]
 compile_error!("At least one runtime feature must be enabled: 'tokio', 'smol' or 'zruntime'");
 
-// The book examples use the tokio runtime and hence the `tokio`-specific API.
-#[cfg(all(doctest, feature = "tokio"))]
+// The book examples use the zruntime runtime and hence the `zruntime`-specific API.
+#[cfg(all(doctest, feature = "zruntime"))]
 mod doctests {
     // Book markdown checks.
     doc_comment::doctest!("../../book/src/introduction.md");

@@ -42,9 +42,11 @@ The zlink project is a Cargo workspace consisting of several crates:
 * **[`zlink-codegen`]**: Generates Rust code from Varlink IDL files.
 
 Since `zlink` re-exports everything you need, this book will only use the `zlink` crate in its
-examples. You enable your async runtime(s) through the additive cargo features `tokio` (the
-default), `smol` and `zruntime`, with the runtime-specific API of each residing in a module of the
-same name.
+examples. The API is async, but a program needs no async runtime of its own to use it: each runtime
+module of zlink has a `block_on`, which runs a future to completion on the calling thread, and the
+examples of this book use that of zruntime, [`zlink::zruntime::block_on`]. You enable your async
+runtime(s) through the additive cargo features `zruntime` (the default), `tokio` and `smol`, with
+the runtime-specific API of each residing in a module of the same name.
 
 ## Getting help
 
@@ -73,5 +75,6 @@ in the [`#zlink:matrix.org`] Matrix room. If something doesn't seem right, pleas
 [tokio]: https://tokio.rs/
 [smol]: https://github.com/smol-rs/smol
 [zruntime]: https://github.com/z-galaxy/zruntime
+[`zlink::zruntime::block_on`]: https://docs.rs/zlink/latest/zlink/zruntime/fn.block_on.html
 [`#zlink:matrix.org`]: https://matrix.to/#/#zlink:matrix.org
 [file an issue]: https://github.com/z-galaxy/zlink/issues/new

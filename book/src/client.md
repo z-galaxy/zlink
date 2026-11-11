@@ -80,9 +80,12 @@ enum ResolveError {
     QueryTimedOut,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = zlink::zruntime::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // The proxy methods are available directly on the connection.
     match conn.resolve_hostname("systemd.io").await? {

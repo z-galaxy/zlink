@@ -15,8 +15,8 @@ socket couldn't take at once, the unwritten part stays in the connection, which 
 flushed. A service that shuts down can give its clients a moment to read it:
 
 ```rust,noplayground
-# async fn example<Svc: zlink::Service<zlink::tokio::unix::Stream>>(
-#     server: zlink::Server<zlink::tokio::unix::Listener, Svc>,
+# async fn example<Svc: zlink::Service<zlink::zruntime::unix::Stream>>(
+#     server: zlink::Server<zlink::zruntime::unix::Listener, Svc>,
 #     sigterm: impl Future<Output = ()>,
 # ) -> Result<(), Box<dyn std::error::Error>> {
 use std::time::Duration;
@@ -30,10 +30,13 @@ let flushes = async {
         let _ = conn.flush().await;
     }
 };
-let _ = tokio::time::timeout(Duration::from_secs(1), flushes).await;
+let _ = zruntime::SharedRuntime::current()?.timeout(Duration::from_secs(1), flushes).await;
 # Ok(())
 # }
 ```
+
+This timeout uses the [zruntime] crate. Add it to your `Cargo.toml`, or use the timeout API of your
+runtime.
 
 A server that is given connections (`Server::with_connections`) continues them from where they
 were: it first writes what they still have to write, and then handles the method calls that were
@@ -53,7 +56,7 @@ takes them before its runtime starts any:
 ```rust,noplayground
 use std::time::Duration;
 
-use zlink::{Connection, Server, Stopped, connection::Handover, tokio::unix::Listener};
+use zlink::{Connection, Server, Stopped, connection::Handover, zruntime::unix::Listener};
 use zoter::{Passed, Store};
 
 # #[derive(Debug)]
@@ -74,7 +77,7 @@ fn start(sigterm: impl Future<Output = ()>) -> Result<(), Box<dyn std::error::Er
     // meanwhile, and nothing took the file descriptors that systemd passed.
     let passed = unsafe { Passed::from_env() }?;
 
-    tokio::runtime::Runtime::new()?.block_on(run(passed, sigterm))
+    zlink::zruntime::block_on(run(passed, sigterm))
 }
 
 async fn run(
@@ -109,7 +112,9 @@ async fn run(
                 let _ = conn.flush().await;
             }
         };
-        let _ = tokio::time::timeout(Duration::from_secs(1), flushes).await;
+        let _ = zruntime::SharedRuntime::current()?
+            .timeout(Duration::from_secs(1), flushes)
+            .await;
 
         return Ok(());
     };
@@ -133,3 +138,4 @@ upgraded to another protocol, are closed as the server stops: nothing generic ca
 them.
 
 [zoter]: https://github.com/z-galaxy/zoter
+[zruntime]: https://github.com/z-galaxy/zruntime
