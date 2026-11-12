@@ -79,7 +79,7 @@ main reasons zlink can outperform bus-based IPC.
 
 ## Low-level method calls
 
-For most use cases you'll want the high-level [`proxy`](client.html) and [`service`](service.html)
+For most use cases you'll want the high-level [`proxy`](client.html) and [`interface`](service.html)
 macros, but let's start at the bottom to understand what the machinery looks like. `Connection`
 provides `send_call`, `receive_reply` and the combined `call_method` for the client side.
 

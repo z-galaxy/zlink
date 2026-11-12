@@ -2,9 +2,9 @@
 
 <!-- toc -->
 
-We've seen that the [`service` macro](service.html#introspection-for-free) implements the standard
-`org.varlink.service` introspection interface for you. This chapter covers the other side — how to
-*consume* introspection from a client — and how to turn IDL into ready-made Rust code.
+We've seen that the [`Service` derive](service.html#introspection-for-free) implements the
+standard `org.varlink.service` introspection interface for you. This chapter covers the other side
+— how to *consume* introspection from a client — and how to turn IDL into ready-made Rust code.
 
 The relevant cargo features are:
 
@@ -63,7 +63,7 @@ cargo run --example varlink-inspect --features="introspection idl-parse" -- \
 
 ## Describing your types: the `introspect` derives
 
-For the compile-time direction — describing Rust types in IDL terms so the `service` macro can
+For the compile-time direction — describing Rust types in IDL terms so the `interface` macro can
 generate interface descriptions — the `introspect` module provides three derives:
 
 * `introspect::Type` for structs and enums used as parameters or replies;

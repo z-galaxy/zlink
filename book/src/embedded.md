@@ -21,8 +21,8 @@ The `no_std` surface is the *client* side and the plumbing underneath it:
 * IDL types and parsing (`idl`, `idl-parse` features),
 * logging via [`defmt`](https://defmt.ferrous-systems.com/) instead of `tracing`.
 
-The server side (`Server`, `Listener`, the `service` macro) and file-descriptor passing currently
-require `std`.
+The server side (`Server`, `Listener`, the `interface` and `Service` macros) and file-descriptor
+passing currently require `std`.
 
 To use zlink in `no_std`, depend on `zlink-core` directly (the `zlink` crate's runtime integrations
 are `std`-only) and disable default features:

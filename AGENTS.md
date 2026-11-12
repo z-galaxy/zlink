@@ -70,7 +70,10 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 ### Key Components
 - **Connection**: Low-level API for message send/receive with unique IDs for read/write halves
 - **Server**: Listens for connections and handles method calls via services
-- **Service**: Trait defining IPC service implementations
+- **Interface**: Trait for one interface of a service, with the state that the interfaces share;
+  `#[interface]` implements it for the type of an `impl` block
+- **Service**: Trait defining IPC service implementations; `#[derive(Service)]` implements it for a
+  struct whose fields are interface types (and at most one `#[zlink(state)]` field)
 - **Call/Reply**: Core message types for IPC communication
 
 ### Feature System
