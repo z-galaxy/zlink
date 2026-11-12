@@ -33,6 +33,9 @@ ryu = { version = "1.0", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "async-await-macro",
+    # For `Stream` on a boxed stream, which the replies of a method that returns an `impl Stream`
+    # are boxed into.
+    "alloc",
 ] }
 tracing = { version = "0.1.41", default-features = false, optional = true }
 defmt = { version = "1.0.1", default-features = false, optional = true }
