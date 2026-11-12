@@ -117,6 +117,11 @@ Some things to note:
 * The struct is what you hand to the `Server`. A service with several interfaces has one field for
   each, as the [section on that](#several-interfaces-and-shared-state) shows.
 
+Readers coming from older versions of zlink may remember a `service` attribute macro that did all
+of this on a single `impl` block. It is deprecated: put `interface` on the `impl` block instead,
+and move the `vendor`, `product`, `version` and `url` attributes to a struct that derives
+`Service`.
+
 ### ⚠ `Server::run` and `tokio::spawn`
 
 Due to a [compiler bug][rustc-100013], the future returned by `Server::run` cannot currently be

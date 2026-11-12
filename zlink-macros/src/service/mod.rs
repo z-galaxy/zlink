@@ -1,8 +1,8 @@
 //! The implementation of the `interface` and `service` attribute macros.
 //!
 //! `#[interface]` implements the `Interface` trait for the type of an impl block, whose methods
-//! all belong to one interface. `#[service]` implements the `Service` trait for it instead: a
-//! whole service, of one or more interfaces.
+//! all belong to one interface. The deprecated `#[service]` implements the `Service` trait for it
+//! instead: a whole service, of one or more interfaces.
 
 mod attrs;
 mod codegen;

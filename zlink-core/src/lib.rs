@@ -78,7 +78,10 @@ pub mod varlink_service;
 pub use zlink_macros::proxy;
 
 #[cfg(feature = "service")]
-pub use zlink_macros::{Service, interface, service};
+#[allow(deprecated)]
+pub use zlink_macros::service;
+#[cfg(feature = "service")]
+pub use zlink_macros::{Service, interface};
 
 /// Re-export of futures-util for use in generated code.
 #[doc(hidden)]

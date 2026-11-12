@@ -2138,643 +2138,93 @@ pub fn interface(
     service::interface(attr.into(), input.into()).into()
 }
 
-/// Transforms an impl block into a `Service` trait implementation.
+/// Implements `Service` for the type of an `impl` block: a whole service, of one or more
+/// interfaces.
 ///
-/// **Requires the `service` feature to be enabled.** The `service` feature automatically enables
-/// the `introspection` feature, allowing the macro to generate interface descriptions and handle
-/// the standard `org.varlink.service` interface automatically.
+/// **Deprecated**: write each interface of the service as a type of its own, with the
+/// [`interface`](macro@interface) attribute macro on its `impl` block, and make those types the
+/// fields of a struct that derives [`Service`](derive@Service). The documentation of
+/// [`interface`](macro@interface) covers what the methods of a block can be.
 ///
-/// This attribute macro takes a regular impl block and generates the necessary code to implement
-/// the `Service` trait, enabling the type to handle Varlink method calls.
+/// The arguments of the macro are those of [`interface`](macro@interface) (with the interface given
+/// by key only, and optional), and the metadata of the service: `vendor`, `product`, `version` and
+/// `url`, each an expression. A method can switch to another interface, for itself and the methods
+/// after it, with `#[zlink(interface = "...")]`, which can also give the custom types of that
+/// interface, as `#[zlink(interface = "...", types = [...])]`. `#[zlink(state)]` parameters aren't
+/// supported, since such a service has no state to lend.
 ///
-/// # Automatic Introspection Support
+/// # Migrating
 ///
-/// The generated service automatically handles the `org.varlink.service` interface:
+/// Until a service is migrated, the deprecation warning of this macro can be silenced with
+/// `#![allow(deprecated)]` in the module of the `impl` block, or in an outer one. An
+/// `#[allow(deprecated)]` on the `impl` block itself has no effect on the attribute macro above it.
 ///
-/// - **`GetInfo`**: Returns service metadata (vendor, product, version, URL) and a list of all
-///   implemented interfaces.
-/// - **`GetInterfaceDescription`**: Returns the IDL description for any implemented interface,
-///   generated at compile time from the method signatures and types.
-/// - **Unknown methods**: Return `MethodNotFound` error with the method name.
-/// - **Unknown interfaces** (in `GetInterfaceDescription`): Return `InterfaceNotFound` error.
-/// - **Protocol upgrades**: Calls asking for their connection to be upgraded to another protocol
-///   (the `upgrade` flag) get an `InvalidParameter` error naming `upgrade`, unless they are to a
-///   method marked with `#[zlink(upgrade)]`. Calls to those that don't ask for an upgrade get an
-///   `ExpectedUpgrade` error (see [Protocol Upgrades](#protocol-upgrades)).
-///
-/// # Supported Attributes
-///
-/// ## On the impl block:
-///
-/// * `crate = "path"` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
-/// * `interface = "..."` - Sets the default interface name for all methods. Useful for services
-///   that implement a single interface. Methods can still override this with method-level
-///   `#[zlink(interface = "...")]`.
-/// * `types = [Type1, Type2, ...]` - Custom types to include in interface descriptions. These types
-///   must implement `CustomType` (typically via `#[derive(CustomType)]`). For single-interface
-///   services, these types are included in that interface's IDL output. For multi-interface
-///   services, prefer specifying types per interface using the method-level `#[zlink(interface =
-///   "...", types = [...])]` attribute instead.
-/// * `vendor = <expr>` - The vendor name for `GetInfo` response. Defaults to empty string.
-/// * `product = <expr>` - The product name for `GetInfo` response. Defaults to empty string.
-/// * `version = <expr>` - The version string for `GetInfo` response. Defaults to empty string. E.g.
-///   `version = env!("CARGO_PKG_VERSION")`.
-/// * `url = <expr>` - The URL for `GetInfo` response. Defaults to empty string.
-///
-/// ## On methods:
-///
-/// * `#[zlink(interface = "...")]` - Set the interface name for this and subsequent methods. If an
-///   interface is specified at the impl block level, this overrides it for the current method.
-/// * `#[zlink(interface = "...", types = [Type1, ...])]` - Set the interface and associate custom
-///   types with it. This scopes the types to the specified interface so they only appear in that
-///   interface's introspection output. Particularly useful for multi-interface services.
-/// * `#[zlink(rename = "MethodName")]` - Custom Varlink method name.
-/// * `#[zlink(upgrade)]` - Mark a method that upgrades its connection to another protocol. The
-///   method returns the state that takes the upgraded connection over along with its reply. See
-///   [Protocol Upgrades](#protocol-upgrades).
-///
-/// ## On parameters:
-///
-/// * `#[zlink(rename = "paramName")]` - Custom serialized parameter name. **Required** for
-///   parameter names starting with `_` (the Rust convention for unused parameters), since such
-///   names are not valid in the Varlink IDL.
-/// * `#[zlink(connection)]` - Mark this parameter to receive a mutable reference to the connection.
-///   This is useful for accessing peer credentials or other connection-specific functionality.
-///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyService`).
-///
-/// # Compile-time Type Checking
-///
-/// The macro verifies at compile time that any custom type referenced in a method's input *or*
-/// output parameters is declared in `types = [...]`. If you forget to list a type, you'll get
-/// a compile error:
-///
-/// ```rust,compile_fail
-/// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect::CustomType, service};
-///
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
-/// struct Book { title: String }
-///
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
-/// struct BookList { books: Vec<Book> }
-///
-/// struct LibraryService;
-///
-/// // Missing `BookList` in `types = [...]` even though it's returned by `list_books`.
-/// #[service(interface = "org.example.library", types = [Book])]
-/// impl LibraryService {
-///     async fn list_books(&self) -> BookList {
-///         BookList { books: vec![] }
-///     }
-/// }
-/// ```
-///
-/// Similarly, parameter names starting with `_` are rejected because they are not valid in the
-/// Varlink IDL. Specify the wire name explicitly with `#[zlink(rename = "...")]`.
-///
-/// # Generated Code
-///
-/// The macro generates an `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method,
-/// along with internal helper types for serialization/deserialization. If there are [upgrade
-/// methods](#protocol-upgrades), the impl sets `Service::Upgrade` to the type of the state that
-/// they return, and requires it to implement `TakeOver<Sock>`, which it can do for only some
-/// sockets.
-///
-/// # Error Handling
-///
-/// Methods can return `Result<T, E>` with any error type `E` that implements `Serialize` and
-/// `Debug`. Different methods can use different error types - the macro automatically generates
-/// internal wrapper types to handle all unique error types.
-///
-/// When a method returns `Err(e)`, the macro generates code that wraps it in the appropriate
-/// combo enum variant and returns `MethodReply::Error(...)`.
-/// When a method returns `Ok(v)`, it returns `MethodReply::Single(Some(v))`, or
-/// `MethodReply::Upgrade` for an [upgrade method](#protocol-upgrades).
-///
-/// Methods can also return plain values (not wrapped in Result) - these are always treated as
-/// successful responses.
-///
-/// # Custom Socket Bounds
-///
-/// By default, the generated `Service` impl uses a generic socket parameter with just the `Socket`
-/// bound. If you need additional bounds (e.g., for peer credential checking), you can provide your
-/// own generics on the impl block:
+/// A service written with this macro:
 ///
 /// ```rust
-/// use zlink::{service, connection::socket::FetchPeerCredentials, introspect};
+/// mod before {
+///     #![allow(deprecated)]
 ///
-/// struct MyService;
+///     struct Bank;
 ///
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.service")]
-/// enum MyError {
-///     ServiceError,
-/// }
+///     #[zlink::service(vendor = "Example Corp")]
+///     impl Bank {
+///         #[zlink(interface = "org.example.accounts")]
+///         async fn open(&mut self) {}
 ///
-/// #[service]
-/// impl<Sock> MyService
-/// where
-///     Sock::ReadHalf: FetchPeerCredentials,
-/// {
-///     #[zlink(interface = "org.example.service")]
-///     async fn get_status(&self) -> Result<(), MyError> {
-///         Ok(())
+///         #[zlink(interface = "org.example.loans")]
+///         async fn borrow(&mut self, amount: u64) {
+///             let _ = amount;
+///         }
 ///     }
 /// }
 /// ```
 ///
-/// The first type parameter is used as the socket type for the generated `Service` impl. The
-/// `Socket` bound is automatically added, so you only need to specify additional bounds.
-///
-/// # Connection Parameter
-///
-/// Methods can receive a mutable reference to the connection using `#[zlink(connection)]`:
+/// is written with [`interface`](macro@interface) and [`Service`](derive@Service) as:
 ///
 /// ```rust
-/// use zlink::{service, Connection, connection::socket::FetchPeerCredentials, introspect};
+/// struct Accounts;
 ///
-/// struct MyService;
-///
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.service")]
-/// enum MyError {
-///     ServiceError,
+/// #[zlink::interface("org.example.accounts")]
+/// impl Accounts {
+///     async fn open(&mut self) {}
 /// }
 ///
-/// #[service]
-/// impl<Sock> MyService
-/// where
-///     Sock::ReadHalf: FetchPeerCredentials,
-/// {
-///     #[zlink(interface = "org.example.service")]
-///     async fn check_credentials(
-///         &self,
-///         #[zlink(connection)] conn: &mut Connection<Sock>,
-///     ) -> Result<(), MyError> {
-///         let _creds = conn.peer_credentials().await;
-///         Ok(())
+/// struct Loans;
+///
+/// #[zlink::interface("org.example.loans")]
+/// impl Loans {
+///     async fn borrow(&mut self, amount: u64) {
+///         let _ = amount;
 ///     }
+/// }
+///
+/// #[derive(zlink::Service)]
+/// #[zlink(vendor = "Example Corp")]
+/// struct Bank {
+///     accounts: Accounts,
+///     loans: Loans,
 /// }
 /// ```
 ///
-/// Methods with connection parameters are only callable through the `Service` trait (not directly
-/// on the type), since they require the socket type to be known.
-///
-/// # Streaming Methods
-///
-/// Methods that send multiple replies (the Varlink `more` flag) are marked with `#[zlink(more)]`.
-/// Such a method must:
-///
-/// - Take `more: bool` as the first parameter after `self`. This receives the value of the call's
-///   `more` flag, allowing the method to behave differently when the client only wants a single
-///   reply.
-/// - Return `impl Stream<Item = Reply<T>>` (or `impl Stream<Item = (Reply<T>, Vec<OwnedFd>)>` when
-///   combined with `#[zlink(return_fds)]`). A concrete stream type is also accepted; in that case
-///   the macro infers `Reply<T>` from the type's first generic parameter.
-/// - Set `Reply::set_continues(Some(true))` on every intermediate item and `Some(false)` on the
-///   final one so that the client knows when the stream ends.
-///
-/// Like systemd does, the interface description marks such a method with a
-/// `[Supports 'more' flag]` comment right before it.
-///
-/// ## Returning Method Errors From Streams
-///
-/// Streaming methods can also opt in to emitting Varlink error replies as stream items. To do so,
-/// return a stream whose item is `Result<Reply<T>, E>` (or `(Result<Reply<T>, E>, Vec<OwnedFd>)`
-/// for `#[zlink(return_fds)]`). When the stream yields `Err(e)`, the server sends an error reply
-/// to the client. The error type `E` must implement `serde::Serialize` and `Debug`, just like for
-/// non-streaming methods, and (because the stream outlives `&self`) cannot borrow from the
-/// service. Different streaming methods may use different error types; the macro combines them
-/// into a single internal enum exposed as `Service::ReplyStreamError`.
-///
-/// Note that, on the wire, an error reply terminates the stream — a client that receives an
-/// error reply should not expect any further items. The macro does not enforce this on the
-/// server side, so callers can still drain the rest of the stream if the server emits more items
-/// after an error.
-///
-/// ## Example
-///
-/// ```rust
-/// use futures_util::Stream;
-/// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect::Type, service, Reply};
-///
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
-/// struct Tick {
-///     value: u32,
-/// }
-///
-/// struct Counter;
-///
-/// #[service(interface = "org.example.counter")]
-/// impl Counter {
-///     // Streams `Tick` values from 1 to `to`. If the caller did not set the `more` flag, only a
-///     // single tick is emitted.
-///     #[zlink(more)]
-///     async fn count(
-///         &self,
-///         more: bool,
-///         to: u32,
-///     ) -> impl Stream<Item = Reply<Tick>> + Unpin {
-///         let to = if more { to.max(1) } else { 1 };
-///         futures_util::stream::iter((1..=to).map(move |value| {
-///             Reply::new(Some(Tick { value })).set_continues(Some(value < to))
-///         }))
-///     }
-/// }
-/// ```
-///
-/// ## Streaming With Errors
-///
-/// ```rust
-/// use futures_util::Stream;
-/// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect, service, Reply};
-///
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, introspect::Type)]
-/// struct Tick { value: u32 }
-///
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.counter")]
-/// enum CountError {
-///     AtZero,
-/// }
-///
-/// struct Counter;
-///
-/// #[service(interface = "org.example.counter")]
-/// impl Counter {
-///     #[zlink(more)]
-///     async fn count(
-///         &self,
-///         _more: bool,
-///         to: u32,
-///     ) -> impl Stream<Item = Result<Reply<Tick>, CountError>> + Unpin {
-///         if to == 0 {
-///             return futures_util::stream::iter(vec![Err(CountError::AtZero)]);
-///         }
-///         let last = to;
-///         let items: Vec<Result<Reply<Tick>, CountError>> = (1..=to)
-///             .map(move |value| {
-///                 Ok(Reply::new(Some(Tick { value })).set_continues(Some(value < last)))
-///             })
-///             .collect();
-///         futures_util::stream::iter(items)
-///     }
-/// }
-/// ```
-///
-/// # Protocol Upgrades
-///
-/// A call can ask for its connection to be upgraded to another protocol (the Varlink `upgrade`
-/// flag), typically a binary one to transfer large amounts of data or to pass file descriptors.
-/// The service confirms the upgrade by replying with a single successful reply, after which the
-/// connection doesn't speak Varlink anymore: the server stops serving it and hands its socket over
-/// to the new protocol. An error reply refuses the upgrade and the connection remains a Varlink
-/// one.
-///
-/// Methods that upgrade their connections are marked with `#[zlink(upgrade)]`. Such a method
-/// returns its reply (which can be `()`) along with the state that takes the upgraded connection
-/// over, as `(Reply, State)` or `Result<(Reply, State), Error>`, where `State` implements
-/// `TakeOver<Sock>`. Only the reply is part of the interface description. Upgrade methods are
-/// otherwise like regular ones, and they don't need an explicit generic socket type parameter
-/// unless they have a [connection parameter](#connection-parameter). They can't be combined with
-/// `#[zlink(more)]` since a single reply confirms an upgrade, nor with `#[zlink(return_fds)]`: pass
-/// file descriptors over the upgraded connection instead.
-///
-/// Calls to an upgrade method that don't ask for an upgrade get an `ExpectedUpgrade` error, without
-/// the method being called. One-way calls to it aren't served either, since they can't get the
-/// reply confirming the upgrade. Calls to any other method (including those of
-/// `org.varlink.service`) that do ask for an upgrade get an `InvalidParameter` error naming
-/// `upgrade`. Like systemd does, the interface description marks an upgrade method with a
-/// `[Requires 'upgrade' flag]` comment right before it.
-///
-/// Once the reply is sent, the server calls `TakeOver::take_over` on the state, so each protocol
-/// takes its connections over in its own way:
-///
-/// * The state carries what the new protocol needs from the call (e.g. its parameters), which the
-///   method moves into it.
-/// * `take_over` takes the socket of the upgraded connection, an `Upgraded<Sock>`, and returns the
-///   future that speaks the new protocol over it. The server polls the future along with its other
-///   connections until it completes, so it doesn't need a task of its own. The future can't borrow
-///   the service, which the server keeps calling into.
-/// * An `Upgraded<Sock>` is a `Socket`, so `split` gives the halves to read from and write to. The
-///   client doesn't have to wait for the reply before it starts talking the new protocol, so the
-///   read half first returns the data that the client sent after the call, if the server has read
-///   any of it already. If the upgrade is refused instead, such data breaks the Varlink connection.
-/// * The future is `Send` whenever the state and the futures of the socket are, so a server with
-///   upgrade methods can be `Send` (see the caveats of `Server::run` for why it can't be yet).
-/// * All the upgrade methods return the same type of state. To upgrade to several protocols, they
-///   can share one state type, e.g. an enum whose `take_over` matches on itself.
-/// * The state can't refuse the upgrade, since the reply that confirms it is sent before the state
-///   takes the connection over. Do the checks that the upgrade depends on, e.g. of
-///   `Connection::peer_credentials`, in the upgrade method instead, using a `#[zlink(connection)]`
-///   parameter, and return an error to refuse the upgrade.
-///
-/// ```rust
-/// use serde::Serialize;
-/// use std::{collections::HashMap, os::fd::OwnedFd};
-/// use zlink::{
-///     connection::socket::{Socket, WriteHalf},
-///     introspect, service,
-///     service::{TakeOver, Upgraded},
-/// };
-///
-/// #[derive(Debug, Serialize, introspect::Type)]
-/// struct Download {
-///     size: u64,
-/// }
-///
-/// #[derive(Debug, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.blobs")]
-/// enum BlobError {
-///     NotFound,
-/// }
-///
-/// struct Blobs {
-///     blobs: HashMap<String, Vec<u8>>,
-/// }
-///
-/// #[service(interface = "org.example.blobs")]
-/// impl Blobs {
-///     /// Replies with the size of the blob, which is then sent over the upgraded connection.
-///     #[zlink(upgrade)]
-///     async fn download(&self, name: String) -> Result<(Download, SendBlob), BlobError> {
-///         // The error reply refuses the upgrade.
-///         let blob = self.blobs.get(&name).ok_or(BlobError::NotFound)?.clone();
-///
-///         Ok((Download { size: blob.len() as u64 }, SendBlob(blob)))
-///     }
-/// }
-///
-/// // The state that takes the upgraded connection over, for any type of socket.
-/// struct SendBlob(Vec<u8>);
-///
-/// impl<Sock> TakeOver<Sock> for SendBlob
-/// where
-///     Sock: Socket,
-/// {
-///     async fn take_over(self, socket: Upgraded<Sock>) {
-///         let (_read, mut write) = socket.split();
-///         let fds = &[] as &[OwnedFd];
-///         let _ = write
-///             .write_all(&self.0, fds, #[cfg(target_os = "linux")] None)
-///             .await;
-///     }
-/// }
-/// ```
-///
-/// # Example
-///
-/// ```rust
-/// use zlink::{
-///     introspect::{self, Type},
-///     service,
-///     zruntime::unix::{bind, connect},
-///     Server,
-/// };
-/// use serde::{Deserialize, Serialize};
-///
-/// // Response type for balance operations.
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
-/// struct Balance {
-///     amount: i64,
-/// }
-///
-/// // Error type - must derive zlink::ReplyError for proper serialization.
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.bank")]
-/// enum BankError {
-///     InsufficientFunds { available: i64, requested: i64 },
-///     InvalidAmount { amount: i64 },
-///     AccountLocked,
-/// }
-///
-/// struct BankAccount {
-///     balance: i64,
-///     locked: bool,
-/// }
-///
-/// impl BankAccount {
-///     fn new(initial_balance: i64) -> Self {
-///         Self { balance: initial_balance, locked: false }
-///     }
-/// }
-///
-/// // Service implementation with error handling.
-/// #[service]
-/// impl BankAccount {
-///     // Method that returns a plain value (not Result) - always succeeds.
-///     #[zlink(interface = "org.example.bank")]
-///     async fn get_balance(&self) -> Balance {
-///         Balance { amount: self.balance }
-///     }
-///
-///     // Method that can fail - returns Result<Balance, BankError>.
-///     async fn deposit(&mut self, amount: i64) -> Result<Balance, BankError> {
-///         if self.locked {
-///             return Err(BankError::AccountLocked);
-///         }
-///         if amount <= 0 {
-///             return Err(BankError::InvalidAmount { amount });
-///         }
-///         self.balance += amount;
-///         Ok(Balance { amount: self.balance })
-///     }
-///
-///     async fn withdraw(&mut self, amount: i64) -> Result<Balance, BankError> {
-///         if self.locked {
-///             return Err(BankError::AccountLocked);
-///         }
-///         if amount <= 0 {
-///             return Err(BankError::InvalidAmount { amount });
-///         }
-///         if amount > self.balance {
-///             return Err(BankError::InsufficientFunds {
-///                 available: self.balance,
-///                 requested: amount,
-///             });
-///         }
-///         self.balance -= amount;
-///         Ok(Balance { amount: self.balance })
-///     }
-///
-///     // Method returning Result<(), E> - void success, can fail.
-///     async fn lock_account(&mut self) -> Result<(), BankError> {
-///         if self.locked {
-///             return Err(BankError::AccountLocked);
-///         }
-///         self.locked = true;
-///         Ok(())
-///     }
-/// }
-///
-/// // Client-side proxy definition.
-/// #[zlink::proxy("org.example.bank")]
-/// trait BankProxy {
-///     async fn get_balance(&mut self) -> zlink::Result<Result<Balance, BankError>>;
-///     async fn deposit(&mut self, amount: i64) -> zlink::Result<Result<Balance, BankError>>;
-///     async fn withdraw(&mut self, amount: i64) -> zlink::Result<Result<Balance, BankError>>;
-///     async fn lock_account(&mut self) -> zlink::Result<Result<(), BankError>>;
-/// }
-///
-/// # zlink::zruntime::block_on(async {
-/// // Server setup.
-/// let dir = tempfile::tempdir()?;
-/// let socket_path = dir.path().join("service-example.sock");
-/// let listener = bind(&socket_path)?;
-/// let service = BankAccount::new(1000);
-/// let server = Server::new(listener, service);
-///
-/// // Run server and client concurrently.
-/// tokio::select! {
-///     res = server.run() => res?,
-///     res = async {
-///         let mut conn = connect(&socket_path).await?;
-///
-///         // Check initial balance.
-///         let balance = conn.get_balance().await?.unwrap();
-///         assert_eq!(balance.amount, 1000);
-///
-///         // Successful deposit.
-///         let balance = conn.deposit(500).await?.unwrap();
-///         assert_eq!(balance.amount, 1500);
-///
-///         // Successful withdrawal.
-///         let balance = conn.withdraw(200).await?.unwrap();
-///         assert_eq!(balance.amount, 1300);
-///
-///         // Error: withdraw more than available.
-///         let err = conn.withdraw(5000).await?.unwrap_err();
-///         assert_eq!(err, BankError::InsufficientFunds { available: 1300, requested: 5000 });
-///
-///         // Error: invalid amount.
-///         let err = conn.deposit(-100).await?.unwrap_err();
-///         assert_eq!(err, BankError::InvalidAmount { amount: -100 });
-///
-///         // Lock account and verify subsequent operations fail.
-///         conn.lock_account().await?.unwrap();
-///         let err = conn.withdraw(100).await?.unwrap_err();
-///         assert_eq!(err, BankError::AccountLocked);
-///
-///         Ok::<(), Box<dyn std::error::Error>>(())
-///     } => res?,
-/// }
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-///
-/// # Introspection Example
-///
-/// The service automatically provides introspection via the `org.varlink.service` interface:
-///
-/// ```rust
-/// use zlink::{
-///     introspect::{self, CustomType, Type},
-///     service,
-///     varlink_service::Proxy,
-/// };
-/// use serde::{Deserialize, Serialize};
-///
-/// // Custom type - must derive CustomType to be included in IDL.
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
-/// struct Balance {
-///     amount: i64,
-/// }
-///
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
-/// #[zlink(interface = "org.example.bank")]
-/// enum BankError {
-///     InsufficientFunds { available: i64 },
-/// }
-///
-/// struct BankService;
-///
-/// // Include custom types in the service for IDL generation.
-/// #[service(
-///     types = [Balance],
-///     vendor = "Example Corp",
-///     product = "Bank Service",
-///     version = env!("CARGO_PKG_VERSION"),
-///     url = "https://example.com/bank"
-/// )]
-/// impl BankService {
-///     #[zlink(interface = "org.example.bank")]
-///     async fn get_balance(&self) -> Result<Balance, BankError> {
-///         Ok(Balance { amount: 1000 })
-///     }
-/// }
-///
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// # use zlink::test_utils::mock_socket::MockSocket;
-/// // GetInfo returns metadata and list of interfaces.
-/// # let response = format!(
-/// #     r#"{{"parameters":{{"vendor":"Example Corp","product":"Bank Service","version":"{}","url":"https://example.com/bank","interfaces":["org.example.bank","org.varlink.service"]}}}}"#,
-/// #     env!("CARGO_PKG_VERSION"),
-/// # );
-/// # let socket = MockSocket::with_responses(&[&response]);
-/// # let mut conn = zlink::Connection::new(socket);
-/// let info = conn.get_info().await?.unwrap();
-/// assert_eq!(info.vendor, "Example Corp");
-/// let interfaces: Vec<&str> = info.interfaces.iter().map(|s| s.as_ref()).collect();
-/// assert_eq!(interfaces.as_slice(), ["org.example.bank", "org.varlink.service"]);
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # }).unwrap();
-///
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// # use zlink::test_utils::mock_socket::MockSocket;
-/// // GetInterfaceDescription returns the IDL, which can be parsed to verify methods and types.
-/// # let responses = [
-/// #     r#"{"parameters":{"description":"interface org.example.bank\n\ntype Balance (amount: int)\n\nmethod GetBalance() -> (amount: int)\n\nerror InsufficientFunds (available: int)"}}"#,
-/// # ];
-/// # let socket = MockSocket::with_responses(&responses);
-/// # let mut conn = zlink::Connection::new(socket);
-/// let desc = conn
-///     .get_interface_description("org.example.bank".try_into()?)
-///     .await?
-///     .unwrap();
-/// let interface = desc.parse()?;
-/// assert_eq!(interface.name(), "org.example.bank");
-///
-/// // Verify methods are present.
-/// let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
-/// assert_eq!(method_names.as_slice(), ["GetBalance"]);
-///
-/// // Verify custom types are included.
-/// let type_names: Vec<_> = interface.custom_types().map(|t| t.name()).collect();
-/// assert_eq!(type_names.as_slice(), ["Balance"]);
-///
-/// // Verify errors are present.
-/// let error_names: Vec<_> = interface.errors().map(|e| e.name()).collect();
-/// assert_eq!(error_names.as_slice(), ["InsufficientFunds"]);
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # }).unwrap();
-/// ```
-///
-/// # Method Name Conversion
-///
-/// By default, method names are converted from snake_case to PascalCase for the Varlink call.
-/// For example, `get_balance` becomes `GetBalance`. Use `#[zlink(rename = "...")]` to override
-/// this.
-///
-/// # Full Method Path
-///
-/// The full Varlink method path is constructed as `{interface}.{MethodName}`. For example,
-/// if the interface is `org.example.bank` and the method is `GetBalance`, the full path
-/// will be `org.example.bank.GetBalance`.
-///
-/// # Interface Propagation
-///
-/// The interface for methods is determined in this order:
-/// 1. If the method has `#[zlink(interface = "...")]`, that interface is used.
-/// 2. Otherwise, the interface is inherited from the previous method or from the macro-level
-///    `interface = "..."` attribute.
-///
-/// For services implementing a single interface, specifying `interface = "..."` at the macro level
-/// is the simplest approach - all methods automatically use that interface without needing
-/// individual attributes.
+/// What differs:
+///
+/// * The metadata of the service (`vendor`, `product`, `version` and `url`) goes on the struct, as
+///   `#[zlink(...)]`.
+/// * Each interface is a type, and an `impl` block, of its own, where a method of a `service` block
+///   switches interfaces with `#[zlink(interface = "...")]`. The data that the methods of several
+///   interfaces share goes in a `#[zlink(state)]` field of the struct, which they borrow through
+///   `#[zlink(state)]` parameters.
+/// * The custom types of an interface are given by `types = [...]` on its
+///   [`interface`](macro@interface) attribute, or on its methods.
+/// * A call to a method that the service doesn't have gets a `MethodNotFound` error that names the
+///   method, where a `service` block replies with the name `unknown`.
 #[cfg(feature = "service")]
+#[deprecated(
+    since = "0.9.0",
+    note = "use the `interface` attribute macro on the `impl` block of each interface, and derive \
+            `Service` for a struct whose fields are the interfaces"
+)]
 #[proc_macro_attribute]
 pub fn service(
     attr: proc_macro::TokenStream,
