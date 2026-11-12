@@ -73,7 +73,7 @@ impl<'a> Interface<'a> {
     }
 
     /// Returns the name of the interface.
-    pub fn name(&self) -> &InterfaceName<'a> {
+    pub const fn name(&self) -> &InterfaceName<'a> {
         &self.name
     }
 
