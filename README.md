@@ -29,7 +29,8 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Unix domain sockets**: Communicate over Unix domain socket transports.
 - **File descriptor passing**: Pass file descriptors along with messages over Unix domain
   sockets, [compatible with systemd's `sd-varlink`][fd-passing].
-- **Runtime choice**: Use the Tokio, smol or zruntime async runtime.
+- **Runtime choice**: Use the zruntime (the default), Tokio or smol async runtime, each with a
+  `block_on` for programs that have no async runtime of their own.
 - **Code generation**: Generate Rust code from Varlink IDL files.
 
 📖 To learn all about using zlink (and Varlink) step by step, check out
@@ -61,10 +62,14 @@ macros:
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::{select, sync::oneshot};
-use zlink::{introspect, proxy, service, tokio::unix, ReplyError, Server};
+use zlink::{introspect, proxy, service, zruntime::unix, ReplyError, Server};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Run the async code on zruntime, the default runtime.
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Create a channel to signal when server is ready.
     let (ready_tx, ready_rx) = oneshot::channel();
 
@@ -242,6 +247,30 @@ impl Calculator {
 For ready-to-run examples you can execute with `cargo run`, see the [`examples`](zlink/examples)
 directory.
 
+## Async runtimes
+
+zlink spawns no tasks of its own: its connections and servers make progress as their futures are
+polled, by whichever executor polls them. Its runtime-specific API resides in a module for each
+runtime: `zlink::zruntime` for [zruntime] (the default), and `zlink::tokio` and `zlink::smol` for
+Tokio and smol. Each of these modules has a `block_on` too, which runs a future to completion on the
+calling thread, driving the runtime of the module, for a program that has no async runtime of its
+own: put the async code in one call to it, as the examples in this README do with
+[`zlink::zruntime::block_on`]. The sockets of zruntime and smol can be used from any other executor
+as well, while those of Tokio need a Tokio runtime, such as that of `zlink::tokio::block_on`.
+
+To use Tokio or smol instead of zruntime, enable the `tokio` or `smol` feature, and use the API
+under its module:
+
+```toml
+[dependencies]
+zlink = { version = "0.9", default-features = false, features = [
+    "tokio",
+    "service",
+    "proxy",
+    "tracing",
+] }
+```
+
 ## Code Generation from IDL
 
 zlink-codegen can generate Rust code from Varlink interface description files:
@@ -290,10 +319,13 @@ responses.
 ```rust,no_run
 use futures_util::{StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
-use zlink::{proxy, tokio::unix, ReplyError};
+use zlink::{proxy, zruntime::unix, ReplyError};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to a batch processing service in the XDG runtime dir
     // (e.g. /run/user/1000/batch_processor.varlink).
     let socket_path = dirs::runtime_dir()
@@ -392,9 +424,9 @@ enum ProcessError {
 
 ### Main Features
 
-- `tokio` (default): Enable tokio runtime integration, under the `tokio` module.
+- `zruntime` (default): Enable zruntime runtime integration, under the `zruntime` module.
+- `tokio`: Enable tokio runtime integration, under the `tokio` module.
 - `smol`: Enable smol runtime integration, under the `smol` module.
-- `zruntime`: Enable zruntime runtime integration, under the `zruntime` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
@@ -405,9 +437,9 @@ enum ProcessError {
   service that restarts under systemd, through [zoter](https://github.com/z-galaxy/zoter). It
   builds nothing on platforms other than Linux.
 
-The runtime features are additive: both can be enabled at the same time, with the
-runtime-specific API (currently the `unix` and `notified` modules) of each residing in its own
-module. The rest of the API is runtime-agnostic and available at the crate root.
+The runtime features are additive: several can be enabled at the same time, with the
+runtime-specific API (currently `block_on` and the `unix` and `notified` modules) of each residing
+in its own module. The rest of the API is runtime-agnostic and available at the crate root.
 
 ### IDL and Introspection
 
@@ -450,4 +482,6 @@ This project is licensed under the [MIT License][license].
 [`zlink-codegen`]: https://docs.rs/zlink-codegen
 [`zlink-macros`]: https://docs.rs/zlink-macros
 [`Server::run` docs]: https://docs.rs/zlink/latest/zlink/struct.Server.html#method.run
+[`zlink::zruntime::block_on`]: https://docs.rs/zlink/latest/zlink/zruntime/fn.block_on.html
+[zruntime]: https://github.com/z-galaxy/zruntime
 [fd-passing]: https://docs.rs/zlink/latest/zlink/connection/index.html#file-descriptor-passing

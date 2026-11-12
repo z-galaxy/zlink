@@ -79,11 +79,15 @@ are ready-made starting points.
 ## Is there a blocking (non-async) API?
 
 No. zlink is async-first by design — IPC is I/O-bound, and the APIs (streaming replies, pipelining,
-serving many connections from one task) lean heavily on async. If you're in a synchronous program,
-you can wrap calls with your runtime's `block_on` (e.g. `tokio`'s current-thread runtime,
-`smol::block_on` or `zruntime::block_on`).
+serving many connections from one task) lean heavily on async. A synchronous program needs no async
+runtime of its own to use them though: each runtime module has a `block_on`, which runs a future to
+completion on the calling thread, such as [`zlink::zruntime::block_on`] for zruntime. Put the async
+code in one call to it, as the examples in this book do. The future must not block the thread to
+wait for a reply, since the thread runs the I/O of the connections between polls of the future, and
+the call must not be made from inside an async task, nor from inside the future of another call.
 
 [zbus]: https://github.com/z-galaxy/zbus
+[`zlink::zruntime::block_on`]: https://docs.rs/zlink/latest/zlink/zruntime/fn.block_on.html
 [rustc-100013]: https://github.com/rust-lang/rust/issues/100013
 [`LocalSet`]: https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html
 [`LocalRuntime`]: https://docs.rs/tokio/latest/tokio/runtime/struct.LocalRuntime.html

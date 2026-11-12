@@ -6,7 +6,7 @@
 use clap::Parser;
 use colored::*;
 use std::process;
-use zlink::{tokio::unix, varlink_service::Proxy};
+use zlink::{varlink_service::Proxy, zruntime::unix};
 
 #[derive(Parser)]
 #[command(name = "varlink-inspect")]
@@ -22,14 +22,13 @@ struct Cli {
     interface: Option<String>,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Setup tracing subscriber
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
 
-    if let Err(e) = run(&cli).await {
+    if let Err(e) = zlink::zruntime::block_on(run(&cli)) {
         eprintln!("Error: {e}");
         process::exit(1);
     }

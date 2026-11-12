@@ -1735,7 +1735,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// use zlink::{
 ///     introspect::{self, Type},
 ///     service,
-///     tokio::unix::{bind, connect},
+///     zruntime::unix::{bind, connect},
 ///     Server,
 /// };
 /// use serde::{Deserialize, Serialize};
@@ -1823,7 +1823,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     async fn lock_account(&mut self) -> zlink::Result<Result<(), BankError>>;
 /// }
 ///
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// # zlink::zruntime::block_on(async {
 /// // Server setup.
 /// let dir = tempfile::tempdir()?;
 /// let socket_path = dir.path().join("service-example.sock");

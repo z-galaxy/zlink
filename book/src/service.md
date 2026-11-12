@@ -23,7 +23,7 @@ socket it listens on. Setting up shop is exactly two steps — bind a listener a
 #     }
 # }
 # async fn example(greeter: Greeter) -> Result<(), Box<dyn std::error::Error>> {
-let listener = zlink::tokio::unix::bind("/run/user/1000/org.zlink.MyGreeter")?;
+let listener = zlink::zruntime::unix::bind("/run/user/1000/org.zlink.MyGreeter")?;
 let server = zlink::Server::new(listener, greeter);
 server.run().await?;
 # Ok(())
@@ -40,7 +40,7 @@ The `service` attribute macro turns an ordinary `impl` block into a full Varlink
 generates the message handling, method dispatch, and introspection support:
 
 ```rust,no_run
-use zlink::{service, tokio::unix, Server};
+use zlink::{service, zruntime::unix, Server};
 use serde::{Deserialize, Serialize};
 use zlink::introspect;
 
@@ -60,8 +60,11 @@ impl Greeter {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = std::env::var("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)?
         .join("org.zlink.MyGreeter");
     let listener = unix::bind(&socket_path)?;
@@ -111,8 +114,8 @@ Due to a [compiler bug][rustc-100013], the future returned by `Server::run` cann
 work using `select!`:
 
 ```rust,noplayground
-# async fn example<Svc: zlink::Service<zlink::tokio::unix::Stream>>(
-#     server: zlink::Server<zlink::tokio::unix::Listener, Svc>,
+# async fn example<Svc: zlink::Service<zlink::zruntime::unix::Stream>>(
+#     server: zlink::Server<zlink::zruntime::unix::Listener, Svc>,
 # ) -> Result<(), Box<dyn std::error::Error>> {
 # async fn do_other_things() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
 tokio::select! {
@@ -205,7 +208,7 @@ one-liner. Here's the relevant part of the FTL (faster-than-light drive 🚀) ex
 test suite:
 
 ```rust,noplayground
-use zlink::tokio::notified::{self, traits::State as _};
+use zlink::zruntime::notified::{self, traits::State as _};
 # use zlink::service;
 # #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, zlink::introspect::CustomType)]
 # struct DriveCondition { tylium_level: i64 }
@@ -360,7 +363,7 @@ trait BlobsProxy {
 }
 
 async fn download(
-    mut conn: zlink::tokio::unix::Connection,
+    mut conn: zlink::zruntime::unix::Connection,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let download = conn.download().await?.map_err(|e| format!("{e:?}"))?;
 
@@ -446,7 +449,7 @@ whose entrypoint inode is unknown.
 ```rust,noplayground
 # use zlink::Listener as _;
 # fn example() -> Result<(), Box<dyn std::error::Error>> {
-let listener = zlink::tokio::unix::bind("/run/user/1000/io.example.Accounts")?;
+let listener = zlink::zruntime::unix::bind("/run/user/1000/io.example.Accounts")?;
 #[cfg(target_os = "linux")]
 if let Err(e) = listener.set_xattr("user.userdb.uid", "1000-1999") {
     eprintln!("could not publish the UID range: {e}");

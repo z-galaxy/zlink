@@ -12,10 +12,10 @@
     missing_docs
 )]
 #![warn(unreachable_pub)]
-// The README examples use the tokio runtime and hence the `tokio`-specific API.
-#![cfg_attr(feature = "tokio", doc = include_str!("../README.md"))]
+// The README examples use the zruntime runtime and hence the `zruntime`-specific API.
+#![cfg_attr(feature = "zruntime", doc = include_str!("../README.md"))]
 #![cfg_attr(
-    not(feature = "tokio"),
+    not(feature = "zruntime"),
     doc = "An asynchronous [Varlink](https://varlink.org/) API. See the \
         [project README](https://github.com/z-galaxy/zlink) for an overview and examples."
 )]
@@ -23,8 +23,8 @@
 #[cfg(not(any(feature = "tokio", feature = "smol", feature = "zruntime")))]
 compile_error!("At least one runtime feature must be enabled: 'tokio', 'smol' or 'zruntime'");
 
-// The book examples use the tokio runtime and hence the `tokio`-specific API.
-#[cfg(all(doctest, feature = "tokio"))]
+// The book examples use the zruntime runtime and hence the `zruntime`-specific API.
+#[cfg(all(doctest, feature = "zruntime"))]
 mod doctests {
     // Book markdown checks.
     doc_comment::doctest!("../../book/src/introduction.md");
@@ -54,7 +54,7 @@ pub use zlink_core::*;
 pub mod tokio {
     #[cfg(feature = "server")]
     pub use zlink_tokio::notified;
-    pub use zlink_tokio::unix;
+    pub use zlink_tokio::{block_on, unix};
 }
 
 /// API specific to the [smol](https://github.com/smol-rs/smol) runtime.
@@ -62,7 +62,7 @@ pub mod tokio {
 pub mod smol {
     #[cfg(feature = "server")]
     pub use zlink_smol::notified;
-    pub use zlink_smol::unix;
+    pub use zlink_smol::{block_on, unix};
 }
 
 /// API specific to the [zruntime](https://github.com/z-galaxy/zruntime) runtime.
@@ -70,5 +70,5 @@ pub mod smol {
 pub mod zruntime {
     #[cfg(feature = "server")]
     pub use zlink_zruntime::notified;
-    pub use zlink_zruntime::unix;
+    pub use zlink_zruntime::{block_on, unix};
 }

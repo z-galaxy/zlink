@@ -7,32 +7,44 @@ the zlink API.
 
 ## Picking an async runtime
 
-zlink is async-first and runtime-agnostic at its core, with ready-made integration for the two
-popular runtimes, tokio and smol, and for [zruntime], enabled through cargo features:
+zlink is async-first and runtime-agnostic at its core: it spawns no tasks of its own, so its
+connections and servers make progress as their futures are polled, by whichever executor polls
+them. It has ready-made integration for [zruntime], the default, and for the two popular runtimes,
+tokio and smol, enabled through cargo features:
 
 ```toml
-# tokio (the default):
+# zruntime (the default):
 zlink = "0.8"
 
-# ...or smol:
-zlink = { version = "0.8", default-features = false, features = ["smol", "service", "proxy", "tracing"] }
+# ...or tokio:
+zlink = { version = "0.8", default-features = false, features = [
+    "tokio", "service", "proxy", "tracing",
+] }
 
-# ...or zruntime:
-zlink = { version = "0.8", default-features = false, features = ["zruntime", "service", "proxy", "tracing"] }
+# ...or smol:
+zlink = { version = "0.8", default-features = false, features = [
+    "smol", "service", "proxy", "tracing",
+] }
 ```
 
 The features are additive — you can enable several at once. The bulk of the API is runtime-agnostic
-and lives at the crate root; only the transport-specific parts (the `unix` and `notified` modules)
-are per-runtime, under `zlink::tokio`, `zlink::smol` and `zlink::zruntime` respectively. The
-examples in this book use tokio, but they work identically with the other runtimes — just replace
-`zlink::tokio` with `zlink::smol` or `zlink::zruntime`. If you enable none of these features, the
-crate fails to compile with an explicit error, since the transport implementations live in the
-runtime-integration crates.
+and lives at the crate root; only the runtime-specific parts (`block_on` and the `unix` and
+`notified` modules) are per-runtime, under `zlink::zruntime`, `zlink::tokio` and `zlink::smol`
+respectively. The examples in this book use zruntime, but they work identically with the other
+runtimes — just replace `zlink::zruntime` with `zlink::tokio` or `zlink::smol`. If you enable none
+of these features, the crate fails to compile with an explicit error, since the transport
+implementations live in the runtime-integration crates.
 
-zruntime is a small, single-threaded runtime. The sockets that `connect` and `bind` make with it are
-on a shared runtime, and can be used from any executor: where no `zruntime::block_on` call drives
-them, a helper thread of zruntime does. `connect_local` and `bind_local` make them on the
-`LocalRuntime` the calling thread is running instead, and those stay on that thread.
+A program with no async runtime of its own drives zlink with the `block_on` of a runtime module,
+which runs a future to completion on the calling thread: put the async code in one call to it, as
+the examples in this book do with [`zlink::zruntime::block_on`]. zruntime is a small,
+single-threaded runtime: between polls of the future, the thread also runs the I/O of the sockets
+that `zlink::zruntime::unix::connect` and `bind` make inside the call. Those sockets can be used
+from any other executor as well: where no `zlink::zruntime::block_on` call drives them, a helper
+thread of zruntime does. `connect_local` and `bind_local` make them on the `LocalRuntime` the
+calling thread is running instead, and those stay on that thread. The sockets of `zlink::smol` can
+be used from any executor too, while those of `zlink::tokio` need a Tokio runtime: that of
+`zlink::tokio::block_on`, or the program's own.
 
 ## Connecting to a service
 
@@ -40,9 +52,12 @@ As we saw in the [previous chapter](concepts.html), there is no bus to connect t
 directly to the service you're interested in, through the socket it listens on:
 
 ```rust,no_run
-#[tokio::main]
-async fn main() -> zlink::Result<()> {
-    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+fn main() -> zlink::Result<()> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> zlink::Result<()> {
+    let mut conn = zlink::zruntime::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     // ... use the connection ...
     Ok(())
@@ -51,9 +66,9 @@ async fn main() -> zlink::Result<()> {
 
 That's it. No handshake, no authentication round-trips, no name registration: after `connect`
 returns, you can immediately send your first method call. The returned type is
-`zlink::tokio::unix::Connection`, an alias for `zlink::Connection<zlink::tokio::unix::Stream>` —
-the `Connection` type is generic over its transport (more on that in the
-[embedded chapter](embedded.html)).
+`zlink::zruntime::unix::Connection`, an alias for `zlink::Connection<zlink::zruntime::unix::Stream>`
+— the `Connection` type is generic over its transport (more on that in the [embedded
+chapter](embedded.html)).
 
 Note that `connect()` gives you the connection *by value* and all its methods take `&mut self`.
 This is a deliberate — and central — design decision in zlink: a connection is exclusively owned by
@@ -107,9 +122,12 @@ enum ResolveError {
     QueryTimedOut,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = zlink::tokio::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    zlink::zruntime::block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = zlink::zruntime::unix::connect("/run/systemd/resolve/io.systemd.Resolve").await?;
 
     let call = Call::new(ResolveMethods::ResolveHostname { name: "systemd.io" });
     let (reply, _fds): (reply::Result<ResolveHostnameReply, ResolveError>, _) =
@@ -159,7 +177,7 @@ each owning its own buffer. You can split a connection into its halves and use t
 for instance, one task feeding calls while another consumes streaming replies:
 
 ```rust,noplayground
-# fn example(conn: zlink::tokio::unix::Connection) {
+# fn example(conn: zlink::zruntime::unix::Connection) {
 let (mut read, mut write) = conn.split();
 // `read.receive_reply(...)` and `write.send_call(...)` can now be driven
 // from separate tasks. `Connection::join(read, write)` puts them back together.
@@ -183,3 +201,4 @@ convenient, type-safe client proxies.
 
 [`serde_prefix_all`]: https://crates.io/crates/serde_prefix_all
 [zruntime]: https://github.com/z-galaxy/zruntime
+[`zlink::zruntime::block_on`]: https://docs.rs/zlink/latest/zlink/zruntime/fn.block_on.html
