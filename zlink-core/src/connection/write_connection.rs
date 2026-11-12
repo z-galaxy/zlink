@@ -188,7 +188,8 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     /// Send out the enqueued calls.
     ///
     /// If the returned future is dropped before it completes, the unwritten data stays queued, and
-    /// the next flush or send writes it first.
+    /// the next flush or send writes it first. The same goes for the bytes the socket has buffered
+    /// (see [`WriteHalf::flush`]): the next flush or send sends them out.
     pub async fn flush(&mut self) -> crate::Result<()> {
         while self.written < self.pos {
             self.write_next().await?;
@@ -196,7 +197,8 @@ impl<Write: WriteHalf> WriteConnection<Write> {
         self.pos = 0;
         self.written = 0;
 
-        Ok(())
+        // Even with nothing queued: an earlier flush may have been dropped right here.
+        self.socket.flush().await
     }
 
     /// The underlying write half of the socket.
