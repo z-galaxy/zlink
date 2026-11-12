@@ -1,6 +1,5 @@
-//! Test the `#[service]` attribute macro with the FTL (faster-than-light drive) example.
-//!
-//! This is the macro-based version of what was previously a low-level service implementation.
+//! Test the `#[interface]` attribute macro and the `Service` derive with the FTL (faster-than-light
+//! drive) example.
 
 #![cfg(all(feature = "service", feature = "introspection", feature = "idl-parse"))]
 
@@ -55,7 +54,7 @@ async fn ftl() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
-    let service = Ftl::new(conditions[0]);
+    let service = FtlService(Ftl::new(conditions[0]));
     let server = zlink::Server::new(listener, service);
     select! {
         res = server.run() => res?,
@@ -364,10 +363,20 @@ struct RawCall {
 }
 
 // ============================================================================
-// The FTL service implementation using the service macro.
+// The FTL service implementation using the interface macro.
 // ============================================================================
 
 /// The FTL drive service.
+#[derive(zlink::Service)]
+#[zlink(
+    vendor = "The FL project",
+    product = "FTL-capable Spaceship \u{1F680}",
+    version = "1",
+    url = "https://want.ftl.now/"
+)]
+struct FtlService(Ftl);
+
+/// The interface of the FTL drive.
 struct Ftl {
     drive_condition: notified::State<DriveCondition, DriveCondition>,
     coordinates: Coordinate,
@@ -386,12 +395,8 @@ impl Ftl {
     }
 }
 
-#[zlink::service(
+#[zlink::interface(
     interface = "org.example.ftl",
-    vendor = "The FL project",
-    product = "FTL-capable Spaceship \u{1F680}",
-    version = "1",
-    url = "https://want.ftl.now/",
     types = [DriveCondition, DriveConfiguration, Coordinate, Location]
 )]
 impl Ftl {

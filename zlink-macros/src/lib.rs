@@ -28,6 +28,9 @@ mod proxy;
 #[cfg(feature = "service")]
 mod service;
 
+#[cfg(feature = "service")]
+mod service_derive;
+
 /// Derives `Type` for structs and enums, generating appropriate `Type::Object` or `Type::Enum`
 /// representation.
 ///
@@ -1343,25 +1346,65 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
     reply_error::derive_reply_error(input)
 }
 
-/// Transforms an impl block into a `Service` trait implementation.
+/// Implements `Interface` for the type of an `impl` block: one Varlink interface of a service.
 ///
 /// **Requires the `service` feature to be enabled.** The `service` feature automatically enables
-/// the `introspection` feature, allowing the macro to generate interface descriptions and handle
-/// the standard `org.varlink.service` interface automatically.
+/// the `introspection` feature, allowing the macro to generate interface descriptions.
 ///
-/// This attribute macro takes a regular impl block and generates the necessary code to implement
-/// the `Service` trait, enabling the type to handle Varlink method calls.
+/// A Varlink service is made up of interfaces, and is written in two parts:
+///
+/// * Each interface is a type, whose `impl` block this attribute macro is applied to. The methods
+///   of the block are the methods of the interface, and the macro implements the
+///   `zlink::service::Interface` trait for the type, which handles the calls to them.
+/// * The service is a struct whose fields are the interfaces, and which derives
+///   [`Service`](derive@Service). The derived `Service` implementation hands each call over to the
+///   interface it is for, and implements the standard `org.varlink.service` interface for all of
+///   them. The struct also gives the metadata of the service (vendor, product, version and URL),
+///   and can keep a state that the interfaces share (see [Shared State](#shared-state)).
+///
+/// A service of a single interface is a struct with a single field:
+///
+/// ```rust
+/// use serde::Serialize;
+/// use zlink::{introspect, test_utils::mock_socket::MockSocket};
+///
+/// #[derive(Debug, Serialize, introspect::Type)]
+/// struct Greeting {
+///     greeting: String,
+/// }
+///
+/// struct Greeter;
+///
+/// #[zlink::interface("org.example.greeter")]
+/// impl Greeter {
+///     async fn greet(&self, name: &str) -> Greeting {
+///         Greeting { greeting: format!("Hello {name}!") }
+///     }
+/// }
+///
+/// #[derive(zlink::Service)]
+/// #[zlink(vendor = "Example", product = "Greeter", version = "1.0")]
+/// struct GreeterService(Greeter);
+///
+/// // The service is what a server serves, e.g. `Server::new(listener, GreeterService(Greeter))`.
+/// fn is_service<S>(_: &S)
+/// where
+///     S: zlink::Service<MockSocket>,
+/// {
+/// }
+/// is_service(&GreeterService(Greeter));
+/// ```
 ///
 /// # Automatic Introspection Support
 ///
-/// The generated service automatically handles the `org.varlink.service` interface:
+/// The service that an interface is part of automatically handles the `org.varlink.service`
+/// interface:
 ///
-/// - **`GetInfo`**: Returns service metadata (vendor, product, version, URL) and a list of all
-///   implemented interfaces.
-/// - **`GetInterfaceDescription`**: Returns the IDL description for any implemented interface,
-///   generated at compile time from the method signatures and types.
-/// - **Unknown methods**: Return `MethodNotFound` error with the method name.
-/// - **Unknown interfaces** (in `GetInterfaceDescription`): Return `InterfaceNotFound` error.
+/// - **`GetInfo`**: Returns the metadata of the service and a list of all its interfaces.
+/// - **`GetInterfaceDescription`**: Returns the IDL description of any of its interfaces, which
+///   this macro generates at compile time from the method signatures and types.
+/// - **Unknown methods**: Return a `MethodNotFound` error naming the method.
+/// - **Unknown interfaces** (in `GetInterfaceDescription`): Return an `InterfaceNotFound` error.
 /// - **Protocol upgrades**: Calls asking for their connection to be upgraded to another protocol
 ///   (the `upgrade` flag) get an `InvalidParameter` error naming `upgrade`, unless they are to a
 ///   method marked with `#[zlink(upgrade)]`. Calls to those that don't ask for an upgrade get an
@@ -1371,29 +1414,26 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// ## On the impl block:
 ///
+/// * The name of the interface (required), e.g. `#[interface("org.example.bank")]`. It can also be
+///   given by key, as `interface = "org.example.bank"`. All the methods of the block belong to it:
+///   a block implements one interface, and a service of several interfaces has a type, and a block,
+///   for each.
+/// * `types = [Type1, Type2, ...]` - Custom types to include in the interface description. These
+///   types must implement `CustomType` (typically via `#[derive(CustomType)]`).
 /// * `crate = "path"` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
-/// * `interface = "..."` - Sets the default interface name for all methods. Useful for services
-///   that implement a single interface. Methods can still override this with method-level
-///   `#[zlink(interface = "...")]`.
-/// * `types = [Type1, Type2, ...]` - Custom types to include in interface descriptions. These types
-///   must implement `CustomType` (typically via `#[derive(CustomType)]`). For single-interface
-///   services, these types are included in that interface's IDL output. For multi-interface
-///   services, prefer specifying types per interface using the method-level `#[zlink(interface =
-///   "...", types = [...])]` attribute instead.
-/// * `vendor = <expr>` - The vendor name for `GetInfo` response. Defaults to empty string.
-/// * `product = <expr>` - The product name for `GetInfo` response. Defaults to empty string.
-/// * `version = <expr>` - The version string for `GetInfo` response. Defaults to empty string. E.g.
-///   `version = env!("CARGO_PKG_VERSION")`.
-/// * `url = <expr>` - The URL for `GetInfo` response. Defaults to empty string.
+///
+/// The metadata of the service goes on the struct that derives [`Service`](derive@Service), as
+/// `#[zlink(vendor = .., product = .., version = .., url = ..)]`.
 ///
 /// ## On methods:
 ///
-/// * `#[zlink(interface = "...")]` - Set the interface name for this and subsequent methods. If an
-///   interface is specified at the impl block level, this overrides it for the current method.
-/// * `#[zlink(interface = "...", types = [Type1, ...])]` - Set the interface and associate custom
-///   types with it. This scopes the types to the specified interface so they only appear in that
-///   interface's introspection output. Particularly useful for multi-interface services.
 /// * `#[zlink(rename = "MethodName")]` - Custom Varlink method name.
+/// * `#[zlink(types = [Type1, ...])]` - Custom types to include in the interface description, as
+///   `types` on the impl block does.
+/// * `#[zlink(more)]` - Mark a method that can send multiple replies. See [Streaming
+///   Methods](#streaming-methods).
+/// * `#[zlink(return_fds)]` - Mark a method that returns file descriptors along with its reply. See
+///   [File Descriptors](#file-descriptors).
 /// * `#[zlink(upgrade)]` - Mark a method that upgrades its connection to another protocol. The
 ///   method returns the state that takes the upgraded connection over along with its reply. See
 ///   [Protocol Upgrades](#protocol-upgrades).
@@ -1403,9 +1443,13 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// * `#[zlink(rename = "paramName")]` - Custom serialized parameter name. **Required** for
 ///   parameter names starting with `_` (the Rust convention for unused parameters), since such
 ///   names are not valid in the Varlink IDL.
+/// * `#[zlink(fds)]` - Mark this parameter, of type `Vec<OwnedFd>`, to receive the file descriptors
+///   sent along with the call. See [File Descriptors](#file-descriptors).
 /// * `#[zlink(connection)]` - Mark this parameter to receive a mutable reference to the connection.
 ///   This is useful for accessing peer credentials or other connection-specific functionality.
-///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyService`).
+///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyInterface`).
+/// * `#[zlink(state)]` - Mark this parameter, of type `&T` or `&mut T`, to borrow the state that
+///   the interfaces of the service share. See [Shared State](#shared-state).
 ///
 /// # Compile-time Type Checking
 ///
@@ -1415,7 +1459,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// ```rust,compile_fail
 /// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect::CustomType, service};
+/// use zlink::{interface, introspect::CustomType};
 ///
 /// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
 /// struct Book { title: String }
@@ -1423,11 +1467,11 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
 /// struct BookList { books: Vec<Book> }
 ///
-/// struct LibraryService;
+/// struct Library;
 ///
 /// // Missing `BookList` in `types = [...]` even though it's returned by `list_books`.
-/// #[service(interface = "org.example.library", types = [Book])]
-/// impl LibraryService {
+/// #[interface("org.example.library", types = [Book])]
+/// impl Library {
 ///     async fn list_books(&self) -> BookList {
 ///         BookList { books: vec![] }
 ///     }
@@ -1439,36 +1483,99 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// # Generated Code
 ///
-/// The macro generates an `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method,
-/// along with internal helper types for serialization/deserialization. If there are [upgrade
-/// methods](#protocol-upgrades), the impl sets `Service::Upgrade` to the type of the state that
-/// they return, and requires it to implement `TakeOver<Sock>`, which it can do for only some
-/// sockets.
+/// The macro generates an `impl<Sock: Socket, State> Interface<Sock, State> for YourType`, whose
+/// `handle` method calls the method that a call is for, along with the hidden types that the calls
+/// and replies are (de)serialized through. If there are [upgrade methods](#protocol-upgrades), the
+/// impl sets `Interface::Upgrade` to the type of the state that they return, and requires it to
+/// implement `TakeOver<Sock>`, which it can do for only some sockets.
+///
+/// The methods remain regular methods of the type, which can be called directly, except for those
+/// with a [connection parameter](#connection-parameter) (see there).
+///
+/// # Shared State
+///
+/// The interfaces of a service are separate values, so the methods of one can't reach the data of
+/// another. The data that they share is kept by the struct that derives
+/// [`Service`](derive@Service), in a field marked with `#[zlink(state)]`, and lent to the interface
+/// that handles a call. A method borrows it through a parameter marked with `#[zlink(state)]`, of
+/// type `&T` or `&mut T`, where `T` is the type of the state. Like the connection, the state isn't
+/// a parameter of the method on the wire, nor in the interface description. A method has at most
+/// one state parameter, and all the state parameters of a block borrow the same type of state.
+///
+/// A block with state parameters implements `Interface` for its type of state only. A block without
+/// any implements `Interface` for every type of state, so that its type fits into any service.
+///
+/// ```rust
+/// use serde::Serialize;
+/// use zlink::{connection::Socket, interface, introspect, service::Interface};
+///
+/// #[derive(Debug, Serialize, introspect::Type)]
+/// struct Count {
+///     count: u64,
+/// }
+///
+/// /// The interface that counts, whose count is shared by the interfaces of the service.
+/// struct Counter;
+///
+/// #[interface("org.example.counter")]
+/// impl Counter {
+///     async fn increment(&self, by: u64, #[zlink(state)] count: &mut u64) -> Count {
+///         *count += by;
+///
+///         Count { count: *count }
+///     }
+/// }
+///
+/// /// The interface that greets, which shares nothing.
+/// struct Greeter;
+///
+/// #[interface("org.example.greeter")]
+/// impl Greeter {
+///     async fn greet(&self) {}
+/// }
+///
+/// /// The service, which keeps the count.
+/// #[derive(zlink::Service)]
+/// struct CountingGreeter {
+///     #[zlink(state)]
+///     count: u64,
+///     counter: Counter,
+///     greeter: Greeter,
+/// }
+///
+/// // Both are interfaces of a service whose state is a `u64`.
+/// fn interfaces_of_counting_service<Sock>()
+/// where
+///     Sock: Socket,
+///     Counter: Interface<Sock, u64>,
+///     Greeter: Interface<Sock, u64>,
+/// {
+/// }
+/// # interfaces_of_counting_service::<zlink::test_utils::mock_socket::MockSocket>();
+/// ```
 ///
 /// # Error Handling
 ///
 /// Methods can return `Result<T, E>` with any error type `E` that implements `Serialize` and
-/// `Debug`. Different methods can use different error types - the macro automatically generates
-/// internal wrapper types to handle all unique error types.
+/// `Debug`. Different methods can use different error types, which the generated code combines.
 ///
-/// When a method returns `Err(e)`, the macro generates code that wraps it in the appropriate
-/// combo enum variant and returns `MethodReply::Error(...)`.
-/// When a method returns `Ok(v)`, it returns `MethodReply::Single(Some(v))`, or
-/// `MethodReply::Upgrade` for an [upgrade method](#protocol-upgrades).
+/// When a method returns `Err(e)`, the call gets an error reply with `e`, and when it returns
+/// `Ok(v)`, a reply with `v`, or the upgrade of its connection for an
+/// [upgrade method](#protocol-upgrades).
 ///
 /// Methods can also return plain values (not wrapped in Result) - these are always treated as
 /// successful responses.
 ///
 /// # Custom Socket Bounds
 ///
-/// By default, the generated `Service` impl uses a generic socket parameter with just the `Socket`
-/// bound. If you need additional bounds (e.g., for peer credential checking), you can provide your
-/// own generics on the impl block:
+/// By default, the generated `Interface` impl uses a generic socket parameter with just the
+/// `Socket` bound. If you need additional bounds (e.g., for peer credential checking), you can
+/// provide your own generics on the impl block:
 ///
 /// ```rust
-/// use zlink::{service, connection::socket::FetchPeerCredentials, introspect};
+/// use zlink::{connection::socket::FetchPeerCredentials, interface, introspect};
 ///
-/// struct MyService;
+/// struct MyInterface;
 ///
 /// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
 /// #[zlink(interface = "org.example.service")]
@@ -1476,19 +1583,22 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     ServiceError,
 /// }
 ///
-/// #[service]
-/// impl<Sock> MyService
+/// #[interface("org.example.service")]
+/// impl<Sock> MyInterface
 /// where
 ///     Sock::ReadHalf: FetchPeerCredentials,
 /// {
-///     #[zlink(interface = "org.example.service")]
 ///     async fn get_status(&self) -> Result<(), MyError> {
 ///         Ok(())
 ///     }
 /// }
+///
+/// // The service is one only for the sockets that the interface is one for.
+/// #[derive(zlink::Service)]
+/// struct MyService(MyInterface);
 /// ```
 ///
-/// The first type parameter is used as the socket type for the generated `Service` impl. The
+/// The first type parameter is used as the socket type for the generated `Interface` impl. The
 /// `Socket` bound is automatically added, so you only need to specify additional bounds.
 ///
 /// # Connection Parameter
@@ -1496,9 +1606,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// Methods can receive a mutable reference to the connection using `#[zlink(connection)]`:
 ///
 /// ```rust
-/// use zlink::{service, Connection, connection::socket::FetchPeerCredentials, introspect};
+/// use zlink::{Connection, connection::socket::FetchPeerCredentials, interface, introspect};
 ///
-/// struct MyService;
+/// struct MyInterface;
 ///
 /// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
 /// #[zlink(interface = "org.example.service")]
@@ -1506,12 +1616,11 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     ServiceError,
 /// }
 ///
-/// #[service]
-/// impl<Sock> MyService
+/// #[interface("org.example.service")]
+/// impl<Sock> MyInterface
 /// where
 ///     Sock::ReadHalf: FetchPeerCredentials,
 /// {
-///     #[zlink(interface = "org.example.service")]
 ///     async fn check_credentials(
 ///         &self,
 ///         #[zlink(connection)] conn: &mut Connection<Sock>,
@@ -1522,8 +1631,48 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// }
 /// ```
 ///
-/// Methods with connection parameters are only callable through the `Service` trait (not directly
-/// on the type), since they require the socket type to be known.
+/// Methods with connection parameters are only callable through the `Interface` trait, and the
+/// `Service` that the interface is part of (not directly on the type), since they require the
+/// socket type to be known.
+///
+/// # File Descriptors
+///
+/// A method receives the file descriptors that a call comes with through a parameter marked with
+/// `#[zlink(fds)]`, of type `Vec<OwnedFd>`, which isn't a parameter of the method on the wire. A
+/// method marked with `#[zlink(return_fds)]` returns the file descriptors to send along with its
+/// reply, as `(Reply, Vec<OwnedFd>)`, where `Reply` can also be a `Result`:
+///
+/// ```rust
+/// use serde::Serialize;
+/// use std::{fs::File, os::fd::OwnedFd};
+/// use zlink::{interface, introspect};
+///
+/// #[derive(Debug, Serialize, introspect::Type)]
+/// struct Opened {
+///     count: u32,
+/// }
+///
+/// struct Files;
+///
+/// #[interface("org.example.files")]
+/// impl Files {
+///     /// Opens a file for each of the paths, in their order.
+///     #[zlink(return_fds)]
+///     async fn open(&self, paths: Vec<String>) -> (Opened, Vec<OwnedFd>) {
+///         let fds: Vec<OwnedFd> = paths
+///             .iter()
+///             .filter_map(|path| File::open(path).ok().map(OwnedFd::from))
+///             .collect();
+///
+///         (Opened { count: fds.len() as u32 }, fds)
+///     }
+///
+///     /// The number of file descriptors sent along with the call.
+///     async fn count(&self, #[zlink(fds)] fds: Vec<OwnedFd>) -> Opened {
+///         Opened { count: fds.len() as u32 }
+///     }
+/// }
+/// ```
 ///
 /// # Streaming Methods
 ///
@@ -1549,8 +1698,8 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// for `#[zlink(return_fds)]`). When the stream yields `Err(e)`, the server sends an error reply
 /// to the client. The error type `E` must implement `serde::Serialize` and `Debug`, just like for
 /// non-streaming methods, and (because the stream outlives `&self`) cannot borrow from the
-/// service. Different streaming methods may use different error types; the macro combines them
-/// into a single internal enum exposed as `Service::ReplyStreamError`.
+/// interface. Different streaming methods may use different error types; the macro combines them
+/// into a single type, `Interface::ReplyStreamError`.
 ///
 /// Note that, on the wire, an error reply terminates the stream — a client that receives an
 /// error reply should not expect any further items. The macro does not enforce this on the
@@ -1562,7 +1711,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// ```rust
 /// use futures_util::Stream;
 /// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect::Type, service, Reply};
+/// use zlink::{interface, introspect::Type, Reply};
 ///
 /// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 /// struct Tick {
@@ -1571,7 +1720,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// struct Counter;
 ///
-/// #[service(interface = "org.example.counter")]
+/// #[interface("org.example.counter")]
 /// impl Counter {
 ///     // Streams `Tick` values from 1 to `to`. If the caller did not set the `more` flag, only a
 ///     // single tick is emitted.
@@ -1594,7 +1743,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// ```rust
 /// use futures_util::Stream;
 /// use serde::{Deserialize, Serialize};
-/// use zlink::{introspect, service, Reply};
+/// use zlink::{interface, introspect, Reply};
 ///
 /// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, introspect::Type)]
 /// struct Tick { value: u32 }
@@ -1607,7 +1756,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// struct Counter;
 ///
-/// #[service(interface = "org.example.counter")]
+/// #[interface("org.example.counter")]
 /// impl Counter {
 ///     #[zlink(more)]
 ///     async fn count(
@@ -1669,8 +1818,8 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///   any of it already. If the upgrade is refused instead, such data breaks the Varlink connection.
 /// * The future is `Send` whenever the state and the futures of the socket are, so a server with
 ///   upgrade methods can be `Send` (see the caveats of `Server::run` for why it can't be yet).
-/// * All the upgrade methods return the same type of state. To upgrade to several protocols, they
-///   can share one state type, e.g. an enum whose `take_over` matches on itself.
+/// * All the upgrade methods of an interface return the same type of state. To upgrade to several
+///   protocols, they can share one state type, e.g. an enum whose `take_over` matches on itself.
 /// * The state can't refuse the upgrade, since the reply that confirms it is sent before the state
 ///   takes the connection over. Do the checks that the upgrade depends on, e.g. of
 ///   `Connection::peer_credentials`, in the upgrade method instead, using a `#[zlink(connection)]`
@@ -1681,7 +1830,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// use std::{collections::HashMap, os::fd::OwnedFd};
 /// use zlink::{
 ///     connection::socket::{Socket, WriteHalf},
-///     introspect, service,
+///     interface, introspect,
 ///     service::{TakeOver, Upgraded},
 /// };
 ///
@@ -1700,7 +1849,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     blobs: HashMap<String, Vec<u8>>,
 /// }
 ///
-/// #[service(interface = "org.example.blobs")]
+/// #[interface("org.example.blobs")]
 /// impl Blobs {
 ///     /// Replies with the size of the blob, which is then sent over the upgraded connection.
 ///     #[zlink(upgrade)]
@@ -1727,14 +1876,18 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///             .await;
 ///     }
 /// }
+///
+/// // The service, which upgrades the connections that its interface does.
+/// #[derive(zlink::Service)]
+/// struct BlobService(Blobs);
 /// ```
 ///
 /// # Example
 ///
 /// ```rust
 /// use zlink::{
+///     interface,
 ///     introspect::{self, Type},
-///     service,
 ///     zruntime::unix::{bind, connect},
 ///     Server,
 /// };
@@ -1766,11 +1919,10 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     }
 /// }
 ///
-/// // Service implementation with error handling.
-/// #[service]
+/// // Interface implementation with error handling.
+/// #[interface("org.example.bank")]
 /// impl BankAccount {
 ///     // Method that returns a plain value (not Result) - always succeeds.
-///     #[zlink(interface = "org.example.bank")]
 ///     async fn get_balance(&self) -> Balance {
 ///         Balance { amount: self.balance }
 ///     }
@@ -1814,6 +1966,12 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     }
 /// }
 ///
+/// // The service, of which the bank account is the only interface.
+/// #[derive(zlink::Service)]
+/// struct Bank {
+///     account: BankAccount,
+/// }
+///
 /// // Client-side proxy definition.
 /// #[zlink::proxy("org.example.bank")]
 /// trait BankProxy {
@@ -1826,9 +1984,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # zlink::zruntime::block_on(async {
 /// // Server setup.
 /// let dir = tempfile::tempdir()?;
-/// let socket_path = dir.path().join("service-example.sock");
+/// let socket_path = dir.path().join("interface-example.sock");
 /// let listener = bind(&socket_path)?;
-/// let service = BankAccount::new(1000);
+/// let service = Bank { account: BankAccount::new(1000) };
 /// let server = Server::new(listener, service);
 ///
 /// // Run server and client concurrently.
@@ -1876,8 +2034,8 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// ```rust
 /// use zlink::{
+///     interface,
 ///     introspect::{self, CustomType, Type},
-///     service,
 ///     varlink_service::Proxy,
 /// };
 /// use serde::{Deserialize, Serialize};
@@ -1894,22 +2052,25 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     InsufficientFunds { available: i64 },
 /// }
 ///
-/// struct BankService;
+/// struct Bank;
 ///
-/// // Include custom types in the service for IDL generation.
-/// #[service(
-///     types = [Balance],
+/// // Include custom types in the interface for IDL generation.
+/// #[interface("org.example.bank", types = [Balance])]
+/// impl Bank {
+///     async fn get_balance(&self) -> Result<Balance, BankError> {
+///         Ok(Balance { amount: 1000 })
+///     }
+/// }
+///
+/// // The metadata that `GetInfo` replies with is that of the service.
+/// #[derive(zlink::Service)]
+/// #[zlink(
 ///     vendor = "Example Corp",
 ///     product = "Bank Service",
 ///     version = env!("CARGO_PKG_VERSION"),
 ///     url = "https://example.com/bank"
 /// )]
-/// impl BankService {
-///     #[zlink(interface = "org.example.bank")]
-///     async fn get_balance(&self) -> Result<Balance, BankError> {
-///         Ok(Balance { amount: 1000 })
-///     }
-/// }
+/// struct BankService(Bank);
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// # use zlink::test_utils::mock_socket::MockSocket;
@@ -1968,22 +2129,284 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// The full Varlink method path is constructed as `{interface}.{MethodName}`. For example,
 /// if the interface is `org.example.bank` and the method is `GetBalance`, the full path
 /// will be `org.example.bank.GetBalance`.
-///
-/// # Interface Propagation
-///
-/// The interface for methods is determined in this order:
-/// 1. If the method has `#[zlink(interface = "...")]`, that interface is used.
-/// 2. Otherwise, the interface is inherited from the previous method or from the macro-level
-///    `interface = "..."` attribute.
-///
-/// For services implementing a single interface, specifying `interface = "..."` at the macro level
-/// is the simplest approach - all methods automatically use that interface without needing
-/// individual attributes.
 #[cfg(feature = "service")]
+#[proc_macro_attribute]
+pub fn interface(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    service::interface(attr.into(), input.into()).into()
+}
+
+/// Implements `Service` for the type of an `impl` block: a whole service, of one or more
+/// interfaces.
+///
+/// **Deprecated**: write each interface of the service as a type of its own, with the
+/// [`interface`](macro@interface) attribute macro on its `impl` block, and make those types the
+/// fields of a struct that derives [`Service`](derive@Service). The documentation of
+/// [`interface`](macro@interface) covers what the methods of a block can be.
+///
+/// The arguments of the macro are those of [`interface`](macro@interface) (with the interface given
+/// by key only, and optional), and the metadata of the service: `vendor`, `product`, `version` and
+/// `url`, each an expression. A method can switch to another interface, for itself and the methods
+/// after it, with `#[zlink(interface = "...")]`, which can also give the custom types of that
+/// interface, as `#[zlink(interface = "...", types = [...])]`. `#[zlink(state)]` parameters aren't
+/// supported, since such a service has no state to lend.
+///
+/// # Migrating
+///
+/// Until a service is migrated, the deprecation warning of this macro can be silenced with
+/// `#![allow(deprecated)]` in the module of the `impl` block, or in an outer one. An
+/// `#[allow(deprecated)]` on the `impl` block itself has no effect on the attribute macro above it.
+///
+/// A service written with this macro:
+///
+/// ```rust
+/// mod before {
+///     #![allow(deprecated)]
+///
+///     struct Bank;
+///
+///     #[zlink::service(vendor = "Example Corp")]
+///     impl Bank {
+///         #[zlink(interface = "org.example.accounts")]
+///         async fn open(&mut self) {}
+///
+///         #[zlink(interface = "org.example.loans")]
+///         async fn borrow(&mut self, amount: u64) {
+///             let _ = amount;
+///         }
+///     }
+/// }
+/// ```
+///
+/// is written with [`interface`](macro@interface) and [`Service`](derive@Service) as:
+///
+/// ```rust
+/// struct Accounts;
+///
+/// #[zlink::interface("org.example.accounts")]
+/// impl Accounts {
+///     async fn open(&mut self) {}
+/// }
+///
+/// struct Loans;
+///
+/// #[zlink::interface("org.example.loans")]
+/// impl Loans {
+///     async fn borrow(&mut self, amount: u64) {
+///         let _ = amount;
+///     }
+/// }
+///
+/// #[derive(zlink::Service)]
+/// #[zlink(vendor = "Example Corp")]
+/// struct Bank {
+///     accounts: Accounts,
+///     loans: Loans,
+/// }
+/// ```
+///
+/// What differs:
+///
+/// * The metadata of the service (`vendor`, `product`, `version` and `url`) goes on the struct, as
+///   `#[zlink(...)]`.
+/// * Each interface is a type, and an `impl` block, of its own, where a method of a `service` block
+///   switches interfaces with `#[zlink(interface = "...")]`. The data that the methods of several
+///   interfaces share goes in a `#[zlink(state)]` field of the struct, which they borrow through
+///   `#[zlink(state)]` parameters.
+/// * The custom types of an interface are given by `types = [...]` on its
+///   [`interface`](macro@interface) attribute, or on its methods.
+/// * A call to a method that the service doesn't have gets a `MethodNotFound` error that names the
+///   method, where a `service` block replies with the name `unknown`.
+#[cfg(feature = "service")]
+#[deprecated(
+    since = "0.9.0",
+    note = "use the `interface` attribute macro on the `impl` block of each interface, and derive \
+            `Service` for a struct whose fields are the interfaces"
+)]
 #[proc_macro_attribute]
 pub fn service(
     attr: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     service::service(attr.into(), input.into()).into()
+}
+
+/// Derives `Service` for a struct whose fields are the interfaces of the service.
+///
+/// A service is made up of one or more interfaces, each with a type of its own that implements
+/// `Interface` (which the [`interface`](macro@interface) attribute macro does for the type of the
+/// `impl` block it is applied to). Make those types the fields of a struct and derive `Service`
+/// for it: the derived implementation hands each method call over to the field whose interface the
+/// method belongs to, and implements the `org.varlink.service` interface for all of them.
+///
+/// Both structs with named fields and tuple structs are supported. Enums and unions are not, nor
+/// are structs with type, lifetime or const parameters, and a struct needs at least one interface
+/// field.
+///
+/// # Supported Attributes
+///
+/// On the struct:
+///
+/// * `#[zlink(vendor = "..", product = "..", version = "..", url = "..")]` - What `GetInfo` replies
+///   with. Each takes an expression and is optional, defaulting to an empty string.
+/// * `#[zlink(crate = "path")]` - Specifies the crate path to use for zlink types. Defaults to
+///   `::zlink`.
+///
+/// On a field:
+///
+/// * `#[zlink(state)]` - Marks the field as the state that the interfaces share, instead of an
+///   interface. At most one field can be.
+///
+/// # Shared State
+///
+/// The interfaces are separate values, so the methods of one can't reach the data of another. To
+/// share data, put it in a field marked with `#[zlink(state)]`: the service lends it to the
+/// interface that handles a call, which has to implement `Interface<Sock, State>` for the type of
+/// the field (an interface that needs no state implements it for any state, so that it fits into
+/// any service). Without such a field, the state is `()`.
+///
+/// # Routing
+///
+/// A method call goes to the interface that the method's name belongs to, e.g.
+/// `org.example.metrics.Get` goes to the field whose interface is `org.example.metrics`, so the
+/// interfaces may have methods of the same name. A call to a method of `org.varlink.service` is
+/// answered by the service itself, and one to a method that no interface has gets a
+/// `MethodNotFound` error naming the method.
+///
+/// If a call has a method of an interface but parameters that don't fit it, the call is
+/// malformed, which the server treats as it does any other malformed call, rather than as a call
+/// to an unknown method.
+///
+/// As calls are routed by the name of their interface, the interfaces of a service must all differ
+/// in name, and none can be `org.varlink.service`. That is checked at compile time, once the
+/// service is used with a socket type, so by a build rather than by `cargo check`:
+///
+/// ```rust,compile_fail,E0080
+/// struct Lights;
+///
+/// #[zlink::interface("org.example.home")]
+/// impl Lights {
+///     async fn switch(&mut self) {}
+/// }
+///
+/// struct Heating;
+///
+/// // The name of the interface of `Lights`.
+/// #[zlink::interface("org.example.home")]
+/// impl Heating {
+///     async fn warm(&mut self) {}
+/// }
+///
+/// #[derive(zlink::Service)]
+/// struct Home {
+///     lights: Lights,
+///     heating: Heating,
+/// }
+///
+/// let listener = zlink::zruntime::unix::bind("/tmp/home.sock")?;
+/// let home = Home { lights: Lights, heating: Heating };
+/// // error: the interfaces of the fields `lights` and `heating` of `Home` have the same name
+/// zlink::zruntime::block_on(zlink::Server::new(listener, home).run())?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Introspection
+///
+/// `GetInfo` replies with the attributes of the struct, and the names of the interfaces of the
+/// fields, in the order of the fields, followed by `org.varlink.service`.
+/// `GetInterfaceDescription` replies with the description of the interface that the client asks
+/// for, or `InterfaceNotFound` if there's no such interface.
+///
+/// # Example
+///
+/// Two interfaces, one of which keeps a count in the state that they share, served together:
+///
+/// ```rust
+/// use serde::{Deserialize, Serialize};
+/// use zlink::{
+///     Server, interface, introspect,
+///     zruntime::unix::{bind, connect},
+/// };
+///
+/// // The interface that counts, in the state that the service lends it.
+/// struct Counter;
+///
+/// #[interface("org.example.counter")]
+/// impl Counter {
+///     async fn increment(&mut self, #[zlink(state)] count: &mut u64) -> Count {
+///         *count += 1;
+///
+///         Count { count: *count }
+///     }
+/// }
+///
+/// // The interface that greets, which needs no state.
+/// struct Greeter;
+///
+/// #[interface("org.example.greeter")]
+/// impl Greeter {
+///     async fn say_hello(&self, name: &str) -> Greeting {
+///         Greeting { greeting: format!("Hello {name}!") }
+///     }
+/// }
+///
+/// // The service is the struct that holds the interfaces and their state.
+/// #[derive(zlink::Service)]
+/// #[zlink(vendor = "Example", product = "Counting greeter", version = "1.0")]
+/// struct CountingGreeter {
+///     #[zlink(state)]
+///     count: u64,
+///     counter: Counter,
+///     greeter: Greeter,
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize, introspect::Type)]
+/// struct Count {
+///     count: u64,
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize, introspect::Type)]
+/// struct Greeting {
+///     greeting: String,
+/// }
+///
+/// #[zlink::proxy("org.example.counter")]
+/// trait CounterProxy {
+///     async fn increment(&mut self) -> zlink::Result<Result<Count, ()>>;
+/// }
+///
+/// #[zlink::proxy("org.example.greeter")]
+/// trait GreeterProxy {
+///     async fn say_hello(&mut self, name: &str) -> zlink::Result<Result<Greeting, ()>>;
+/// }
+///
+/// # zlink::zruntime::block_on(async {
+/// let dir = tempfile::tempdir()?;
+/// let socket_path = dir.path().join("derive-service-example.sock");
+/// let service = CountingGreeter { count: 0, counter: Counter, greeter: Greeter };
+/// let server = Server::new(bind(&socket_path)?, service);
+///
+/// // Run the server and a client that uses both interfaces on one connection.
+/// tokio::select! {
+///     res = server.run() => res?,
+///     res = async {
+///         let mut conn = connect(&socket_path).await?;
+///
+///         assert_eq!(conn.increment().await?.unwrap().count, 1);
+///         assert_eq!(conn.say_hello("zlink").await?.unwrap().greeting, "Hello zlink!");
+///         assert_eq!(conn.increment().await?.unwrap().count, 2);
+///
+///         Ok::<(), Box<dyn std::error::Error>>(())
+///     } => res?,
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # })?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[cfg(feature = "service")]
+#[proc_macro_derive(Service, attributes(zlink))]
+pub fn derive_service(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    service_derive::service_derive(input.into()).into()
 }

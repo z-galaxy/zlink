@@ -19,8 +19,8 @@ an API that is leaner and more efficient than what is possible for a D-Bus imple
 zlink is a 100% Rust-native, async-first implementation of the Varlink protocol. It provides:
 
 * a low-level API to send and receive Varlink messages over a connection,
-* high-level attribute macros — [`proxy`] for writing clients and [`service`] for writing
-  services — that generate all the wiring for you,
+* high-level macros — [`proxy`] for writing clients, and [`interface`] and the [`Service`] derive
+  for writing services — that generate all the wiring for you,
 * first-class support for method call [pipelining],
 * runtime [introspection] and code generation from Varlink IDL, and
 * `no_std` support in its core, for use in embedded environments.
@@ -62,7 +62,8 @@ in the [`#zlink:matrix.org`] Matrix room. If something doesn't seem right, pleas
 [pipelining]: pipelining.html
 [introspection]: introspection.html
 [`proxy`]: https://docs.rs/zlink/latest/zlink/attr.proxy.html
-[`service`]: https://docs.rs/zlink/latest/zlink/attr.service.html
+[`interface`]: https://docs.rs/zlink/latest/zlink/attr.interface.html
+[`Service`]: https://docs.rs/zlink/latest/zlink/derive.Service.html
 [`zlink`]: https://docs.rs/zlink/
 [`zlink-core`]: https://docs.rs/zlink-core/
 [`zlink-macros`]: https://docs.rs/zlink-macros/

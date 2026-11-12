@@ -1,4 +1,4 @@
-//! Tests for file descriptor passing with service macro.
+//! Tests for file descriptor passing with interface macro.
 
 use serde::{Deserialize, Serialize};
 use zlink::{
@@ -13,7 +13,7 @@ async fn fd_passing() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = dir.path().join("test.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = FdService;
+    let service = FdService(Fds);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -125,10 +125,13 @@ pub(crate) enum FdError {
 }
 
 // A service that tests file descriptor passing.
-struct FdService;
+#[derive(zlink::Service)]
+struct FdService(Fds);
 
-#[zlink::service(interface = "org.example.fd")]
-impl FdService {
+struct Fds;
+
+#[zlink::interface("org.example.fd")]
+impl Fds {
     /// Receive FDs and read from the one at the given index.
     async fn read_fd(
         &self,

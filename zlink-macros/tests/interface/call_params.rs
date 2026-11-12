@@ -1,7 +1,7 @@
-//! Tests for how the parameters of a service method are read from a call.
+//! Tests for how the parameters of an interface method are read from a call.
 //!
-//! The calls are dispatched to the services from the JSON that a client sends, so that what is on
-//! the wire is what is under test.
+//! The calls are dispatched to the services of the interfaces from the JSON that a client sends,
+//! so that what is on the wire is what is under test.
 
 use std::borrow::Cow;
 
@@ -17,7 +17,7 @@ const NO_PARAMETERS: [Option<&str>; 3] = [None, Some("{}"), Some("null")];
 
 #[test_log::test(tokio::test)]
 async fn method_without_parameters() {
-    let mut service = Optionals;
+    let mut service = OptionalsService(Optionals);
 
     for parameters in NO_PARAMETERS {
         let json = optionals_call("Ping", parameters);
@@ -35,7 +35,7 @@ async fn method_without_parameters() {
 
 #[test_log::test(tokio::test)]
 async fn method_with_optional_parameters() {
-    let mut service = Optionals;
+    let mut service = OptionalsService(Optionals);
 
     for parameters in NO_PARAMETERS {
         let json = optionals_call("Greet", parameters);
@@ -66,7 +66,7 @@ async fn method_with_optional_parameters() {
 
 #[test_log::test(tokio::test)]
 async fn method_with_required_parameters() {
-    let mut service = Optionals;
+    let mut service = OptionalsService(Optionals);
 
     // A required parameter can't be left out, whichever way the call leaves it out.
     for parameters in NO_PARAMETERS {
@@ -90,7 +90,7 @@ async fn method_with_required_parameters() {
 
 #[test_log::test(tokio::test)]
 async fn parameters_before_method() {
-    let mut service = Optionals;
+    let mut service = OptionalsService(Optionals);
 
     let jsons = [
         r#"{"parameters":{},"method":"org.example.optionals.Ping"}"#,
@@ -118,18 +118,21 @@ async fn parameters_before_method() {
     }
 }
 
-// A method can borrow from the call, no matter how the other methods of its service get their
+// A method can borrow from the call, no matter how the other methods of its interface get their
 // parameters.
 #[test_log::test(tokio::test)]
 async fn borrowed_parameters() {
     let json = r#"{"method":"org.example.joiner.Join","parameters":{"parts":["a","b"]}}"#;
     assert_eq!(
-        dispatch(&mut Joiner, json).await.unwrap(),
+        dispatch(&mut JoinerService(Joiner), json).await.unwrap(),
         r#"{"text":"a+b"}"#
     );
 
     let json = r#"{"method":"org.example.noter.Note","parameters":{"note":{"title":"a"}}}"#;
-    assert_eq!(dispatch(&mut Noter, json).await.unwrap(), r#"{"text":"a"}"#);
+    assert_eq!(
+        dispatch(&mut NoterService(Noter), json).await.unwrap(),
+        r#"{"text":"a"}"#
+    );
 
     let calls_and_replies = [
         (
@@ -166,18 +169,15 @@ async fn borrowed_parameters() {
             r#"{"text":"pong"}"#,
         ),
     ];
+    let mut service = BorrowerService(Borrower);
     for (json, reply) in calls_and_replies {
-        assert_eq!(
-            dispatch(&mut Borrower, json).await.unwrap(),
-            reply,
-            "{json}"
-        );
+        assert_eq!(dispatch(&mut service, json).await.unwrap(), reply, "{json}");
     }
 }
 
 #[test_log::test(tokio::test)]
 async fn parameters_named_like_markers() {
-    let mut service = Names;
+    let mut service = NamesService(Names);
 
     let json = r#"{"method":"org.example.names.Marker","parameters":{"marker":1}}"#;
     assert_eq!(
@@ -198,7 +198,7 @@ async fn parameters_named_like_markers() {
     );
 }
 
-/// The JSON of a call to `method` of the `Optionals` service.
+/// The JSON of a call to `method` of the `Optionals` interface.
 fn optionals_call(method: &str, parameters: Option<&str>) -> String {
     match parameters {
         Some(parameters) => {
@@ -237,9 +237,12 @@ impl Received {
     }
 }
 
+#[derive(zlink::Service)]
+struct OptionalsService(Optionals);
+
 struct Optionals;
 
-#[zlink::service(interface = "org.example.optionals")]
+#[zlink::interface("org.example.optionals")]
 impl Optionals {
     /// Takes no parameters.
     async fn ping(&self) -> Received {
@@ -262,11 +265,14 @@ impl Optionals {
     }
 }
 
-// A service whose only method borrows from the call through a type that `serde` doesn't borrow
+// An interface whose only method borrows from the call through a type that `serde` doesn't borrow
 // for on its own.
+#[derive(zlink::Service)]
+struct JoinerService(Joiner);
+
 struct Joiner;
 
-#[zlink::service(interface = "org.example.joiner")]
+#[zlink::interface("org.example.joiner")]
 impl Joiner {
     async fn join(&self, parts: Vec<&str>) -> Received {
         Received::new(parts.join("+"))
@@ -274,9 +280,12 @@ impl Joiner {
 }
 
 // The same, with a type of the user.
+#[derive(zlink::Service)]
+struct NoterService(Noter);
+
 struct Noter;
 
-#[zlink::service(interface = "org.example.noter")]
+#[zlink::interface("org.example.noter")]
 impl Noter {
     async fn note(&self, note: Note<'_>) -> Received {
         Received::new(note.title)
@@ -288,10 +297,13 @@ struct Note<'a> {
     title: &'a str,
 }
 
-// A service with methods that borrow in different ways, next to ones that don't.
+// An interface with methods that borrow in different ways, next to ones that don't.
+#[derive(zlink::Service)]
+struct BorrowerService(Borrower);
+
 struct Borrower;
 
-#[zlink::service(interface = "org.example.borrower")]
+#[zlink::interface("org.example.borrower")]
 impl Borrower {
     async fn join(&self, parts: Vec<&str>) -> Received {
         Received::new(parts.join("+"))
@@ -322,11 +334,14 @@ impl Borrower {
     }
 }
 
-// A service with parameters that are named like the fields that the macro may add to the types it
-// reads the parameters into.
+// An interface with parameters that are named like the fields that the macro may add to the types
+// it reads the parameters into.
+#[derive(zlink::Service)]
+struct NamesService(Names);
+
 struct Names;
 
-#[zlink::service(interface = "org.example.names")]
+#[zlink::interface("org.example.names")]
 impl Names {
     async fn marker(&self, #[zlink(rename = "marker")] __marker: u32) -> Received {
         Received::new(__marker.to_string())

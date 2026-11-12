@@ -140,8 +140,8 @@ offers two methods:
   interfaces it implements.
 * `GetInterfaceDescription` — returns the IDL text of a given interface.
 
-That's considerably simpler than D-Bus introspection, and just as with zbus, zlink's `service`
-macro [implements it for you automatically](service.html#introspection-for-free), while both a
+That's considerably simpler than D-Bus introspection, and just as with zbus, zlink's `Service`
+derive [implements it for you automatically](service.html#introspection-for-free), while both a
 low-level and a high-level client API is available for [querying it](introspection.html).
 
 ## Exploring services with `varlinkctl`

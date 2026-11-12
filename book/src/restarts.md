@@ -63,12 +63,14 @@ use zoter::{Passed, Store};
 # struct Greeter;
 # #[derive(Debug, serde::Serialize, serde::Deserialize, zlink::introspect::Type)]
 # struct Greeting { greeting: String }
-# #[zlink::service(interface = "org.zlink.MyGreeter")]
+# #[zlink::interface("org.zlink.MyGreeter")]
 # impl Greeter {
 #     async fn say_hello(&self, name: String) -> Greeting {
 #         Greeting { greeting: format!("Hello {name}!") }
 #     }
 # }
+# #[derive(zlink::Service)]
+# struct GreeterService(Greeter);
 // What `main` comes down to, with `sigterm` completing once the service is told to stop.
 fn start(sigterm: impl Future<Output = ()>) -> Result<(), Box<dyn std::error::Error>> {
     // The next instance takes the file descriptors of the hand-over under this limit.
@@ -91,7 +93,7 @@ async fn run(
     };
     // The socket of socket activation, which systemd keeps open while the service restarts.
     let socket = passed.take("greeter.socket").ok_or("no socket to listen on")?;
-    let mut server = Server::new(Listener::try_from(socket)?, Greeter);
+    let mut server = Server::new(Listener::try_from(socket)?, GreeterService(Greeter));
     if let Some(mut restored) = restored {
         let connections = restored
             .take_items()

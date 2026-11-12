@@ -19,7 +19,7 @@ async fn raw_ident_method_and_param() -> Result<(), Box<dyn std::error::Error>> 
 
     // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
-    let service = Probe;
+    let service = ProbeService(Probe);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -70,9 +70,12 @@ enum ProbeError {
     Failed,
 }
 
+#[derive(zlink::Service)]
+struct ProbeService(Probe);
+
 struct Probe;
 
-#[zlink::service(interface = "org.example.probe", types = [Probed])]
+#[zlink::interface("org.example.probe", types = [Probed])]
 impl Probe {
     /// Echo back the raw-named parameter.
     async fn r#type(&mut self, r#type: String) -> Result<Probed, ProbeError> {

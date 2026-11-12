@@ -13,7 +13,8 @@ default = ["std", "server", "proxy", "tracing"]
 std = ["dep:rustix", "dep:libc", "zlink-macros/std"]
 server = []
 proxy = ["zlink-macros/proxy"]
-service = ["server", "zlink-macros/service", "introspection"]
+# The `Service` derive macro reads the parameters of some method calls as raw JSON.
+service = ["server", "zlink-macros/service", "introspection", "serde_json/raw_value"]
 # IDL and introspection support
 idl = ["dep:zlink-idl"]
 idl-parse = ["idl", "zlink-idl/parse", "zlink-macros/idl-parse"]
@@ -33,6 +34,9 @@ ryu = { version = "1.0", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "async-await-macro",
+    # For `Stream` on a boxed stream, which the replies of a method that returns an `impl Stream`
+    # are boxed into.
+    "alloc",
 ] }
 tracing = { version = "0.1.41", default-features = false, optional = true }
 defmt = { version = "1.0.1", default-features = false, optional = true }

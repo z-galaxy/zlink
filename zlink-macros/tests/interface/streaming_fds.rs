@@ -1,4 +1,4 @@
-//! Tests for streaming service methods with FD passing (#[zlink(more, return_fds)]).
+//! Tests for streaming interface methods with FD passing (#[zlink(more, return_fds)]).
 
 use super::fd_passing::{FdError, FdHandle};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ async fn streaming_with_fds() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = dir.path().join("test.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = StreamingFdService;
+    let service = StreamingFdService(StreamingFds);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -115,10 +115,14 @@ struct FdReadResult {
 }
 
 /// A service that streams file descriptors.
-struct StreamingFdService;
+#[derive(zlink::Service)]
+struct StreamingFdService(StreamingFds);
 
-#[zlink::service(interface = "org.example.streamingFd")]
-impl StreamingFdService {
+/// The interface that streams file descriptors.
+struct StreamingFds;
+
+#[zlink::interface("org.example.streamingFd")]
+impl StreamingFds {
     /// Stream FDs with handles, one per name. Each stream item contains a handle and the FD.
     #[zlink(more, return_fds)]
     async fn stream_fds(

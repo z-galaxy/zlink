@@ -1,4 +1,4 @@
-//! Basic service macro tests using a BankAccount example.
+//! Basic interface macro tests using a BankAccount example, served as a service of its own.
 
 use serde::{Deserialize, Serialize};
 use zlink::{
@@ -8,13 +8,15 @@ use zlink::{
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn service_macro_basic() -> Result<(), Box<dyn std::error::Error>> {
+async fn interface_macro_basic() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("test.sock");
 
     // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
-    let service = BankAccount::new(1000, false);
+    let service = BankService {
+        account: BankAccount::new(1000, false),
+    };
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -96,7 +98,13 @@ pub(crate) enum BankError {
     AccountLocked,
 }
 
-// Define the service type.
+// The service, of which the bank account is the only interface.
+#[derive(zlink::Service)]
+pub(crate) struct BankService {
+    pub account: BankAccount,
+}
+
+// Define the interface type.
 pub(crate) struct BankAccount {
     balance: i64,
     locked: bool,
@@ -111,11 +119,10 @@ impl BankAccount {
     }
 }
 
-/// A simple bank account service for testing.
-#[zlink::service(types = [Balance])]
+/// A simple bank account interface for testing.
+#[zlink::interface("org.example.bank", types = [Balance])]
 impl BankAccount {
     /// Get the current account balance.
-    #[zlink(interface = "org.example.bank")]
     async fn get_balance(&self) -> Balance {
         Balance {
             amount: self.balance,

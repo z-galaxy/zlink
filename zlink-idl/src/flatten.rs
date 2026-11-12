@@ -1,7 +1,7 @@
 //! Field-list helpers for `#[zlink(flatten)]` code generation.
 //!
 //! These `const fn`s exist **solely** to be called by the code that `zlink-macros` generates for
-//! the `Type`, `CustomType`, `ReplyError`, and `#[service]` derives/macros. They are not a
+//! the `Type`, `CustomType`, `ReplyError`, and `#[interface]` derives/macros. They are not a
 //! supported public API — the module is `#[doc(hidden)]` and may change without notice.
 
 use zlink_names::FieldName;

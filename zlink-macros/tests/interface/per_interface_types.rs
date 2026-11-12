@@ -1,8 +1,8 @@
 //! Tests for per-interface custom type scoping in introspection.
 //!
-//! When a service implements multiple interfaces, custom types specified via
-//! `#[zlink(interface = "...", types = [...])]` should only appear in the IDL
-//! output for that specific interface, not in all interfaces.
+//! When a service is made up of multiple interfaces, the custom types of each,
+//! specified via `types = [...]` on its `#[interface]` or on its methods, should only
+//! appear in the IDL output for that specific interface, not in all interfaces.
 //!
 //! Varlink method return types must always be structs (objects) so that the
 //! response can be expressed as named fields: `-> (field: type, …)`.  Arrays
@@ -21,7 +21,7 @@ async fn per_interface_types() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = dir.path().join("per-iface-types.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = CatalogService;
+    let service = CatalogService(Books, Music);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -168,12 +168,15 @@ enum MusicError {
 }
 
 /// A service exposing two catalog interfaces with distinct custom types.
-#[derive(Default)]
-struct CatalogService;
+#[derive(zlink::Service)]
+struct CatalogService(Books, Music);
 
-#[zlink::service]
-impl CatalogService {
-    #[zlink(interface = "org.example.books", types = [Book, BookList])]
+/// The books, whose methods list the custom types.
+struct Books;
+
+#[zlink::interface("org.example.books")]
+impl Books {
+    #[zlink(types = [Book, BookList])]
     async fn list_books(&self) -> BookList {
         BookList {
             books: vec![Book {
@@ -195,8 +198,13 @@ impl CatalogService {
             Err(BookError::NotFound)
         }
     }
+}
 
-    #[zlink(interface = "org.example.music", types = [Album, AlbumList])]
+/// The music, whose interface lists the custom types.
+struct Music;
+
+#[zlink::interface("org.example.music", types = [Album, AlbumList])]
+impl Music {
     async fn list_albums(&self) -> AlbumList {
         AlbumList {
             albums: vec![Album {
@@ -206,7 +214,6 @@ impl CatalogService {
         }
     }
 
-    #[zlink(types = [Album])]
     async fn get_album(&self, title: String) -> Result<Album, MusicError> {
         if title == "Oxidized Beats" {
             Ok(Album {

@@ -1,4 +1,4 @@
-//! Tests for service macro with borrowed types (lifetimes in error and return types).
+//! Tests for interface macro with borrowed types (lifetimes in error and return types).
 
 use serde::{Deserialize, Serialize};
 use zlink::{
@@ -8,12 +8,12 @@ use zlink::{
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn service_macro_borrowed_types() -> Result<(), Box<dyn std::error::Error>> {
+async fn interface_macro_borrowed_types() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("test.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = Calculator;
+    let service = CalculatorService(Calculator);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -71,11 +71,13 @@ enum CalculatorError<'a> {
     InvalidInput { field: &'a str, reason: &'a str },
 }
 
+#[derive(zlink::Service)]
+struct CalculatorService(Calculator);
+
 struct Calculator;
 
-#[zlink::service(types = [CalculationResult, Greeting])]
+#[zlink::interface("org.example.BorrowedCalc", types = [CalculationResult, Greeting])]
 impl Calculator {
-    #[zlink(interface = "org.example.BorrowedCalc")]
     async fn divide(
         &self,
         dividend: f64,

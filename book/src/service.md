@@ -16,15 +16,17 @@ socket it listens on. Setting up shop is exactly two steps — bind a listener a
 # struct Greeter;
 # #[derive(Debug, serde::Serialize, serde::Deserialize, zlink::introspect::Type)]
 # struct Greeting { greeting: String }
-# #[zlink::service(interface = "org.zlink.MyGreeter")]
+# #[zlink::interface("org.zlink.MyGreeter")]
 # impl Greeter {
 #     async fn say_hello(&self, name: String) -> Greeting {
 #         Greeting { greeting: format!("Hello {name}!") }
 #     }
 # }
-# async fn example(greeter: Greeter) -> Result<(), Box<dyn std::error::Error>> {
+# #[derive(zlink::Service)]
+# struct GreeterService(Greeter);
+# async fn example(service: GreeterService) -> Result<(), Box<dyn std::error::Error>> {
 let listener = zlink::zruntime::unix::bind("/run/user/1000/org.zlink.MyGreeter")?;
-let server = zlink::Server::new(listener, greeter);
+let server = zlink::Server::new(listener, service);
 server.run().await?;
 # Ok(())
 # }
@@ -34,15 +36,22 @@ There is no "hang on, incoming calls might be lost" window either: as soon as `b
 socket exists and clients can connect; their calls simply queue up until `run` starts servicing
 them.
 
-## The `service` macro
+## Interfaces and services
 
-The `service` attribute macro turns an ordinary `impl` block into a full Varlink service — it
-generates the message handling, method dispatch, and introspection support:
+A Varlink service is made up of one or more *interfaces*, and zlink models it the same way. An
+interface is a type with an `impl` block that has the `interface` attribute macro: its methods are
+the methods of the Varlink interface. A service is a struct that derives `Service` and holds the
+interface types as its fields, even if it has just the one. The macros generate the message
+handling, method dispatch, and introspection support:
 
 ```rust,no_run
-use zlink::{service, zruntime::unix, Server};
+use zlink::{interface, zruntime::unix, Server, Service};
 use serde::{Deserialize, Serialize};
 use zlink::introspect;
+
+#[derive(Service)]
+#[zlink(vendor = "The zlink project", product = "Greeter", version = "1")]
+struct GreeterService(Greeter);
 
 struct Greeter;
 
@@ -51,7 +60,7 @@ struct Greeting {
     greeting: String,
 }
 
-#[service(interface = "org.zlink.MyGreeter")]
+#[interface("org.zlink.MyGreeter")]
 impl Greeter {
     async fn say_hello(&self, name: &str) -> Greeting {
         Greeting {
@@ -68,7 +77,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = std::env::var("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)?
         .join("org.zlink.MyGreeter");
     let listener = unix::bind(&socket_path)?;
-    Server::new(listener, Greeter).run().await?;
+    Server::new(listener, GreeterService(Greeter)).run().await?;
 
     Ok(())
 }
@@ -100,11 +109,18 @@ Some things to note:
   reply is wrapped in a struct deriving `introspect::Type`; the macro unwraps its fields into the
   method's output parameters (`-> (greeting: string)`), both on the wire and in the IDL above.
 * Types that should appear as *named* custom types in the IDL derive `introspect::CustomType`
-  instead, and must be listed in `types = [...]` on the macro. Forgetting one is a *compile-time*
-  error, so you can't accidentally publish an incomplete interface description.
-* The `interface` can also be specified per-method with `#[zlink(interface = "...")]`; it
-  propagates to subsequent methods, which is how a single service can implement **multiple
-  interfaces**.
+  instead, and must be listed in `types = [...]` on the `interface` attribute, as in
+  `#[interface(interface = "org.zlink.MyGreeter", types = [...])]`. Forgetting one is a
+  *compile-time* error, so you can't accidentally publish an incomplete interface description.
+* The metadata that `org.varlink.service.GetInfo` reports (`vendor`, `product`, `version` and
+  `url`) goes on the struct that derives `Service`, as above; all of it is optional.
+* The struct is what you hand to the `Server`. A service with several interfaces has one field for
+  each, as the [section on that](#several-interfaces-and-shared-state) shows.
+
+Readers coming from older versions of zlink may remember a `service` attribute macro that did all
+of this on a single `impl` block. It is deprecated: put `interface` on the `impl` block instead,
+and move the `vendor`, `product`, `version` and `url` attributes to a struct that derives
+`Service`.
 
 ### ⚠ `Server::run` and `tokio::spawn`
 
@@ -134,20 +150,23 @@ Here's something that tends to raise eyebrows when people first see it. Let's gi
 state:
 
 ```rust,noplayground
-# use zlink::{introspect, service};
+# use zlink::{interface, introspect};
 # #[derive(Debug, serde::Serialize, serde::Deserialize, introspect::Type)]
 # struct Count { count: u64 }
 struct Counter {
     count: u64,
 }
 
-#[service(interface = "org.zlink.Counter")]
+#[interface("org.zlink.Counter")]
 impl Counter {
     async fn increment(&mut self) -> Count {
         self.count += 1; // <- plain mutation. No Mutex. No RwLock. No atomics.
         Count { count: self.count }
     }
 }
+
+#[derive(zlink::Service)]
+struct CounterService(Counter);
 ```
 
 That's a `&mut self` method mutating a plain field — no `Arc<Mutex<...>>` in sight. In zbus, an
@@ -164,6 +183,103 @@ connections and pipelining, usually comes out *ahead*. If a method genuinely nee
 work, spawn a task for it and stream progress back through a
 [streaming method](#streaming-methods).
 
+## Several interfaces and shared state
+
+A service with several interfaces is easier to keep in order with one type per interface, each in
+a module of its own. Give each its own `interface` attribute, and make them the fields of the
+struct that derives `Service`:
+
+```rust,noplayground
+mod greeter {
+    #[derive(Debug, serde::Serialize, zlink::introspect::Type)]
+    pub struct Greeting { greeting: String }
+
+    pub struct Greeter;
+
+    #[zlink::interface("org.zlink.Greeter")]
+    impl Greeter {
+        async fn get(&self, name: &str) -> Greeting {
+            Greeting { greeting: format!("Hello {name}!") }
+        }
+    }
+}
+
+mod clock {
+    #[derive(Debug, serde::Serialize, zlink::introspect::Type)]
+    pub struct Time { seconds: u64 }
+
+    pub struct Clock;
+
+    #[zlink::interface("org.zlink.Clock")]
+    impl Clock {
+        async fn get(&self) -> Time {
+            let since_epoch = std::time::UNIX_EPOCH.elapsed().unwrap_or_default();
+            Time { seconds: since_epoch.as_secs() }
+        }
+    }
+}
+
+#[derive(zlink::Service)]
+#[zlink(vendor = "The zlink project", product = "Greeter and clock", version = "1")]
+struct Example {
+    greeter: greeter::Greeter,
+    clock: clock::Clock,
+}
+```
+
+Each call goes to the interface it is for, and the standard `org.varlink.service` interface covers
+them all: `GetInfo` lists every interface along with the `vendor`, `product`, `version` and `url`
+from the attributes on the struct, and `GetInterfaceDescription` describes each one. Note that both
+interfaces above have a method named `Get`. That's fine, as a method is told apart by the interface
+it belongs to. An `impl` block is always one interface: a method can't switch to another.
+
+Separate values can't reach each other's data. Interfaces that have to share some mark one field of
+the struct with `#[zlink(state)]` and borrow it in the methods that need it, through a parameter
+with the same attribute. Like `&self`, it's not a parameter on the wire:
+
+```rust,noplayground
+# #[derive(Debug, serde::Serialize, zlink::introspect::Type)]
+# struct Count { count: u64 }
+# #[derive(Debug, serde::Serialize, zlink::introspect::Type)]
+# struct Total<'a> { name: &'a str, count: u64 }
+# struct Greeter;
+# #[zlink::interface("org.zlink.Greeter")]
+# impl Greeter {
+#     async fn greet(&self) {}
+# }
+struct Visits;
+
+#[zlink::interface("org.zlink.Visits")]
+impl Visits {
+    async fn record(&mut self, #[zlink(state)] shared: &mut Shared) -> Count {
+        shared.count += 1;
+        Count { count: shared.count }
+    }
+
+    // The reply may borrow from the state.
+    async fn total<'a>(&self, #[zlink(state)] shared: &'a Shared) -> Total<'a> {
+        Total { name: &shared.name, count: shared.count }
+    }
+}
+
+struct Shared {
+    name: String,
+    count: u64,
+}
+
+#[derive(zlink::Service)]
+struct Example {
+    #[zlink(state)]
+    shared: Shared,
+    visits: Visits,
+    greeter: Greeter, // Needs no state, and gets none.
+}
+```
+
+An interface whose methods borrow the state fits only a service that has a state of that type,
+which is where the state comes from. One that doesn't fits any service, so interfaces that share
+nothing need none of this. A service has at most one `#[zlink(state)]` field.
+
 ## Method errors
 
 To return errors from methods, declare an error enum (the same `ReplyError` +
@@ -171,7 +287,7 @@ To return errors from methods, declare an error enum (the same `ReplyError` +
 a `Result`:
 
 ```rust,noplayground
-use zlink::{ReplyError, introspect, service};
+use zlink::{ReplyError, interface, introspect};
 
 #[derive(Debug, ReplyError, introspect::ReplyError)]
 #[zlink(interface = "org.zlink.Counter")]
@@ -182,13 +298,16 @@ enum CounterError {
 # struct Counter { count: u64 }
 # #[derive(Debug, serde::Serialize, serde::Deserialize, introspect::Type)]
 # struct Count { count: u64 }
-#[service(interface = "org.zlink.Counter")]
+#[interface("org.zlink.Counter")]
 impl Counter {
     async fn increment(&mut self) -> Result<Count, CounterError> {
         self.count = self.count.checked_add(1).ok_or(CounterError::Overflow)?;
         Ok(Count { count: self.count })
     }
 }
+
+# #[derive(zlink::Service)]
+# struct CounterService(Counter);
 ```
 
 An `Err` return is sent as a Varlink error reply — for the wire format, see the
@@ -209,7 +328,7 @@ test suite:
 
 ```rust,noplayground
 use zlink::zruntime::notified::{self, traits::State as _};
-# use zlink::service;
+use zlink::interface;
 # #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, zlink::introspect::CustomType)]
 # struct DriveCondition { tylium_level: i64 }
 
@@ -217,7 +336,7 @@ struct Ftl {
     drive_condition: notified::State<DriveCondition, DriveCondition>,
 }
 
-#[service(interface = "org.example.ftl", types = [DriveCondition])]
+#[interface(interface = "org.example.ftl", types = [DriveCondition])]
 impl Ftl {
     /// When `more` is false, reply once with the current condition;
     /// when true, stream every change as it happens.
@@ -235,6 +354,8 @@ impl Ftl {
         condition
     }
 }
+# #[derive(zlink::Service)]
+# struct FtlService(Ftl);
 ```
 
 Every client that called `GetDriveCondition` with the `more` flag receives a new reply whenever
@@ -271,7 +392,7 @@ use serde::Serialize;
 use std::os::fd::OwnedFd;
 use zlink::{
     connection::socket::{Socket, WriteHalf},
-    introspect, service,
+    interface, introspect,
     service::{TakeOver, Upgraded},
 };
 
@@ -284,7 +405,7 @@ struct Blobs {
     blob: Vec<u8>,
 }
 
-#[service(interface = "org.example.Blobs")]
+#[interface("org.example.Blobs")]
 impl Blobs {
     /// Replies with the size of the blob, which is then sent over the upgraded connection.
     #[zlink(upgrade)]
@@ -297,6 +418,8 @@ impl Blobs {
         (download, SendBlob(blob))
     }
 }
+# #[derive(zlink::Service)]
+# struct BlobsService(Blobs);
 
 struct SendBlob(Vec<u8>);
 
@@ -334,13 +457,13 @@ Some things to note:
   can't refuse the upgrade anymore. Do the checks that the upgrade depends on, e.g. of the peer's
   credentials, in the upgrade method instead, using a `#[zlink(connection)]` parameter, and return
   an error to refuse the upgrade.
-* The macro refuses what wouldn't make sense, without calling the method: a call to an upgrade
-  method that doesn't ask for an upgrade gets the `ExpectedUpgrade` error that systemd's services
-  reply with as well, and a call that asks for an upgrade of any other method gets the standard
-  `InvalidParameter` error naming `upgrade`. One-way calls to an upgrade method aren't served
-  either, since they can't get a reply that confirms the upgrade. Upgrade methods can't be combined
-  with `#[zlink(more)]`, since a single reply confirms an upgrade, or `#[zlink(return_fds)]`: pass
-  file descriptors over the upgraded connection instead.
+* The `interface` macro refuses what wouldn't make sense, without calling the method: a call to an
+  upgrade method that doesn't ask for an upgrade gets the `ExpectedUpgrade` error that systemd's
+  services reply with as well, and a call that asks for an upgrade of any other method gets the
+  standard `InvalidParameter` error naming `upgrade`. One-way calls to an upgrade method aren't
+  served either, since they can't get a reply that confirms the upgrade. Upgrade methods can't be
+  combined with `#[zlink(more)]`, since a single reply confirms an upgrade, or
+  `#[zlink(return_fds)]`: pass file descriptors over the upgraded connection instead.
 
 On the client side, mark the proxy method with `#[zlink(upgrade)]` too. If the call returns a
 successful reply, the upgrade is confirmed and the socket can be taken out of the connection. The
@@ -391,31 +514,32 @@ upgrade is refused.
 
 ## Introspection for free
 
-The macro implements the standard `org.varlink.service` interface for you:
+The `Service` derive implements the standard `org.varlink.service` interface for you:
 
-* **`GetInfo`** returns the service metadata you declare on the macro:
+* **`GetInfo`** returns the service metadata you declare on the struct:
 
   ```rust,noplayground
   # struct Ftl;
   # #[derive(Debug, serde::Serialize, serde::Deserialize, zlink::introspect::Type)]
   # struct Speed { speed: i64 }
-  #[zlink::service(
-      interface = "org.example.ftl",
+  # #[zlink::interface("org.example.ftl")]
+  # impl Ftl {
+  #     async fn get_speed(&self) -> Speed { Speed { speed: 42 } }
+  # }
+  #[derive(zlink::Service)]
+  #[zlink(
       vendor = "The FTL project",
       product = "FTL-capable Spaceship 🚀",
       version = "1",
       url = "https://example.org/ftl",
   )]
-  impl Ftl {
-      // ...methods...
-  #     async fn get_speed(&self) -> Speed { Speed { speed: 42 } }
-  }
+  struct FtlService(Ftl);
   ```
 
 * **`GetInterfaceDescription`** returns the IDL of any implemented interface, generated at compile
   time from your method signatures and the `types = [...]` list.
 * Calls to unknown methods or interfaces automatically get the standard `MethodNotFound` /
-  `InterfaceNotFound` error replies.
+  `InterfaceNotFound` error replies, the former naming the method that was called.
 
 ## Socket activation and inherited sockets
 
@@ -458,15 +582,22 @@ if let Err(e) = listener.set_xattr("user.userdb.uid", "1000-1999") {
 # }
 ```
 
-## Under the hood: the `Service` trait
+## Under the hood: the `Service` and `Interface` traits
 
-The `service` macro is sugar for implementing the `zlink::Service` trait, whose `handle` method
-receives each incoming `Call` and returns a `MethodReply` (single reply, error, stream, or upgrade).
-An upgrade reply comes with a value of the trait's `Upgrade` type, which implements `TakeOver` to
-take the connection over once the reply is sent. The macro sets that type to the state that the
-upgrade methods return, and to `()`, which just closes the connection, if there are none. You can
-implement the trait by hand for maximum control — the macro-generated introspection then becomes
-your responsibility — but for nearly all services, the macro is the way to go.
+The `zlink::Service` trait is what a `Server` serves. Its `handle` method receives each incoming
+`Call` and returns a `MethodReply` (single reply, error, stream, or upgrade). An upgrade reply comes
+with a value of the trait's `Upgrade` type, which implements `TakeOver` to take the connection over
+once the reply is sent. You can implement the trait by hand for maximum control — the generated
+introspection then becomes your responsibility — but for nearly all services, the two macros are the
+way to go.
+
+`service::Interface` is the `Service` trait for a single interface, which also gets the state that
+the interfaces share. The `interface` macro implements it for the type of the `impl` block: it
+generates the call type that the methods deserialize from, the dispatch to the methods, the IDL
+description, and the `Upgrade` type, which it sets to the state that the upgrade methods return, and
+to `()`, which just closes the connection, if there are none. `#[derive(Service)]` implements
+`Service` for the struct that holds the interfaces, by handing every call to the field it is for,
+and answering the calls of `org.varlink.service` itself.
 
 [rustc-100013]: https://github.com/rust-lang/rust/issues/100013
 [`LocalSet`]: https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html

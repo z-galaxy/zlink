@@ -56,13 +56,13 @@ The zlink project consists of several subcrates:
 ### Example: Calculator Service and Client
 
 Here's a complete example showing both service and client implementations using zlink's attribute
-macros:
+and derive macros:
 
 ```rust
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::{select, sync::oneshot};
-use zlink::{introspect, proxy, service, zruntime::unix, ReplyError, Server};
+use zlink::{interface, introspect, proxy, zruntime::unix, ReplyError, Server, Service};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run the async code on zruntime, the default runtime.
@@ -177,7 +177,7 @@ async fn run_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Setup and run the server.
     let listener = unix::bind(socket_path)?;
-    let server = Server::new(listener, Calculator::new());
+    let server = Server::new(listener, CalculatorService(Calculator::new()));
 
     // Signal that server is ready.
     let _ = ready_tx.send(());
@@ -185,7 +185,12 @@ async fn run_server(
     server.run().await.map_err(|e| e.into())
 }
 
-// The calculator service.
+// The calculator service, which has the one interface.
+#[derive(Service)]
+#[zlink(vendor = "The zlink project", product = "Calculator", version = "1")]
+struct CalculatorService(Calculator);
+
+// The interface of the calculator.
 struct Calculator {
     operations: Vec<String>,
 }
@@ -196,7 +201,7 @@ impl Calculator {
     }
 }
 
-#[service(interface = "org.example.Calculator")]
+#[interface("org.example.Calculator")]
 impl Calculator {
     async fn add(&mut self, a: f64, b: f64) -> CalculationResult {
         self.operations.push(format!("add({a}, {b})"));
@@ -428,7 +433,8 @@ enum ProcessError {
 - `tokio`: Enable tokio runtime integration, under the `tokio` module.
 - `smol`: Enable smol runtime integration, under the `smol` module.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
-- `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
+- `service` (default): Enable the `#[interface]` macro and the `Service` derive. Implies `server`
+  and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
 - `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is

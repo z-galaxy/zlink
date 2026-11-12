@@ -27,7 +27,7 @@ async fn upgrade() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("upgrade.sock");
 
-    let server = Server::new(bind(&socket_path)?, Echo::default());
+    let server = Server::new(bind(&socket_path)?, EchoService(Echo::default()));
     select! {
         res = server.run() => res?,
         res = run_client(&socket_path) => res?,
@@ -150,12 +150,15 @@ where
         .unwrap();
 }
 
+#[derive(zlink::Service)]
+struct EchoService(Echo);
+
 #[derive(Default)]
 struct Echo {
     upgrades: u32,
 }
 
-#[zlink::service(interface = "org.example.echo")]
+#[zlink::interface("org.example.echo")]
 impl Echo {
     /// Upgrades the connection to a protocol that greets and then echoes back everything it's
     /// sent.

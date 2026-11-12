@@ -2,7 +2,12 @@ pub(crate) mod listener;
 mod select_all;
 pub mod service;
 
+#[cfg(feature = "service")]
+#[doc(hidden)]
+pub mod dispatch;
 mod infallible;
+#[cfg(feature = "idl")]
+mod interface;
 mod upgrade;
 
 use alloc::{boxed::Box, vec::Vec};

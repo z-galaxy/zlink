@@ -1,4 +1,4 @@
-//! Code generation for the service macro.
+//! Code generation for the `interface` and `service` attribute macros.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -6,7 +6,11 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Error, GenericParam, ItemImpl, Type};
 
-use super::{attrs::ServiceAttrs, method::MethodInfo, types::ParamInfo};
+use super::{
+    attrs::{Mode, ServiceAttrs},
+    method::MethodInfo,
+    types::ParamInfo,
+};
 use crate::{naming, utils::convert_type_lifetimes};
 
 /// Context for generating the `handle` method body.
@@ -55,8 +59,11 @@ fn collect_interfaces(methods_info: &[MethodInfo]) -> Vec<String> {
     interfaces
 }
 
-/// Generate the Service trait implementation.
-pub(super) fn generate_service_impl(
+/// Generate the trait implementation: `Interface` for `#[interface]`, and `Service` for
+/// `#[service]`.
+///
+/// The service that an interface is part of is a struct that derives `Service`.
+pub(super) fn generate_trait_impls(
     item_impl: &ItemImpl,
     methods_info: &[MethodInfo],
     service_attrs: &ServiceAttrs,
@@ -79,12 +86,22 @@ pub(super) fn generate_service_impl(
     // Collect interfaces for introspection.
     let interfaces = collect_interfaces(methods_info);
 
+    // The state that the methods borrow from the service the interface is part of, if any: the `T`
+    // of the first `&T` or `&mut T` state parameter. If other methods spell another type, the
+    // compiler reports the mismatch when they're passed the state.
+    let state_ty = methods_info
+        .iter()
+        .find_map(|m| m.state_param()?.state_reference())
+        .map(|reference| &*reference.elem);
+    let has_service_impl = service_attrs.mode == Mode::Service;
+
     // Generate the MethodCall enum (outer untagged wrapper + inner user methods).
     let method_call_enum = generate_method_call_enum(
         methods_info,
         &method_call_name,
         &user_methods_name,
         crate_path,
+        has_service_impl,
     )?;
 
     // Generate the Reply enum for parameters.
@@ -147,7 +164,7 @@ pub(super) fn generate_service_impl(
         type_name: &type_name,
         needs_stream_boxing,
     };
-    let handle_body = generate_handle_body(methods_info, service_attrs, &handle_body_ctx)?;
+    let user_methods_match = generate_user_methods_match(methods_info, &handle_body_ctx);
 
     // Extract socket type parameter: use user-provided first type param, or default to __ZlinkSock.
     let (socket_ty, generics, user_where_clause) = item_impl
@@ -256,34 +273,107 @@ pub(super) fn generate_service_impl(
     #[cfg(not(feature = "std"))]
     let handle_fds_param = quote! {};
 
-    // Generate the impl block.
-    let service_impl = quote! {
-        impl #generics #crate_path::Service<#socket_ty> for #self_ty
-        #where_clause
-        {
-            type MethodCall<'de> = #method_call_name<'de>;
-            type ReplyParams<'ser> = #reply_params_name<'ser> where Self: 'ser;
-            type ReplyStream = #reply_stream_type;
-            type ReplyStreamParams = #reply_stream_params_type;
-            type ReplyStreamError = #reply_stream_error_ty;
-            type ReplyError<'ser> = #error_type where Self: 'ser;
-            type Upgrade = #upgrade_type;
+    // Suppress the unused warning of the connection where no method uses it.
+    let conn_suppression = if methods_info.iter().any(|m| m.has_connection_param()) {
+        quote! {}
+    } else {
+        quote! { let _ = __zlink_conn; }
+    };
 
-            async fn handle<'__zlink_ser>(
-                &'__zlink_ser mut self,
-                __zlink_call: &'__zlink_ser #crate_path::Call<Self::MethodCall<'_>>,
-                __zlink_conn: &mut #crate_path::Connection<#socket_ty>,
-                #handle_fds_param
-            ) -> #crate_path::service::HandleResult<
-                Self::ReplyParams<'__zlink_ser>,
-                Self::ReplyStream,
-                Self::ReplyError<'__zlink_ser>,
-                Self::Upgrade,
-            > {
-                #handle_body
+    let interface_impl = (service_attrs.mode == Mode::Interface).then(|| {
+        let const_name = format_ident!("__{}_INTERFACE_0", type_name);
+        // An interface that needs no state fits into a service with any state.
+        let (generics, state_ty) = match state_ty {
+            Some(state_ty) => (generics.clone(), quote! { #state_ty }),
+            None => {
+                let state_param = format_ident!("__ZlinkState");
+                let mut generics = generics.clone();
+                generics
+                    .params
+                    .push(GenericParam::Type(syn::TypeParam::from(
+                        state_param.clone(),
+                    )));
+                (generics, quote! { #state_param })
+            }
+        };
+
+        quote! {
+            impl #generics #crate_path::service::Interface<#socket_ty, #state_ty> for #self_ty
+            #where_clause
+            {
+                const DESCRIPTION: &'static #crate_path::idl::Interface<'static> = #const_name;
+
+                type MethodCall<'de> = #user_methods_name<'de>;
+                type ReplyParams<'ser> = #reply_params_name<'ser>
+                where
+                    Self: 'ser,
+                    #state_ty: 'ser;
+                type ReplyStream = #reply_stream_type;
+                type ReplyStreamParams = #reply_stream_params_type;
+                type ReplyStreamError = #reply_stream_error_ty;
+                type ReplyError<'ser> = #error_type
+                where
+                    Self: 'ser,
+                    #state_ty: 'ser;
+                type Upgrade = #upgrade_type;
+
+                async fn handle<'__zlink_ser>(
+                    &'__zlink_ser mut self,
+                    __zlink_state: &'__zlink_ser mut #state_ty,
+                    __zlink_call: #crate_path::Call<&'__zlink_ser Self::MethodCall<'_>>,
+                    __zlink_conn: &mut #crate_path::Connection<#socket_ty>,
+                    #handle_fds_param
+                ) -> #crate_path::service::HandleResult<
+                    Self::ReplyParams<'__zlink_ser>,
+                    Self::ReplyStream,
+                    Self::ReplyError<'__zlink_ser>,
+                    Self::Upgrade,
+                > {
+                    #conn_suppression
+                    let __user_method = *__zlink_call.method();
+                    #user_methods_match
+                }
             }
         }
-    };
+    });
+
+    let service_impl = has_service_impl.then(|| {
+        let varlink_service_match = generate_varlink_service_match(service_attrs, &handle_body_ctx);
+
+        quote! {
+            impl #generics #crate_path::Service<#socket_ty> for #self_ty
+            #where_clause
+            {
+                type MethodCall<'de> = #method_call_name<'de>;
+                type ReplyParams<'ser> = #reply_params_name<'ser> where Self: 'ser;
+                type ReplyStream = #reply_stream_type;
+                type ReplyStreamParams = #reply_stream_params_type;
+                type ReplyStreamError = #reply_stream_error_ty;
+                type ReplyError<'ser> = #error_type where Self: 'ser;
+                type Upgrade = #upgrade_type;
+
+                async fn handle<'__zlink_ser>(
+                    &'__zlink_ser mut self,
+                    __zlink_call: &'__zlink_ser #crate_path::Call<Self::MethodCall<'_>>,
+                    __zlink_conn: &mut #crate_path::Connection<#socket_ty>,
+                    #handle_fds_param
+                ) -> #crate_path::service::HandleResult<
+                    Self::ReplyParams<'__zlink_ser>,
+                    Self::ReplyStream,
+                    Self::ReplyError<'__zlink_ser>,
+                    Self::Upgrade,
+                > {
+                    #conn_suppression
+                    match __zlink_call.method() {
+                        #varlink_service_match
+                        #method_call_name::__UserMethods(__user_method) => {
+                            #user_methods_match
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     Ok(quote! {
         #interface_descriptions
@@ -300,6 +390,8 @@ pub(super) fn generate_service_impl(
 
         #reply_error_enum
 
+        #interface_impl
+
         #service_impl
     })
 }
@@ -311,11 +403,15 @@ pub(super) fn generate_service_impl(
 /// The parameters of each user method are deserialized into a struct of their own, which the
 /// variant of the method wraps in `OptionalParams`. That lets a call leave out its `parameters`
 /// if the method has no required parameter, as callers with nothing to pass may do.
+///
+/// The wrapper is only generated with a `Service` impl, which is what it's for: as an `Interface`,
+/// the type gets the calls to its own methods only.
 fn generate_method_call_enum(
     methods_info: &[MethodInfo],
     enum_name: &Ident,
     user_methods_name: &Ident,
     crate_path: &TokenStream,
+    with_wrapper: bool,
 ) -> Result<TokenStream, Error> {
     let (params_structs, variants): (Vec<TokenStream>, Vec<TokenStream>) = methods_info
         .iter()
@@ -364,16 +460,18 @@ fn generate_method_call_enum(
 
     // Generate the outer untagged wrapper enum.
     // VarlinkService is tried first (specific matches only), then UserMethods.
-    let outer_enum = quote! {
-        #[allow(private_interfaces)]
-        #[derive(::core::fmt::Debug, ::serde::Deserialize)]
-        #[serde(untagged)]
-        pub enum #enum_name<'__de> {
-            #[serde(borrow)]
-            __VarlinkService(#crate_path::varlink_service::Method<'__de>),
-            __UserMethods(#user_methods_name<'__de>),
+    let outer_enum = with_wrapper.then(|| {
+        quote! {
+            #[allow(private_interfaces)]
+            #[derive(::core::fmt::Debug, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum #enum_name<'__de> {
+                #[serde(borrow)]
+                __VarlinkService(#crate_path::varlink_service::Method<'__de>),
+                __UserMethods(#user_methods_name<'__de>),
+            }
         }
-    };
+    });
 
     Ok(quote! {
         #(#params_structs)*
@@ -1085,7 +1183,10 @@ fn generate_interface_descriptions(
                     method.return_type.clone()
                 }
                 .map(|ty| {
-                    if all_custom_types.contains(&&ty) {
+                    let is_custom = all_custom_types.contains(&&ty);
+                    // The method's lifetimes aren't in scope in the constant.
+                    let ty = convert_type_lifetimes(&ty, "'static");
+                    if is_custom {
                         // Declared custom type: must be an object (struct) so its fields
                         // can be emitted as named out-params. Custom enums are not valid
                         // Varlink return types — the spec requires `-> (field: type, …)`.
@@ -1298,12 +1399,16 @@ fn wrap_handle_result_with_fds(inner: TokenStream, _fds_expr: TokenStream) -> To
     inner
 }
 
-/// Generate the `handle` method body with match arms.
-fn generate_handle_body(
+/// Generate the `match` over the user methods that calls the method represented by `__user_method`.
+///
+/// It's the body of a `handle` method, in whose scope `__user_method` is a reference to the user
+/// methods enum, and `__zlink_call` the call, `__zlink_conn` the connection, `__zlink_fds` the file
+/// descriptors that came with the call and, in `Interface::handle`, `__zlink_state` the state that
+/// the interfaces of the service share.
+fn generate_user_methods_match(
     methods_info: &[MethodInfo],
-    service_attrs: &ServiceAttrs,
     ctx: &HandleBodyContext<'_>,
-) -> Result<TokenStream, Error> {
+) -> TokenStream {
     let HandleBodyContext {
         crate_path,
         method_call_name,
@@ -1315,32 +1420,21 @@ fn generate_handle_body(
         reply_stream_name,
         error_type_map,
         stream_item_type_map,
-        interfaces,
-        type_name,
         needs_stream_boxing,
+        ..
     } = ctx;
 
     let mut user_match_arms: Vec<TokenStream> = Vec::new();
     let type_to_variant = build_return_type_variant_map(methods_info);
     let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
 
-    let refusal = |error: TokenStream| {
-        wrap_handle_result_no_fds(quote! {
-            #crate_path::service::MethodReply::Error(
-                #reply_error_name::#varlink_error_variant(#error)
-            )
-        })
-    };
-    // A successful reply confirms an upgrade (see `Call::upgrade`), so the calls asking for one are
-    // refused by the methods that don't support upgrades.
-    let refuse_upgrade = refusal(quote! {
-        #crate_path::varlink_service::Error::InvalidParameter {
-            parameter: ::core::convert::From::from("upgrade"),
-        }
-    });
+    let refuse_upgrade = refuse_upgrade(ctx);
     // The calls to the methods that do are refused unless they ask for an upgrade, with the error
     // that systemd also uses when a method requiring the flag is called without it.
-    let expect_upgrade = refusal(quote! { #crate_path::varlink_service::Error::ExpectedUpgrade });
+    let expect_upgrade = refusal(
+        ctx,
+        quote! { #crate_path::varlink_service::Error::ExpectedUpgrade },
+    );
 
     for method in methods_info {
         let Some(_full_path) = method.full_method_path() else {
@@ -1402,11 +1496,20 @@ fn generate_handle_body(
                 })
                 .collect();
 
-            // Set up bindings for regular params (clone from pattern match).
-            let param_bindings: Vec<TokenStream> = method
+            // Set up bindings for the state param (borrowed from the shared state).
+            let state_bindings: Vec<TokenStream> = method
                 .params
                 .iter()
-                .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
+                .filter_map(|p| {
+                    let name = &p.name;
+                    let state = state_arg(p.state_reference()?);
+                    Some(quote! { let #name = #state; })
+                })
+                .collect();
+
+            // Set up bindings for regular params (clone from pattern match).
+            let param_bindings: Vec<TokenStream> = method
+                .serialized_params()
                 .map(|p| {
                     let name = &p.name;
                     quote! { let #name = ::core::clone::Clone::clone(#name); }
@@ -1418,6 +1521,7 @@ fn generate_handle_body(
                     #(#conn_bindings)*
                     #(#more_bindings)*
                     #(#fds_bindings)*
+                    #(#state_bindings)*
                     #(#param_bindings)*
                     async move #body
                 }.await
@@ -1428,7 +1532,10 @@ fn generate_handle_body(
                 .params
                 .iter()
                 .map(|p| {
-                    if p.is_more {
+                    if let Some(state) = p.state_reference() {
+                        // State param borrows the shared state.
+                        state_arg(state)
+                    } else if p.is_more {
                         // `more` param comes from the call request.
                         quote! { __zlink_call.more() }
                     } else if p.is_fds {
@@ -1450,7 +1557,7 @@ fn generate_handle_body(
         // reply.
         let single_reply = |params: TokenStream| {
             if method.is_upgrade {
-                quote! { #crate_path::service::MethodReply::Upgrade(#params, __zlink_state) }
+                quote! { #crate_path::service::MethodReply::Upgrade(#params, __zlink_upgrade) }
             } else {
                 quote! { #crate_path::service::MethodReply::Single(#params) }
             }
@@ -1458,7 +1565,7 @@ fn generate_handle_body(
         // The pattern of the value that the method returns on success, given the one of its reply.
         let success = |reply: TokenStream| {
             if method.is_upgrade {
-                quote! { (#reply, __zlink_state) }
+                quote! { (#reply, __zlink_upgrade) }
             } else {
                 reply
             }
@@ -1703,7 +1810,6 @@ fn generate_handle_body(
 
     let unused_variant = format_ident!("__{}Unused", user_methods_name);
     let unknown_variant = format_ident!("__{}Unknown", user_methods_name);
-    let varlink_reply_variant = format_ident!("__{}VarlinkService", reply_params_name);
 
     // Add the unused variant arm first (to match enum order).
     user_match_arms.insert(
@@ -1731,14 +1837,32 @@ fn generate_handle_body(
         }
     });
 
-    // Generate the user methods match.
-    let user_methods_match = quote! {
-        #method_call_name::__UserMethods(__user_method) => {
-            match __user_method {
-                #(#user_match_arms)*
-            }
+    quote! {
+        match __user_method {
+            #(#user_match_arms)*
         }
-    };
+    }
+}
+
+/// Generate the arms of the `match` in `Service::handle` that handle the calls to the
+/// `org.varlink.service` interface.
+fn generate_varlink_service_match(
+    service_attrs: &ServiceAttrs,
+    ctx: &HandleBodyContext<'_>,
+) -> TokenStream {
+    let HandleBodyContext {
+        crate_path,
+        method_call_name,
+        reply_params_name,
+        reply_error_name,
+        interfaces,
+        type_name,
+        ..
+    } = ctx;
+
+    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
+    let varlink_reply_variant = format_ident!("__{}VarlinkService", reply_params_name);
+    let refuse_upgrade = refuse_upgrade(ctx);
 
     // Generate interface description match arms for GetInterfaceDescription.
     let interface_match_arms: Vec<TokenStream> = interfaces
@@ -1820,7 +1944,7 @@ fn generate_handle_body(
     });
     // `Info::new` converts the interface names it is given. They are `InterfaceName`s already, so
     // the conversion can't fail, which makes the `Result` pattern in the `GetInfo` arm irrefutable.
-    let varlink_service_match = quote! {
+    quote! {
         #method_call_name::__VarlinkService(_) if __zlink_call.upgrade() => {
             #refuse_upgrade
         }
@@ -1863,26 +1987,46 @@ fn generate_handle_body(
                 }
             }
         }
-    };
+    }
+}
 
-    // Check if any method uses the connection parameter.
-    let uses_connection = methods_info.iter().any(|m| m.has_connection_param());
+/// The reply refusing a call to a method that doesn't support upgrades, which asks for one.
+///
+/// A successful reply confirms an upgrade (see `Call::upgrade`), so such calls are refused.
+fn refuse_upgrade(ctx: &HandleBodyContext<'_>) -> TokenStream {
+    let crate_path = ctx.crate_path;
 
-    let conn_suppression = if uses_connection {
-        // Connection is used, no suppression needed.
-        quote! {}
-    } else {
-        // Suppress unused warning when no methods use the connection.
-        quote! { let _ = __zlink_conn; }
-    };
+    refusal(
+        ctx,
+        quote! {
+            #crate_path::varlink_service::Error::InvalidParameter {
+                parameter: ::core::convert::From::from("upgrade"),
+            }
+        },
+    )
+}
 
-    Ok(quote! {
-        #conn_suppression
-        match __zlink_call.method() {
-            #varlink_service_match
-            #user_methods_match
-        }
+/// The reply refusing a call with `error`, an `org.varlink.service` error.
+fn refusal(ctx: &HandleBodyContext<'_>, error: TokenStream) -> TokenStream {
+    let crate_path = ctx.crate_path;
+    let reply_error_name = ctx.reply_error_name;
+    let varlink_error_variant = format_ident!("__{}VarlinkService", reply_error_name);
+
+    wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Error(
+            #reply_error_name::#varlink_error_variant(#error)
+        )
     })
+}
+
+/// The argument passing the shared state to a parameter of type `reference`: a reborrow of the
+/// state that `Interface::handle` gets, shared or mutable as the parameter is.
+fn state_arg(reference: &syn::TypeReference) -> TokenStream {
+    if reference.mutability.is_some() {
+        quote! { &mut *__zlink_state }
+    } else {
+        quote! { &*__zlink_state }
+    }
 }
 
 /// The name of the struct that the parameters of a call to `method` are deserialized into.

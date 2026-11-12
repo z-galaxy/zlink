@@ -1,4 +1,4 @@
-//! Tests for service implementing multiple interfaces (each with its own error type).
+//! Tests for services made up of multiple interfaces (each with its own error type).
 
 use serde::{Deserialize, Serialize};
 use zlink::{
@@ -15,8 +15,12 @@ async fn multiple_interfaces() -> Result<(), Box<dyn std::error::Error>> {
     // Setup the server with the multi-interface service.
     let listener = bind(&socket_path).unwrap();
     let service = MultiInterfaceService {
-        user_authenticated: false,
-        items: vec!["apple".to_string(), "banana".to_string()],
+        auth: Auth {
+            user_authenticated: false,
+        },
+        storage: Storage {
+            items: vec!["apple".to_string(), "banana".to_string()],
+        },
     };
     let server = Server::new(listener, service);
     tokio::select! {
@@ -108,17 +112,20 @@ enum StorageError {
 }
 
 /// A service that implements multiple interfaces.
+#[derive(zlink::Service)]
 struct MultiInterfaceService {
-    user_authenticated: bool,
-    items: Vec<String>,
+    auth: Auth,
+    storage: Storage,
 }
 
-#[zlink::service]
-impl MultiInterfaceService {
-    // ---- org.example.auth interface ----
+/// The org.example.auth interface.
+struct Auth {
+    user_authenticated: bool,
+}
 
+#[zlink::interface("org.example.auth")]
+impl Auth {
     /// Authenticate with a password.
-    #[zlink(interface = "org.example.auth")]
     async fn authenticate(&mut self, password: String) -> Result<(), AuthError> {
         if password == "secret" {
             self.user_authenticated = true;
@@ -140,11 +147,16 @@ impl MultiInterfaceService {
             Err(AuthError::NotAuthenticated)
         }
     }
+}
 
-    // ---- org.example.storage interface ----
+/// The org.example.storage interface.
+struct Storage {
+    items: Vec<String>,
+}
 
+#[zlink::interface("org.example.storage")]
+impl Storage {
     /// Get the number of items (returns plain value, no Result).
-    #[zlink(interface = "org.example.storage")]
     async fn item_count(&self) -> ItemCount {
         ItemCount {
             count: self.items.len(),
@@ -186,7 +198,8 @@ trait StorageProxy {
 }
 
 // Regression test (https://github.com/z-galaxy/zlink/issues/315): interface names differing
-// only in case used to fold to the same generated const identifier.
+// only in case used to fold to the same generated const identifier. Here they are the interfaces
+// of one service.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn case_distinct_interface_names() -> Result<(), Box<dyn std::error::Error>> {
     use zlink::varlink_service::Proxy as VarlinkProxy;
@@ -195,7 +208,7 @@ async fn case_distinct_interface_names() -> Result<(), Box<dyn std::error::Error
     let socket_path = dir.path().join("case-distinct.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = CaseDistinctService;
+    let service = CaseDistinctService(LowerFoo, UpperFoo);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -234,14 +247,20 @@ async fn case_distinct_interface_names() -> Result<(), Box<dyn std::error::Error
 }
 
 /// A service exercising two interface names differing only in case.
-struct CaseDistinctService;
+#[derive(zlink::Service)]
+struct CaseDistinctService(LowerFoo, UpperFoo);
 
-#[zlink::service]
-impl CaseDistinctService {
-    #[zlink(interface = "org.example.foo")]
+struct LowerFoo;
+
+#[zlink::interface("org.example.foo")]
+impl LowerFoo {
     async fn lower_method(&self) {}
+}
 
-    #[zlink(interface = "org.example.Foo")]
+struct UpperFoo;
+
+#[zlink::interface("org.example.Foo")]
+impl UpperFoo {
     async fn upper_method(&self) {}
 }
 
@@ -267,8 +286,9 @@ trait UpperProxy {
     async fn upper_method(&mut self) -> zlink::Result<Result<(), UpperError>>;
 }
 
-// Regression test (https://github.com/z-galaxy/zlink/issues/315): service type names differing
-// only in case used to collapse to the same generated interface constant identifier.
+// Regression test (https://github.com/z-galaxy/zlink/issues/315): interface type names differing
+// only in case used to collapse to the same generated interface constant identifier. The names of
+// their services differ only in case too.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn case_distinct_service_type_names() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
@@ -276,9 +296,9 @@ async fn case_distinct_service_type_names() -> Result<(), Box<dyn std::error::Er
     let socket_path_b = dir.path().join("case-distinct-b.sock");
 
     let listener_a = bind(&socket_path_a).unwrap();
-    let server_a = Server::new(listener_a, FooBar);
+    let server_a = Server::new(listener_a, FooBarService(FooBar));
     let listener_b = bind(&socket_path_b).unwrap();
-    let server_b = Server::new(listener_b, Foobar);
+    let server_b = Server::new(listener_b, FoobarService(Foobar));
 
     tokio::select! {
         res = server_a.run() => res?,
@@ -297,21 +317,27 @@ async fn case_distinct_service_type_names() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// A service type whose name differs from `Foobar` only in case.
+/// A service type whose name differs from `FoobarService` only in case.
+#[derive(zlink::Service)]
+struct FooBarService(FooBar);
+
+/// An interface type whose name differs from `Foobar` only in case.
 struct FooBar;
 
-#[zlink::service]
+#[zlink::interface("org.example.a")]
 impl FooBar {
-    #[zlink(interface = "org.example.a")]
     async fn method_a(&self) {}
 }
 
-/// A service type whose name differs from `FooBar` only in case.
+/// A service type whose name differs from `FooBarService` only in case.
+#[derive(zlink::Service)]
+struct FoobarService(Foobar);
+
+/// An interface type whose name differs from `FooBar` only in case.
 struct Foobar;
 
-#[zlink::service]
+#[zlink::interface("org.example.b")]
 impl Foobar {
-    #[zlink(interface = "org.example.b")]
     async fn method_b(&self) {}
 }
 

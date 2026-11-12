@@ -20,7 +20,7 @@ async fn unknown_error() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("unknown-error.sock");
 
-    let server = Server::new(bind(&socket_path)?, Versions);
+    let server = Server::new(bind(&socket_path)?, VersionsService(Versions));
     select! {
         res = server.run() => res?,
         res = run_client(&socket_path) => res?,
@@ -45,9 +45,12 @@ async fn run_client(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[derive(zlink::Service)]
+struct VersionsService(Versions);
+
 struct Versions;
 
-#[zlink::service(interface = "org.example.versions")]
+#[zlink::interface("org.example.versions")]
 impl Versions {
     async fn check(&mut self, newer: bool) -> Result<(), ServiceError> {
         if newer {

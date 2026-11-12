@@ -15,7 +15,7 @@ async fn with_custom_socket_bounds() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup the server with the credential-checking service.
     let listener = bind(&socket_path).unwrap();
-    let service = CredentialCheckingService { balance: 1000 };
+    let service = CredentialCheckingService(CredentialChecker { balance: 1000 });
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -40,20 +40,24 @@ enum CredsError {
     CredentialCheckFailed,
 }
 
-/// A service that uses custom socket bounds to check peer credentials.
-struct CredentialCheckingService {
+/// The service of the interface below.
+#[derive(zlink::Service)]
+struct CredentialCheckingService(CredentialChecker);
+
+/// An interface that uses custom socket bounds to check peer credentials.
+struct CredentialChecker {
     balance: i64,
 }
 
-// Service implementation with custom socket bounds using user-provided generics.
+// Interface implementation with custom socket bounds using user-provided generics.
 // The first type parameter (Sock) is used as the socket type. The Socket bound is added
-// automatically, so we only specify additional bounds.
-#[zlink::service(types = [Balance])]
-impl<Sock> CredentialCheckingService
+// automatically, so we only specify additional bounds. The service that the interface is part of
+// is only served on the sockets that meet them.
+#[zlink::interface("org.example.creds", types = [Balance])]
+impl<Sock> CredentialChecker
 where
     Sock::ReadHalf: FetchPeerCredentials,
 {
-    #[zlink(interface = "org.example.creds")]
     async fn get_balance_with_creds(
         &self,
         multiplier: i64,
