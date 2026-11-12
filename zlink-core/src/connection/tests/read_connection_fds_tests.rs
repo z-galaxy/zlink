@@ -413,6 +413,24 @@ async fn into_read_half_returns_unreceived_fds() {
     );
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[tokio::test]
+async fn rewind_into_parts_returns_unreturned_fds() {
+    let reads = [(
+        [&br#"{"parameters":{"result":"ok"}}"#[..], b"\0raw"].concat(),
+        vec![fd(), fd()],
+    )];
+    let mut conn = ReadConnection::new(ScriptedReadHalf(reads.into()), 0);
+
+    let (reply, fds) = conn.receive_reply::<TestReply, TestReply>().await.unwrap();
+    assert_eq!(reply.unwrap().parameters().unwrap().result, "ok");
+    assert!(fds.is_empty());
+
+    let ((_socket, data), fds) = conn.into_read_half().into_parts();
+    assert_eq!(data, b"raw");
+    assert_eq!(fds.len(), 2);
+}
+
 /// A call to `org.example.Test` with `value`, as it's sent over the socket.
 fn call(value: u32) -> Vec<u8> {
     let mut call =

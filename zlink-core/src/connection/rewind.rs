@@ -4,7 +4,10 @@
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-use super::socket::{ReadHalf, ReadResult};
+use super::{
+    RecvResult,
+    socket::{ReadHalf, ReadResult},
+};
 #[cfg(feature = "std")]
 use super::{read_connection::PendingFds, socket::UnixSocket};
 
@@ -35,6 +38,30 @@ pub struct Rewind<Read> {
 }
 
 impl<Read> Rewind<Read> {
+    /// Consume the read half into the socket's read half and the data that was read from it but
+    /// not returned yet, which comes before what the socket returns next.
+    ///
+    /// Returns the file descriptors that came with the data as well (std only).
+    pub fn into_parts(mut self) -> RecvResult<(Read, Vec<u8>)> {
+        self.buffer.drain(..self.pos);
+        let parts = (self.socket, self.buffer);
+
+        #[cfg(feature = "std")]
+        {
+            let fds = self
+                .pending_fds
+                .into_iter()
+                .flat_map(|pending| pending.fds)
+                .collect();
+
+            (parts, fds)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            parts
+        }
+    }
+
     /// Create a read half that returns `buffer` before reading from `socket`.
     pub(super) fn new(
         socket: Read,
