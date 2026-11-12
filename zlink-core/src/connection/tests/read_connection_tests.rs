@@ -721,6 +721,35 @@ async fn into_read_half_without_unreceived_data() {
     assert!(read_all(&mut read, 64).await.is_empty());
 }
 
+#[tokio::test]
+async fn rewind_into_parts_returns_unreturned_data() {
+    let reads: [&[u8]; 2] = [b"{\"parameters\":{\"result\":\"ok\"}}\0hello", b"rest"];
+    let socket = MockSocket::with_reads(
+        &reads,
+        #[cfg(feature = "std")]
+        vec![],
+    );
+    let (read, _write) = socket.split();
+    let mut conn = ReadConnection::new(read, 0);
+    assert!(conn.receive_reply::<TestReply, TestReply>().await.is_ok());
+
+    // A read first, so that the data it returned is known to be left out.
+    let mut read = conn.into_read_half();
+    let mut buf = [0; 2];
+    assert_eq!(read.read(&mut buf).await.unwrap().bytes_read(), 2);
+    assert_eq!(&buf, b"he");
+
+    let parts = read.into_parts();
+    #[cfg(feature = "std")]
+    let ((mut socket, data), fds) = parts;
+    #[cfg(not(feature = "std"))]
+    let (mut socket, data) = parts;
+    assert_eq!(data, b"llo");
+    #[cfg(feature = "std")]
+    assert!(fds.is_empty());
+    assert_eq!(read_all(&mut socket, 64).await, [b"rest"]);
+}
+
 // Deserializing a message doesn't check that the values its type ignores are valid UTF-8, so a
 // message can be received even if it isn't valid UTF-8. It must be logged nonetheless.
 #[test_log::test(tokio::test)]
