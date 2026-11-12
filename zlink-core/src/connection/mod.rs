@@ -1,7 +1,7 @@
 //! Contains connection related API.
 //!
 //! The [`Connection`] type provides a low-level API for sending and receiving Varlink messages.
-//! For most use cases, you'll want to use the higher-level [`proxy`] and [`service`] attribute
+//! For most use cases, you'll want to use the higher-level [`proxy`] and [`interface`] attribute
 //! macros instead, which generate type-safe client and server code respectively.
 //!
 //! # Client Usage with `proxy` Macro
@@ -27,10 +27,11 @@
 //! enum CalcError {}
 //! ```
 //!
-//! # Server Usage with `service` Macro
+//! # Server Usage with `interface` Macro
 //!
-//! The [`service`] macro generates the [`Service`] trait implementation. See the [`service`] macro
-//! documentation for details and examples.
+//! The [`interface`] macro implements the [`Interface`] trait for the type of an `impl` block, and
+//! the [`Service`] derive macro implements the [`Service`] trait for a struct that holds such
+//! types. See the documentation of the two macros for details and examples.
 //!
 //! # Low-Level API
 //!
@@ -65,7 +66,8 @@
 //! * Linux limits the number of file descriptors sent at once, and hence per message, to 253.
 //!
 //! [`proxy`]: macro@crate::proxy
-//! [`service`]: macro@crate::service
+//! [`interface`]: macro@crate::interface
+//! [`Interface`]: crate::service::Interface
 //! [`Service`]: crate::service::Service
 //! [`Socket::CAN_TRANSFER_FDS`]: socket::Socket::CAN_TRANSFER_FDS
 

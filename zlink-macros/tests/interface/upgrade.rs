@@ -1,4 +1,4 @@
-//! Tests for protocol upgrades with services.
+//! Tests for protocol upgrades with interfaces.
 
 use serde::{Deserialize, Serialize};
 use std::{error::Error, future::Future, num::ParseIntError, os::fd::OwnedFd, path::PathBuf};
@@ -232,7 +232,10 @@ where
 {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("test.sock");
-    let server = Server::new(bind(&socket_path)?, Upgrader { upgrades: 0 });
+    let server = Server::new(
+        bind(&socket_path)?,
+        UpgraderService(Upgrader { upgrades: 0 }),
+    );
 
     tokio::select! {
         res = server.run() => res?,
@@ -301,11 +304,14 @@ where
         .unwrap();
 }
 
+#[derive(zlink::Service)]
+struct UpgraderService(Upgrader);
+
 struct Upgrader {
     upgrades: u32,
 }
 
-#[zlink::service(interface = "org.example.upgrade")]
+#[zlink::interface("org.example.upgrade")]
 impl<Sock> Upgrader
 where
     Sock::ReadHalf: FetchPeerCredentials,

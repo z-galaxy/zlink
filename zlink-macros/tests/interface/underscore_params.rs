@@ -1,7 +1,7 @@
 //! Tests for underscore-prefixed (unused) method parameters.
 //!
 //! Underscore-prefixed names (the Rust convention for unused parameters) are not valid Varlink
-//! field names, so the service macro requires an explicit `#[zlink(rename = "...")]` wire name
+//! field names, so the interface macro requires an explicit `#[zlink(rename = "...")]` wire name
 //! for them (rejecting them with a compile error otherwise). This test verifies that renamed
 //! underscore-prefixed parameters work end to end: dispatch accepts the wire name and the
 //! introspection data advertises it.
@@ -22,7 +22,7 @@ async fn underscore_prefixed_params() -> Result<(), Box<dyn std::error::Error>> 
 
     // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
-    let service = Launcher;
+    let service = LauncherService(Launcher);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -84,12 +84,14 @@ enum LauncherError {
     NotFound,
 }
 
+#[derive(zlink::Service)]
+struct LauncherService(Launcher);
+
 struct Launcher;
 
-#[zlink::service(types = [Launched])]
+#[zlink::interface("org.example.launcher", types = [Launched])]
 impl<Sock> Launcher {
     /// Uninstall a launcher, ignoring the options.
-    #[zlink(interface = "org.example.launcher")]
     async fn uninstall(
         &mut self,
         desktop_file_id: String,

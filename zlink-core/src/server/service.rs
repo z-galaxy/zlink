@@ -5,6 +5,11 @@ use core::{fmt::Debug, future::Future};
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "service")]
+#[doc(hidden)]
+pub use super::dispatch;
+#[cfg(feature = "idl")]
+pub use super::interface::Interface;
 pub use super::{
     infallible::Infallible,
     upgrade::{TakeOver, Upgraded},
@@ -37,13 +42,15 @@ pub type ReplyStreamItem<Params, Error> = core::result::Result<Reply<Params>, Er
 
 /// Service trait for handling method calls.
 ///
-/// Instead of implementing this trait manually, prefer using the [`service`] attribute macro which
-/// generates the implementation for you. The macro provides a more ergonomic API and handles the
+/// Instead of implementing this trait manually, prefer writing each interface of the service as a
+/// type with an `impl` block that has the [`interface`] attribute macro, and deriving the trait
+/// with the [`Service`] derive macro for a struct that holds those types. The macros handle the
 /// boilerplate of method dispatching, error handling, and streaming replies.
 ///
-/// See the [`service`] macro documentation for details and examples.
+/// See the documentation of the two macros for details and examples.
 ///
-/// [`service`]: macro@crate::service
+/// [`interface`]: macro@crate::interface
+/// [`Service`]: derive@crate::Service
 pub trait Service<Sock>
 where
     Sock: Socket,

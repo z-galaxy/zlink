@@ -1,4 +1,4 @@
-//! Tests for streaming service methods (#[zlink(more)]).
+//! Tests for streaming interface methods (#[zlink(more)]).
 
 use serde::{Deserialize, Serialize};
 use zlink::{
@@ -13,9 +13,9 @@ async fn streaming() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup the server with a streaming service.
     let listener = bind(&socket_path).unwrap();
-    let service = StreamingService {
+    let service = StreamingService(Streaming {
         values: vec![10, 20, 30, 40, 50],
-    };
+    });
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -52,12 +52,16 @@ struct StreamValue {
 }
 
 /// A service that has a streaming method.
-struct StreamingService {
+#[derive(zlink::Service)]
+struct StreamingService(Streaming);
+
+/// The interface with the streaming method.
+struct Streaming {
     values: Vec<i64>,
 }
 
-#[zlink::service(interface = "org.example.streaming")]
-impl StreamingService {
+#[zlink::interface("org.example.streaming")]
+impl Streaming {
     #[zlink(more)]
     async fn get_values(
         &self,

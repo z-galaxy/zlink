@@ -1,4 +1,4 @@
-//! Tests for streaming service methods that emit method errors.
+//! Tests for streaming interface methods that emit method errors.
 //!
 //! Streaming methods can opt in to error replies by yielding `Result<Reply<T>, E>` instead of
 //! plain `Reply<T>`. The server dispatches each item as either a success reply or an error
@@ -17,7 +17,7 @@ async fn streaming_errors() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = dir.path().join("test.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let server = Server::new(listener, CountingService);
+    let server = Server::new(listener, CountingService(Counting));
     tokio::select! {
         res = server.run() => res?,
         res = run_client(&socket_path) => res?,
@@ -73,10 +73,13 @@ enum CountError {
     BadInput { reason: String },
 }
 
-struct CountingService;
+#[derive(zlink::Service)]
+struct CountingService(Counting);
 
-#[zlink::service(interface = "org.example.counter")]
-impl CountingService {
+struct Counting;
+
+#[zlink::interface("org.example.counter")]
+impl Counting {
     /// Stream values 1..=`to`, or fail with [`CountError::AtZero`] if `to == 0`.
     #[zlink(more)]
     async fn count(

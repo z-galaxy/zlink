@@ -13,7 +13,8 @@ default = ["std", "server", "proxy", "tracing"]
 std = ["dep:rustix", "dep:libc", "zlink-macros/std"]
 server = []
 proxy = ["zlink-macros/proxy"]
-service = ["server", "zlink-macros/service", "introspection"]
+# The `Service` derive macro reads the parameters of some method calls as raw JSON.
+service = ["server", "zlink-macros/service", "introspection", "serde_json/raw_value"]
 # IDL and introspection support
 idl = ["dep:zlink-idl"]
 idl-parse = ["idl", "zlink-idl/parse", "zlink-macros/idl-parse"]

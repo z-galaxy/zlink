@@ -1,4 +1,4 @@
-//! Method information extraction for service macro.
+//! Method information extraction for the `interface` and `service` attribute macros.
 
 use proc_macro2::TokenStream;
 use syn::{
@@ -109,28 +109,34 @@ impl MethodInfo {
         }
 
         // Extract parameters (skip self).
-        let params: Vec<ParamInfo> = method
-            .sig
-            .inputs
-            .iter()
-            .skip(1)
-            .enumerate()
-            .filter_map(|(idx, arg)| {
-                let mut param_info = ParamInfo::from_fn_arg(arg)?;
-                // Try to extract zlink attributes from the parameter.
-                if let syn::FnArg::Typed(pat_type) = arg {
-                    let param_attrs = extract_param_attrs(&pat_type.attrs);
-                    param_info.serialized_name = param_attrs.rename;
-                    param_info.is_connection = param_attrs.is_connection;
-                    param_info.is_fds = param_attrs.is_fds;
-                }
-                // For streaming methods, the first param must be `more: bool`.
-                if is_streaming && idx == 0 {
-                    param_info.is_more = true;
-                }
-                Some(param_info)
-            })
-            .collect();
+        let mut params = Vec::new();
+        for (idx, arg) in method.sig.inputs.iter().skip(1).enumerate() {
+            let Some(mut param_info) = ParamInfo::from_fn_arg(arg) else {
+                continue;
+            };
+            // Try to extract zlink attributes from the parameter.
+            if let syn::FnArg::Typed(pat_type) = arg {
+                let param_attrs = extract_param_attrs(&pat_type.attrs);
+                param_info.serialized_name = param_attrs.rename;
+                param_info.is_connection = param_attrs.is_connection;
+                param_info.is_fds = param_attrs.is_fds;
+                param_info.is_state = param_attrs.is_state;
+            }
+            // For streaming methods, the first param must be `more: bool`.
+            if is_streaming && idx == 0 {
+                param_info.is_more = true;
+            }
+            if param_info.is_state {
+                validate_state_param(&param_info, arg)?;
+            }
+            params.push(param_info);
+        }
+        if let Some(second) = params.iter().filter(|p| p.is_state).nth(1) {
+            return Err(Error::new_spanned(
+                &second.name,
+                "at most one `#[zlink(state)]` parameter is allowed per method",
+            ));
+        }
 
         // For streaming methods, validate the `more` parameter.
         if is_streaming {
@@ -151,10 +157,7 @@ impl MethodInfo {
         // Serialized parameters (the ones that end up on the wire and in the IDL) must carry a
         // name Varlink can express. The `_`-prefixed case falls out of this: `_foo` fails the
         // field grammar at its first character.
-        for param in params
-            .iter()
-            .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
-        {
+        for param in params.iter().filter(|p| p.is_serialized()) {
             let (wire_name, source) = match &param.serialized_name {
                 Some(lit) => (lit.value(), NameSource::Rename(lit)),
                 None => (naming::unraw(&param.name), NameSource::Ident(&param.name)),
@@ -398,11 +401,14 @@ impl MethodInfo {
         self.params.iter().any(|p| p.is_connection)
     }
 
-    /// Get parameters that are serialized (excludes connection, more, and fds parameters).
+    /// Get parameters that are serialized (excludes connection, more, fds and state parameters).
     pub(super) fn serialized_params(&self) -> impl Iterator<Item = &ParamInfo> {
-        self.params
-            .iter()
-            .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
+        self.params.iter().filter(|p| p.is_serialized())
+    }
+
+    /// The `#[zlink(state)]` parameter of this method, if any.
+    pub(super) fn state_param(&self) -> Option<&ParamInfo> {
+        self.params.iter().find(|p| p.is_state)
     }
 }
 
@@ -502,6 +508,8 @@ struct ParamAttrs {
     is_connection: bool,
     /// Whether this parameter receives file descriptors.
     is_fds: bool,
+    /// Whether this parameter receives the state that the interfaces of a service share.
+    is_state: bool,
 }
 
 /// Extract zlink attributes from parameter attributes.
@@ -538,12 +546,48 @@ fn extract_param_attrs(attrs: &[Attribute]) -> ParamAttrs {
                 Meta::Path(path) if path.is_ident("fds") => {
                     result.is_fds = true;
                 }
+                Meta::Path(path) if path.is_ident("state") => {
+                    result.is_state = true;
+                }
                 _ => {}
             }
         }
     }
 
     result
+}
+
+/// Check that a `#[zlink(state)]` parameter is a reference and receives nothing else.
+///
+/// The state is lent to the method by the service that the interface is part of, so the parameter
+/// can only borrow it, mutably or not.
+fn validate_state_param(param: &ParamInfo, arg: &syn::FnArg) -> Result<(), Error> {
+    if param.is_more {
+        return Err(Error::new_spanned(
+            arg,
+            "the first parameter of a streaming method receives the `more` flag of the call, so it \
+             can't be a `#[zlink(state)]` parameter",
+        ));
+    }
+    if param.is_connection || param.is_fds {
+        let other = if param.is_connection {
+            "connection"
+        } else {
+            "fds"
+        };
+        return Err(Error::new_spanned(
+            arg,
+            format!("a `#[zlink(state)]` parameter can't also be `#[zlink({other})]`"),
+        ));
+    }
+    if !matches!(param.ty, Type::Reference(_)) {
+        return Err(Error::new_spanned(
+            &param.ty,
+            "a `#[zlink(state)]` parameter must be a reference to the state, `&T` or `&mut T`",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Convert snake_case to PascalCase.

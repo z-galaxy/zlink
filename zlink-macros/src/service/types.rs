@@ -1,6 +1,6 @@
-//! Types used in service macro processing.
+//! Types used in the processing of the `interface` and `service` attribute macros.
 
-use syn::{FnArg, Ident, LitStr, Pat, Type};
+use syn::{FnArg, Ident, LitStr, Pat, Type, TypeReference};
 
 /// Information about a method parameter.
 #[derive(Clone)]
@@ -18,9 +18,30 @@ pub(super) struct ParamInfo {
     pub is_fds: bool,
     /// Whether this is the `more` parameter for streaming methods.
     pub is_more: bool,
+    /// Whether this parameter is marked with `#[zlink(state)]`.
+    pub is_state: bool,
 }
 
 impl ParamInfo {
+    /// Whether the parameter is one of the call's, i-e it is on the wire and in the IDL.
+    ///
+    /// The other parameters get what the service has rather than what the caller sent: the
+    /// connection, the `more` flag of the call, the file descriptors or the shared state.
+    pub(super) fn is_serialized(&self) -> bool {
+        !self.is_connection && !self.is_more && !self.is_fds && !self.is_state
+    }
+
+    /// The reference type of a `#[zlink(state)]` parameter, `&T` or `&mut T`.
+    ///
+    /// `None` for the other parameters. The type of a state parameter is checked to be a reference
+    /// when the method is parsed.
+    pub(super) fn state_reference(&self) -> Option<&TypeReference> {
+        match &self.ty {
+            Type::Reference(reference) if self.is_state => Some(reference),
+            _ => None,
+        }
+    }
+
     /// The parameter name used on the wire (and in the IDL).
     ///
     /// This is the explicit `#[zlink(rename = "...")]` name if provided, the unraw'd Rust
@@ -50,6 +71,7 @@ impl ParamInfo {
             is_connection: false,
             is_fds: false,
             is_more: false,
+            is_state: false,
         })
     }
 }

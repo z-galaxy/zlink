@@ -1,6 +1,6 @@
 //! Compile-time assertions for custom type declarations.
 //!
-//! These const functions are used by the `#[service]` macro to verify at compile time that
+//! These const functions are used by the `#[interface]` macro to verify at compile time that
 //! any custom types referenced in method signatures are declared in `types = [...]`.
 
 use crate::{idl, names::TypeName};
@@ -26,7 +26,7 @@ pub const fn assert_params_declared(params: &[&idl::Parameter<'_>], declared: &[
 /// Assert at compile time that if a type is a custom type reference, its name appears in
 /// the declared types list.
 ///
-/// This is called by generated code from the `#[service]` macro. If the assertion fails,
+/// This is called by generated code from the `#[interface]` macro. If the assertion fails,
 /// compilation stops with a message telling the user to add the type to `types = [...]`.
 ///
 /// # Panics
@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     use crate::idl::{Type, TypeRef};
 
-    /// The names of the declared types, as the `#[service]` macro lists them.
+    /// The names of the declared types, as the `#[interface]` macro lists them.
     const DECLARED: &[&TypeName<'static>] = &[
         &TypeName::from_static_str_unchecked("Book"),
         &TypeName::from_static_str_unchecked("Album"),

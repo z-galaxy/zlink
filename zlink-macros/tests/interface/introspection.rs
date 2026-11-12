@@ -1,6 +1,6 @@
 //! Tests for introspection support (GetInfo and GetInterfaceDescription).
 
-use super::basic::{BankAccount, BankError};
+use super::basic::{BankAccount, BankError, BankService};
 use zlink::{
     Server,
     idl::Type,
@@ -14,7 +14,9 @@ async fn introspection() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup the server with metadata.
     let listener = bind(&socket_path).unwrap();
-    let service = BankAccount::new(1000, false);
+    let service = BankService {
+        account: BankAccount::new(1000, false),
+    };
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -125,7 +127,7 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
     let interface_comments: Vec<_> = interface.comments().map(|c| c.content()).collect();
     assert_eq!(
         interface_comments,
-        ["A simple bank account service for testing."]
+        ["A simple bank account interface for testing."]
     );
 
     // Verify the interface contains exactly the expected errors.
@@ -202,15 +204,12 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         Err(err) => panic!("Expected VarlinkService error, got: {err:?}"),
     }
 
-    // Test MethodNotFound error - call a non-existent method.
-    // Note: The method name is reported as "unknown" because serde's `#[serde(other)]`
-    // attribute captures unknown variants but doesn't preserve the actual tag value.
+    // Test MethodNotFound error - call a non-existent method, which the error names.
     let result = conn.nonexistent_method().await;
     match result {
         Err(zlink::Error::VarlinkService(err)) => match err.inner() {
             zlink::varlink_service::Error::MethodNotFound { method } => {
-                // The method name is "unknown" because the generated code uses #[serde(other)].
-                assert_eq!(method.as_ref(), "unknown");
+                assert_eq!(method.as_ref(), "org.example.bank.NonexistentMethod");
             }
             other => panic!("Expected MethodNotFound error, got: {other:?}"),
         },

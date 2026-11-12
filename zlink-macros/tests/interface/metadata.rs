@@ -1,4 +1,4 @@
-//! Tests for service with metadata attributes.
+//! Tests for the metadata of a service, which the struct that derives `Service` gives.
 
 use zlink::{
     Server,
@@ -14,7 +14,7 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup the server with a service that has metadata.
     let listener = bind(&socket_path).unwrap();
-    let service = MetadataService;
+    let service = MetadataService(Metadata);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
@@ -35,14 +35,14 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             // Test GetInterfaceDescription - verify both methods are exposed.
-            // This tests that the macro-level interface attribute applies to all methods.
+            // This tests that the interface of the macro applies to all methods.
             let desc = conn.get_interface_description("org.example.metadata-hyphen".try_into().unwrap()).await?.unwrap();
             let interface = desc.parse()?;
             let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
             assert_eq!(
                 method_names.as_slice(),
                 ["Ping", "Pong"],
-                "Expected both Ping and Pong methods from macro-level interface attribute"
+                "Expected both Ping and Pong methods of the interface"
             );
 
             Ok::<(), Box<dyn std::error::Error>>(())
@@ -54,18 +54,22 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
 
 /// A simple service with metadata attributes.
 /// This is `pub` to test that the generated types work with public service structs (issue #216).
-pub struct MetadataService;
-
-// Test the interface attribute at the macro level instead of on each method.
-// The interface name also exercises a `-` character in a segment.
-#[zlink::service(
-    interface = "org.example.metadata-hyphen",
+#[derive(zlink::Service)]
+#[zlink(
     vendor = "Test Vendor",
     product = "Test Product",
     version = env!("CARGO_PKG_VERSION"),
     url = env!("CARGO_PKG_REPOSITORY")
 )]
-impl MetadataService {
+pub struct MetadataService(pub Metadata);
+
+/// The interface of the service, `pub` for the same reason.
+pub struct Metadata;
+
+// The interface is given by key here, rather than as the only argument.
+// The interface name also exercises a `-` character in a segment.
+#[zlink::interface(interface = "org.example.metadata-hyphen")]
+impl Metadata {
     async fn ping(&self) {}
 
     // Add another method to verify all methods get the interface.
