@@ -180,7 +180,7 @@ mod server {
     use zlink::connection::socket::FetchPeerCredentials;
 
     /// Owned version of ProcessId for use in service method parameters.
-    /// The service macro clones parameters, so we need owned types.
+    /// The `interface` macro clones parameters, so we need owned types.
     /// Named `ProcessId` to match the IDL output of the real machined service.
     #[allow(dead_code)]
     #[derive(Debug, Clone, Deserialize, CustomType)]
@@ -202,25 +202,31 @@ mod server {
     }
 
     /// Mock systemd-machined service that serves hardcoded responses.
-    #[derive(Default)]
-    pub struct MockMachinedService;
+    #[derive(Default, zlink::Service)]
+    #[zlink(
+        vendor = "The systemd Project",
+        product = "systemd (systemd-machined)",
+        version = "257.5 (257.5-6.fc42)",
+        url = "https://systemd.io/"
+    )]
+    pub struct MockMachinedService(MockMachinedInterface);
 
     impl MockMachinedService {
         /// Create a new mock machined service.
         pub fn new() -> Self {
-            Self
+            Self::default()
         }
     }
 
-    #[zlink::service(
+    /// The `io.systemd.Machine` interface of the mock service.
+    #[derive(Default)]
+    struct MockMachinedInterface;
+
+    #[zlink::interface(
         interface = "io.systemd.Machine",
-        vendor = "The systemd Project",
-        product = "systemd (systemd-machined)",
-        version = "257.5 (257.5-6.fc42)",
-        url = "https://systemd.io/",
         types = [AcquireMetadata, MachineOpenMode, ProcessId, Timestamp, Address]
     )]
-    impl<Sock> MockMachinedService
+    impl<Sock> MockMachinedInterface
     where
         Sock::ReadHalf: FetchPeerCredentials,
     {

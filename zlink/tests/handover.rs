@@ -46,7 +46,7 @@ async fn connections_go_on_in_the_next_instance() {
     // once, the second with a file descriptor, which the first instance may read but not handle.
     let stop = Rc::new(Flag::default());
     let listener = ReadyListener::new(Stream::try_from(server_end).unwrap());
-    let server = Server::new(listener, Counter::new(0, stop.clone()));
+    let server = Server::new(listener, CounterService(Counter::new(0, stop.clone())));
     let (read, mut write) = StdUnixStream::pair().unwrap();
     write.write_all(b"passed").unwrap();
     drop(write);
@@ -77,7 +77,7 @@ async fn connections_go_on_in_the_next_instance() {
         .map(|conn| conn.hand_over().unwrap())
         .collect();
     let items = (0..).zip(&handovers);
-    let state = service.count.get().to_le_bytes();
+    let state = service.0.count.get().to_le_bytes();
     let stored = first.handover().unwrap().store(&state[..], items).unwrap();
     assert_eq!(stored.items(), 1);
     drop(handovers);
@@ -92,8 +92,8 @@ async fn connections_go_on_in_the_next_instance() {
         .map(|item| Connection::take_over(item.restore::<Handover>().unwrap()).unwrap())
         .collect();
     let stop = Rc::new(Flag::default());
-    let server =
-        Server::new(listener, Counter::new(count, stop.clone())).with_connections(connections);
+    let server = Server::new(listener, CounterService(Counter::new(count, stop.clone())))
+        .with_connections(connections);
     let calls = async {
         let (reply, _) = client.receive_reply::<Text, CounterError>().await.unwrap();
         let text = reply.unwrap().into_parameters().unwrap().text;
@@ -154,7 +154,7 @@ async fn a_reply_cut_off_by_the_stop_goes_on_in_the_next_instance() {
     // of the reply.
     let stop = Rc::new(Flag::default());
     let listener = ReadyListener::new(Stream::try_from(server_end).unwrap());
-    let server = Server::new(listener, Counter::new(0, stop.clone()));
+    let server = Server::new(listener, CounterService(Counter::new(0, stop.clone())));
     let stopped = timeout(Duration::from_secs(10), server.run_until(stop.raised()));
     let Stopped {
         listener,
@@ -171,8 +171,11 @@ async fn a_reply_cut_off_by_the_stop_goes_on_in_the_next_instance() {
 
     let conn = Connection::<Stream>::take_over(Handover::restore(&record, fds).unwrap()).unwrap();
     let stop = Rc::new(Flag::default());
-    let server = Server::new(listener, Counter::new(service.count.get(), stop.clone()))
-        .with_connections([conn]);
+    let server = Server::new(
+        listener,
+        CounterService(Counter::new(service.0.count.get(), stop.clone())),
+    )
+    .with_connections([conn]);
     let calls = async {
         let (reply, fds) = client.receive_reply::<Text, CounterError>().await.unwrap();
         let text = reply.unwrap().into_parameters().unwrap().text;
@@ -280,6 +283,16 @@ enum CounterError {
     NoFd,
 }
 
+/// The service of the `Counter` interface.
+#[derive(zlink::Service)]
+#[zlink(
+    vendor = "zlink tests",
+    product = "counter",
+    version = "1",
+    url = "https://example.invalid/"
+)]
+struct CounterService(Counter);
+
 /// Counts the calls to `count`, reads the contents of the file descriptor passed to `read`, and
 /// answers `large` with a large text and a file descriptor. It raises `stop` as it answers its
 /// first call to `count`, and calls to `large`.
@@ -297,14 +310,7 @@ impl Counter {
     }
 }
 
-#[zlink::service(
-    interface = "org.example.counter",
-    vendor = "zlink tests",
-    product = "counter",
-    version = "1",
-    url = "https://example.invalid/",
-    types = [Count, Text]
-)]
+#[zlink::interface(interface = "org.example.counter", types = [Count, Text])]
 impl Counter {
     async fn count(&self) -> Count {
         let count = self.count.get() + 1;

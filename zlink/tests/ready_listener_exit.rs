@@ -28,7 +28,7 @@ async fn ready_listener_exits_after_client_disconnects() {
     let server_stream = Stream::try_from(server_sock).unwrap();
     let client_stream = Stream::try_from(client_sock).unwrap();
 
-    let server = Server::new(ReadyListener::new(server_stream), PingService);
+    let server = Server::new(ReadyListener::new(server_stream), PingService(Ping));
     let client = Connection::new(client_stream);
 
     // `Server::run` is `!Send` (rustc-100013), so drive both halves on the same task.
@@ -73,17 +73,19 @@ enum PingError {
     Boom,
 }
 
-struct PingService;
-
-#[zlink::service(
-    interface = "org.example.ping",
+#[derive(zlink::Service)]
+#[zlink(
     vendor = "zlink tests",
     product = "ping",
     version = "1",
-    url = "https://example.invalid/",
-    types = [Pong]
+    url = "https://example.invalid/"
 )]
-impl PingService {
+struct PingService(Ping);
+
+struct Ping;
+
+#[zlink::interface(interface = "org.example.ping", types = [Pong])]
+impl Ping {
     async fn ping(&self) -> Pong {
         Pong { ok: true }
     }
