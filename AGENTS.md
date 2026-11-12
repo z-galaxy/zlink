@@ -91,6 +91,8 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
   service that restarts under systemd, through zoter (`connection::Handover`). Linux only: it
   builds nothing elsewhere.
 
+Each runtime module has a `block_on`, which drives its runtime on the calling thread.
+
 #### IDL and Introspection
 
 - `idl`: Support for IDL type representations.

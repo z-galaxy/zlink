@@ -406,8 +406,8 @@ enum ProcessError {
   builds nothing on platforms other than Linux.
 
 The runtime features are additive: several can be enabled at the same time, with the
-runtime-specific API (currently the `unix` and `notified` modules) of each residing in its own
-module. The rest of the API is runtime-agnostic and available at the crate root.
+runtime-specific API (currently `block_on` and the `unix` and `notified` modules) of each residing
+in its own module. The rest of the API is runtime-agnostic and available at the crate root.
 
 ### IDL and Introspection
 
