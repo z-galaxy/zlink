@@ -77,7 +77,11 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 
 #### Main Features
 
-- `tokio` (default): Enable tokio runtime integration and use of standard library.
+- `tokio` (default): Enable tokio runtime integration, under the `tokio` module, and use of standard
+  library.
+- `smol`: Enable smol runtime integration, under the `smol` module, and use of standard library.
+- `zruntime`: Enable zruntime runtime integration, under the `zruntime` module, and use of standard
+  library.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
