@@ -26,6 +26,7 @@ defmt = ["zlink-core/defmt"]
 
 [dependencies]
 futures-core = { version = "0.3.34", default-features = false, optional = true }
+futures-util = { version = "0.3.31", default-features = false, features = ["io"] }
 pin-project-lite = { version = "0.2.16", optional = true }
 zlink-core = { path = "../zlink-core", version = "=0.9.0", default-features = false, features = ["std"] }
 # Taken from git, for API that zruntime has not released yet, until zlink is released.
@@ -36,6 +37,7 @@ zruntime = { git = "https://github.com/z-galaxy/zruntime", branch = "main", defa
 ] }
 
 [dev-dependencies]
+serde = { version = "1.0.218", default-features = false, features = ["derive"] }
 tempfile = "3.14"
 
 [package.metadata.docs.rs]

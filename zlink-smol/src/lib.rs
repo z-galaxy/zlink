@@ -11,6 +11,7 @@
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 
 pub(crate) use zlink_core::*;
+pub mod io;
 #[cfg(feature = "server")]
 pub mod notified;
 pub mod unix;

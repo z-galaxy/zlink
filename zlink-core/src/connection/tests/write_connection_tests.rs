@@ -373,3 +373,74 @@ async fn dropped_flush_goes_on_from_where_it_stopped() {
         [&b"123456789\0"[..], b"42\0"].concat()
     );
 }
+
+#[tokio::test]
+async fn write_flushes_a_buffering_socket() {
+    let mut write_conn = WriteConnection::new(BufferingWriteHalf::default(), 1);
+    #[cfg(feature = "std")]
+    write_conn.write(&"hello", vec![]).await.unwrap();
+    #[cfg(not(feature = "std"))]
+    write_conn.write(&"hello").await.unwrap();
+
+    assert_eq!(write_conn.socket.sent, b"\"hello\"\0");
+    assert!(write_conn.socket.held.is_empty());
+}
+
+#[tokio::test]
+async fn flush_with_nothing_queued_flushes_the_socket() {
+    let mut write_conn = WriteConnection::new(BufferingWriteHalf::default(), 1);
+    write_conn.flush().await.unwrap();
+
+    assert_eq!(write_conn.socket.flushes, 1);
+}
+
+#[tokio::test]
+async fn write_all_flushes_a_buffering_socket() {
+    use crate::connection::socket::WriteHalf;
+
+    let mut socket = BufferingWriteHalf::default();
+    #[cfg(feature = "std")]
+    let fds: &[std::os::fd::OwnedFd] = &[];
+    socket
+        .write_all(
+            b"hello",
+            #[cfg(feature = "std")]
+            fds,
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(socket.sent, b"hello");
+}
+
+/// A write half that holds on to what is written to it until it's flushed, as a TLS stream does.
+#[derive(Debug, Default)]
+struct BufferingWriteHalf {
+    held: Vec<u8>,
+    sent: Vec<u8>,
+    flushes: usize,
+}
+
+impl crate::connection::socket::WriteHalf for BufferingWriteHalf {
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
+    ) -> crate::Result<usize> {
+        self.held.extend_from_slice(buf);
+
+        Ok(buf.len())
+    }
+
+    async fn flush(&mut self) -> crate::Result<()> {
+        self.flushes += 1;
+        self.sent.append(&mut self.held);
+
+        Ok(())
+    }
+}

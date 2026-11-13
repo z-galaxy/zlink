@@ -54,7 +54,7 @@ pub use zlink_core::*;
 pub mod tokio {
     #[cfg(feature = "server")]
     pub use zlink_tokio::notified;
-    pub use zlink_tokio::{block_on, unix};
+    pub use zlink_tokio::{block_on, io, unix};
 }
 
 /// API specific to the [smol](https://github.com/smol-rs/smol) runtime.
@@ -62,7 +62,7 @@ pub mod tokio {
 pub mod smol {
     #[cfg(feature = "server")]
     pub use zlink_smol::notified;
-    pub use zlink_smol::{block_on, unix};
+    pub use zlink_smol::{block_on, io, unix};
 }
 
 /// API specific to the [zruntime](https://github.com/z-galaxy/zruntime) runtime.
@@ -70,5 +70,5 @@ pub mod smol {
 pub mod zruntime {
     #[cfg(feature = "server")]
     pub use zlink_zruntime::notified;
-    pub use zlink_zruntime::{block_on, unix};
+    pub use zlink_zruntime::{block_on, io, unix};
 }

@@ -77,7 +77,8 @@ pub trait WriteHalf: core::fmt::Debug {
         >,
     ) -> impl Future<Output = crate::Result<usize>>;
 
-    /// Write all of `buf` to the socket, calling [`WriteHalf::write`] as many times as needed.
+    /// Write all of `buf` to the socket, calling [`WriteHalf::write`] as many times as needed, and
+    /// then [`WriteHalf::flush`].
     ///
     /// The file descriptors are sent with the first call, along with the first byte of `buf`, and
     /// the credentials with every call.
@@ -114,8 +115,23 @@ pub trait WriteHalf: core::fmt::Debug {
                 pos += written;
             }
 
-            Ok(())
+            self.flush().await
         }
+    }
+
+    /// Flush any bytes buffered by previous writes.
+    ///
+    /// The connection calls this after writing all that is queued. The default does nothing: only
+    /// a socket that buffers, such as one over TLS or a WebSocket, needs to implement it. `write`
+    /// can't flush by itself, as a flush dropped midway would lose the count of the bytes written.
+    ///
+    /// Notes for implementers:
+    ///
+    /// * The returned future has the same requirements as that of [`ReadHalf::read`].
+    /// * If the future is dropped before it completes, the socket must keep the bytes it has not
+    ///   sent yet, and its progress, so that the next flush resumes without loss or duplication.
+    fn flush(&mut self) -> impl Future<Output = crate::Result<()>> {
+        async { Ok(()) }
     }
 }
 
