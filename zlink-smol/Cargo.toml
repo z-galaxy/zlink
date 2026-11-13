@@ -26,10 +26,8 @@ futures-util = { version = "0.3.31", default-features = false, features = [
     "alloc",
     "io",
 ] }
-futures-lite = "2.5"
 async-io = "2.3"
 async-broadcast = "0.7"
-async-channel = "2.3"
 pin-project-lite = "0.2"
 
 [dev-dependencies]
