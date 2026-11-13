@@ -2361,7 +2361,9 @@ name = "zlink-zruntime"
 version = "0.9.0"
 dependencies = [
  "futures-core",
+ "futures-util",
  "pin-project-lite",
+ "serde",
  "tempfile",
  "zlink-core",
  "zruntime",
