@@ -129,6 +129,23 @@ mod tests {
         assert!(Socket::join(read, write).is_err());
     }
 
+    /// The halves give the halves of the stream back, to go on without Varlink on them.
+    #[tokio::test]
+    async fn halves_give_the_halves_of_the_stream_back() {
+        let (client, mut server) = tokio::io::duplex(1024);
+        let (read, write) = Socket::new(client).split();
+        let (mut read, mut write) = (read.into_inner(), write.into_inner());
+
+        write.write_all(b"ping").await.unwrap();
+        let mut buf = [0; 4];
+        server.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping");
+
+        server.write_all(b"pong").await.unwrap();
+        read.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"pong");
+    }
+
     /// A call reaches the peer over a stream that sends only when it's flushed.
     #[tokio::test]
     async fn call_reaches_the_peer_of_a_buffering_stream() {

@@ -82,6 +82,16 @@ impl<T, B> fmt::Debug for Socket<T, B> {
 /// The [`ReadHalf`](socket::ReadHalf) implementation over a byte stream.
 pub struct ReadHalf<T, B: ByteStream<T>>(B::ReadHalf);
 
+impl<T, B> ReadHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    /// Consume the half into the read half of the underlying stream.
+    pub fn into_inner(self) -> B::ReadHalf {
+        self.0
+    }
+}
+
 impl<T, B> socket::ReadHalf for ReadHalf<T, B>
 where
     B: ByteStream<T>,
@@ -101,6 +111,16 @@ impl<T, B: ByteStream<T>> fmt::Debug for ReadHalf<T, B> {
 
 /// The [`WriteHalf`](socket::WriteHalf) implementation over a byte stream.
 pub struct WriteHalf<T, B: ByteStream<T>>(B::WriteHalf);
+
+impl<T, B> WriteHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    /// Consume the half into the write half of the underlying stream.
+    pub fn into_inner(self) -> B::WriteHalf {
+        self.0
+    }
+}
 
 impl<T, B> socket::WriteHalf for WriteHalf<T, B>
 where
