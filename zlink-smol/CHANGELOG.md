@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 - 2026-11-13
+
+### ✨ Added
+- Add the `byte_stream` module, for connections over any byte stream.
+- Add block_on, to drive smol on the calling thread.
+- Implement IntoStd for the Unix stream.
+
+### 💥 Breaking
+- Return bytes written from WriteHalf::write.
+- Add Socket::join, the opposite of split.
+
+### 📝 Documentation
+- Document the byte_stream module. #357
+- Document connections over any byte stream.
+- Write services as interfaces that a struct holds.
+- Drive the examples of the README with zlink::zruntime::block_on.
+- Document all three runtime features.
+- Document the zruntime runtime support.
+
+### 🐛 Fixed
+- Don't panic setting a state no stream watches.
+
+### ⚙️ Other
+- 🚩 Enable the `io` feature of futures-util.
+
 ## 0.8.0 - 2026-10-29
 
 ### 💥 Breaking
