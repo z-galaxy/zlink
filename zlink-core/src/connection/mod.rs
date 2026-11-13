@@ -72,6 +72,8 @@
 //! [`Socket::CAN_TRANSFER_FDS`]: socket::Socket::CAN_TRANSFER_FDS
 
 #[cfg(feature = "std")]
+mod byte_stream;
+#[cfg(feature = "std")]
 mod credentials;
 #[cfg(all(feature = "handover", target_os = "linux"))]
 mod handover;
