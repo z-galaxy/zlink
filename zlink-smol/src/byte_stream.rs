@@ -1,15 +1,67 @@
 //! Provides transport over any byte stream.
 
-zlink_core::impl_byte_stream! {
-    io: futures_util::io,
-    split: futures_util::io::AsyncReadExt::split,
-    join: |read, write| read.reunite(write).ok(),
+use futures_util::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use zlink_core::connection::byte_stream::{self, ByteStream};
+
+/// The connection type that uses a byte stream for transport.
+pub type Connection<T> = crate::Connection<Socket<T>>;
+
+/// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
+///
+/// Varlink needs no more than a reliable, ordered byte stream, so a connection can run over a TLS
+/// stream, a WebSocket or any other stream that is [`AsyncRead`] and [`AsyncWrite`]. Only Unix
+/// Domain Sockets carry file descriptors and peer credentials; for those, use
+/// [`unix::Stream`](crate::unix::Stream).
+///
+/// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
+/// stream.
+pub type Socket<T> = byte_stream::Socket<T, SmolByteStream>;
+
+/// The [`ReadHalf`](crate::connection::socket::ReadHalf) implementation over a byte stream.
+pub type ReadHalf<T> = byte_stream::ReadHalf<T, SmolByteStream>;
+
+/// The [`WriteHalf`](crate::connection::socket::WriteHalf) implementation over a byte stream.
+pub type WriteHalf<T> = byte_stream::WriteHalf<T, SmolByteStream>;
+
+/// Selects the byte stream operations of smol for the types above.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SmolByteStream;
+
+impl<T> ByteStream<T> for SmolByteStream
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    type ReadHalf = futures_util::io::ReadHalf<T>;
+    type WriteHalf = futures_util::io::WriteHalf<T>;
+
+    fn split(stream: T) -> (Self::ReadHalf, Self::WriteHalf) {
+        stream.split()
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Option<T> {
+        read.reunite(write).ok()
+    }
+
+    // `AsyncReadExt::read` is cancel safe, which the trait requires.
+    async fn read(read: &mut Self::ReadHalf, buf: &mut [u8]) -> std::io::Result<usize> {
+        read.read(buf).await
+    }
+
+    // `AsyncWriteExt::write` is cancel safe, which the trait requires.
+    async fn write(write: &mut Self::WriteHalf, buf: &[u8]) -> std::io::Result<usize> {
+        write.write(buf).await
+    }
+
+    async fn flush(write: &mut Self::WriteHalf) -> std::io::Result<()> {
+        write.flush().await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Call, Reply};
+    use crate::{Call, Reply, connection::socket::Socket as _};
     use async_io::Async;
     use serde::{Deserialize, Serialize};
     use std::{
@@ -23,8 +75,8 @@ mod tests {
     fn call_and_reply_over_a_byte_stream() {
         smol::block_on(async {
             let (client, server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(client));
-            let mut server = Connection::new(Stream::new(server));
+            let mut client = Connection::new(Socket::new(client));
+            let mut server = Connection::new(Socket::new(server));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),
@@ -68,18 +120,18 @@ mod tests {
     #[test]
     fn halves_join_back_into_the_stream() {
         let (client, _server) = Async::<UnixStream>::pair().unwrap();
-        let (read, write) = Stream::new(client).split();
+        let (read, write) = Socket::new(client).split();
 
-        assert!(Stream::join(read, write).is_ok());
+        assert!(Socket::join(read, write).is_ok());
     }
 
     /// The halves of two different streams aren't joined.
     #[test]
     fn halves_of_two_streams_are_not_joined() {
-        let (read, _) = Stream::new(Async::<UnixStream>::pair().unwrap().0).split();
-        let (_, write) = Stream::new(Async::<UnixStream>::pair().unwrap().0).split();
+        let (read, _) = Socket::new(Async::<UnixStream>::pair().unwrap().0).split();
+        let (_, write) = Socket::new(Async::<UnixStream>::pair().unwrap().0).split();
 
-        assert!(Stream::join(read, write).is_err());
+        assert!(Socket::join(read, write).is_err());
     }
 
     /// A call reaches the peer over a stream that sends only when it's flushed.
@@ -87,11 +139,11 @@ mod tests {
     fn call_reaches_the_peer_of_a_buffering_stream() {
         smol::block_on(async {
             let (client, server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(Buffering {
+            let mut client = Connection::new(Socket::new(Buffering {
                 stream: client,
                 held: Vec::new(),
             }));
-            let mut server = Connection::new(Stream::new(server));
+            let mut server = Connection::new(Socket::new(server));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),
@@ -108,7 +160,7 @@ mod tests {
     fn file_descriptors_are_refused() {
         smol::block_on(async {
             let (client, _server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(client));
+            let mut client = Connection::new(Socket::new(client));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),

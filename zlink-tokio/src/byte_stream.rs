@@ -1,15 +1,68 @@
 //! Provides transport over any byte stream.
 
-zlink_core::impl_byte_stream! {
-    io: tokio::io,
-    split: tokio::io::split,
-    join: |read, write| read.is_pair_of(&write).then(|| read.unsplit(write)),
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use zlink_core::connection::byte_stream::{self, ByteStream};
+
+/// The connection type that uses a byte stream for transport.
+pub type Connection<T> = crate::Connection<Socket<T>>;
+
+/// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
+///
+/// Varlink needs no more than a reliable, ordered byte stream, so a connection can run over a TLS
+/// stream, a WebSocket or any other stream that is [`AsyncRead`] and [`AsyncWrite`]. Only Unix
+/// Domain Sockets carry file descriptors and peer credentials; for those, use
+/// [`unix::Stream`](crate::unix::Stream).
+///
+/// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
+/// stream.
+pub type Socket<T> = byte_stream::Socket<T, TokioByteStream>;
+
+/// The [`ReadHalf`](crate::connection::socket::ReadHalf) implementation over a byte stream.
+pub type ReadHalf<T> = byte_stream::ReadHalf<T, TokioByteStream>;
+
+/// The [`WriteHalf`](crate::connection::socket::WriteHalf) implementation over a byte stream.
+pub type WriteHalf<T> = byte_stream::WriteHalf<T, TokioByteStream>;
+
+/// Selects the byte stream operations of Tokio for the types above.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct TokioByteStream;
+
+impl<T> ByteStream<T> for TokioByteStream
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    type ReadHalf = tokio::io::ReadHalf<T>;
+    type WriteHalf = tokio::io::WriteHalf<T>;
+
+    fn split(stream: T) -> (Self::ReadHalf, Self::WriteHalf) {
+        tokio::io::split(stream)
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Option<T> {
+        // `unsplit` panics on the halves of two streams.
+        read.is_pair_of(&write).then(|| read.unsplit(write))
+    }
+
+    // `AsyncReadExt::read` is cancel safe, which the trait requires.
+    async fn read(read: &mut Self::ReadHalf, buf: &mut [u8]) -> std::io::Result<usize> {
+        read.read(buf).await
+    }
+
+    // `AsyncWriteExt::write` is cancel safe, which the trait requires.
+    async fn write(write: &mut Self::WriteHalf, buf: &[u8]) -> std::io::Result<usize> {
+        write.write(buf).await
+    }
+
+    async fn flush(write: &mut Self::WriteHalf) -> std::io::Result<()> {
+        write.flush().await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Call, Reply};
+    use crate::{Call, Reply, connection::socket::Socket as _};
     use serde::{Deserialize, Serialize};
     use std::{
         pin::Pin,
@@ -20,8 +73,8 @@ mod tests {
     #[tokio::test]
     async fn call_and_reply_over_a_duplex_stream() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(client));
-        let mut server = Connection::new(Stream::new(server));
+        let mut client = Connection::new(Socket::new(client));
+        let mut server = Connection::new(Socket::new(server));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),
@@ -62,29 +115,46 @@ mod tests {
     #[tokio::test]
     async fn halves_join_back_into_the_stream() {
         let (client, _server) = tokio::io::duplex(1024);
-        let (read, write) = Stream::new(client).split();
+        let (read, write) = Socket::new(client).split();
 
-        assert!(Stream::join(read, write).is_ok());
+        assert!(Socket::join(read, write).is_ok());
     }
 
     /// The halves of two different streams aren't joined.
     #[tokio::test]
     async fn halves_of_two_streams_are_not_joined() {
-        let (read, _) = Stream::new(tokio::io::duplex(1024).0).split();
-        let (_, write) = Stream::new(tokio::io::duplex(1024).0).split();
+        let (read, _) = Socket::new(tokio::io::duplex(1024).0).split();
+        let (_, write) = Socket::new(tokio::io::duplex(1024).0).split();
 
-        assert!(Stream::join(read, write).is_err());
+        assert!(Socket::join(read, write).is_err());
+    }
+
+    /// The halves give the halves of the stream back, to go on without Varlink on them.
+    #[tokio::test]
+    async fn halves_give_the_halves_of_the_stream_back() {
+        let (client, mut server) = tokio::io::duplex(1024);
+        let (read, write) = Socket::new(client).split();
+        let (mut read, mut write) = (read.into_inner(), write.into_inner());
+
+        write.write_all(b"ping").await.unwrap();
+        let mut buf = [0; 4];
+        server.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping");
+
+        server.write_all(b"pong").await.unwrap();
+        read.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"pong");
     }
 
     /// A call reaches the peer over a stream that sends only when it's flushed.
     #[tokio::test]
     async fn call_reaches_the_peer_of_a_buffering_stream() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(Buffering {
+        let mut client = Connection::new(Socket::new(Buffering {
             stream: client,
             held: Vec::new(),
         }));
-        let mut server = Connection::new(Stream::new(server));
+        let mut server = Connection::new(Socket::new(server));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),
@@ -99,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn file_descriptors_are_refused() {
         let (client, _server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(client));
+        let mut client = Connection::new(Socket::new(client));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),

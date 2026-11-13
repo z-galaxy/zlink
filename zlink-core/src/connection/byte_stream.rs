@@ -1,157 +1,204 @@
 //! The byte stream transport, shared by the runtime crates.
+//!
+//! Applications use the aliases of these types in the `byte_stream` module of their runtime.
 
-/// Define the byte stream transport in the invoking module.
+use core::{fmt, future::Future, marker::PhantomData};
+use std::{io, os::fd::AsFd};
+
+use super::socket;
+
+/// The [`Socket`](socket::Socket) implementation over a byte stream `T` of the runtime `B`.
 ///
-/// Each runtime crate gets its own copy, as the runtimes have their own `AsyncRead` and
-/// `AsyncWrite` traits. `join` returns `None` for halves that aren't of one stream.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! impl_byte_stream {
-    (io: $($io:ident)::+, split: $split:expr, join: $join:expr $(,)?) => {
-        use $($io)::+::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-        use $crate::connection::socket::{self, Socket};
+/// Only Unix Domain Sockets carry file descriptors and peer credentials, so this socket refuses
+/// to send either.
+///
+/// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
+/// stream.
+pub struct Socket<T, B> {
+    stream: T,
+    // `fn() -> B`, so that the socket is `Send` and `Sync` whenever the stream is.
+    runtime: PhantomData<fn() -> B>,
+}
 
-        /// The connection type that uses a byte stream for transport.
-        pub type Connection<T> = $crate::Connection<Stream<T>>;
+impl<T, B> Socket<T, B>
+where
+    B: ByteStream<T>,
+{
+    /// Create a socket over `stream`.
+    pub fn new(stream: T) -> Self {
+        Self {
+            stream,
+            runtime: PhantomData,
+        }
+    }
 
-        /// The [`Socket`] implementation over any byte stream.
-        ///
-        /// Varlink needs no more than a reliable, ordered byte stream, so a connection can run
-        /// over a TCP or TLS stream, or a WebSocket exposed through [`AsyncRead`] and
-        /// [`AsyncWrite`]. Only Unix Domain Sockets carry file descriptors and peer credentials;
-        /// for those, use [`unix::Stream`](crate::unix::Stream).
-        ///
-        /// A stream converts into it, so `Connection::new(stream.into())` makes a connection over
-        /// the stream.
-        pub struct Stream<T>(T);
+    /// Consume the socket into the underlying stream.
+    pub fn into_inner(self) -> T {
+        self.stream
+    }
+}
 
-        impl<T> Stream<T>
-        where
-            T: AsyncRead + AsyncWrite + Unpin,
-        {
-            /// Create a socket over `stream`.
-            pub fn new(stream: T) -> Self {
-                Self(stream)
-            }
+impl<T, B> From<T> for Socket<T, B>
+where
+    B: ByteStream<T>,
+{
+    fn from(stream: T) -> Self {
+        Self::new(stream)
+    }
+}
 
-            /// Consume the socket into the underlying stream.
-            pub fn into_inner(self) -> T {
-                self.0
-            }
+impl<T, B> socket::Socket for Socket<T, B>
+where
+    B: ByteStream<T>,
+{
+    type ReadHalf = ReadHalf<T, B>;
+    type WriteHalf = WriteHalf<T, B>;
+
+    fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
+        let (read, write) = B::split(self.stream);
+
+        (ReadHalf(read), WriteHalf(write))
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> crate::Result<Self> {
+        let stream = B::join(read.0, write.0).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the halves are of two different streams",
+            )
+        })?;
+
+        Ok(Self::new(stream))
+    }
+}
+
+// Not derived, so that `T` needn't be `Debug`.
+impl<T, B> fmt::Debug for Socket<T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Socket").finish_non_exhaustive()
+    }
+}
+
+/// The [`ReadHalf`](socket::ReadHalf) implementation over a byte stream.
+pub struct ReadHalf<T, B: ByteStream<T>>(B::ReadHalf);
+
+impl<T, B> ReadHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    /// Consume the half into the read half of the underlying stream.
+    pub fn into_inner(self) -> B::ReadHalf {
+        self.0
+    }
+}
+
+impl<T, B> socket::ReadHalf for ReadHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    async fn read(&mut self, buf: &mut [u8]) -> crate::Result<socket::ReadResult> {
+        let n = B::read(&mut self.0, buf).await?;
+
+        Ok(socket::ReadResult::new(n))
+    }
+}
+
+impl<T, B: ByteStream<T>> fmt::Debug for ReadHalf<T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ReadHalf").finish_non_exhaustive()
+    }
+}
+
+/// The [`WriteHalf`](socket::WriteHalf) implementation over a byte stream.
+pub struct WriteHalf<T, B: ByteStream<T>>(B::WriteHalf);
+
+impl<T, B> WriteHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    /// Consume the half into the write half of the underlying stream.
+    pub fn into_inner(self) -> B::WriteHalf {
+        self.0
+    }
+}
+
+impl<T, B> socket::WriteHalf for WriteHalf<T, B>
+where
+    B: ByteStream<T>,
+{
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        fds: &[impl AsFd],
+        #[cfg(target_os = "linux")] credentials: Option<&super::PassedCredentials>,
+    ) -> crate::Result<usize> {
+        if !fds.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "a byte stream can't transfer file descriptors",
+            )
+            .into());
+        }
+        #[cfg(target_os = "linux")]
+        if credentials.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "a byte stream can't pass credentials",
+            )
+            .into());
         }
 
-        impl<T> From<T> for Stream<T>
-        where
-            T: AsyncRead + AsyncWrite + Unpin,
-        {
-            fn from(stream: T) -> Self {
-                Self(stream)
-            }
-        }
+        let n = B::write(&mut self.0, buf).await?;
 
-        impl<T> Socket for Stream<T>
-        where
-            T: AsyncRead + AsyncWrite + Unpin,
-        {
-            type ReadHalf = ReadHalf<T>;
-            type WriteHalf = WriteHalf<T>;
+        Ok(n)
+    }
 
-            fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
-                let (read, write) = ($split)(self.0);
+    async fn flush(&mut self) -> crate::Result<()> {
+        B::flush(&mut self.0).await?;
 
-                (ReadHalf(read), WriteHalf(write))
-            }
+        Ok(())
+    }
+}
 
-            fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> $crate::Result<Self> {
-                let join: fn($($io)::+::ReadHalf<T>, $($io)::+::WriteHalf<T>) -> Option<T> = $join;
-                let stream = join(read.0, write.0).ok_or_else(|| {
-                    ::std::io::Error::new(
-                        ::std::io::ErrorKind::InvalidInput,
-                        "the halves are of two different streams",
-                    )
-                })?;
+impl<T, B: ByteStream<T>> fmt::Debug for WriteHalf<T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("WriteHalf").finish_non_exhaustive()
+    }
+}
 
-                Ok(Self(stream))
-            }
-        }
+/// The byte stream operations of an async runtime, for its streams of type `T`.
+///
+/// The runtimes have their own read and write traits, so each runtime crate implements this for a
+/// marker type of its own, for every `T` that implements the traits of that runtime. The marker
+/// only selects the implementation: it holds no stream.
+pub trait ByteStream<T> {
+    /// The read half of a stream.
+    type ReadHalf;
+    /// The write half of a stream.
+    type WriteHalf;
 
-        // Not derived, so that `T` needn't be `Debug`.
-        impl<T> ::core::fmt::Debug for Stream<T> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.debug_tuple("Stream").finish_non_exhaustive()
-            }
-        }
+    /// Split `stream` into its read and write halves.
+    fn split(stream: T) -> (Self::ReadHalf, Self::WriteHalf);
 
-        /// The [`ReadHalf`](socket::ReadHalf) implementation over a byte stream.
-        pub struct ReadHalf<T>($($io)::+::ReadHalf<T>);
+    /// Join the halves back into the stream they were split from.
+    ///
+    /// Returns `None` if the halves aren't of one stream.
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Option<T>;
 
-        impl<T> socket::ReadHalf for ReadHalf<T>
-        where
-            T: AsyncRead + Unpin,
-        {
-            // `AsyncReadExt::read` is cancel safe, which the trait requires.
-            async fn read(&mut self, buf: &mut [u8]) -> $crate::Result<socket::ReadResult> {
-                let n = self.0.read(buf).await?;
+    /// Read from the stream into `buf`.
+    ///
+    /// Returns the number of bytes read, 0 at the end of the stream. The returned future has the
+    /// same requirements as that of [`socket::ReadHalf::read`].
+    fn read(read: &mut Self::ReadHalf, buf: &mut [u8]) -> impl Future<Output = io::Result<usize>>;
 
-                Ok(socket::ReadResult::new(n))
-            }
-        }
+    /// Write as much of `buf` to the stream as it accepts at once.
+    ///
+    /// Returns the number of bytes written, which can be fewer than `buf` holds. The returned
+    /// future has the same requirements as that of [`socket::WriteHalf::write`].
+    fn write(write: &mut Self::WriteHalf, buf: &[u8]) -> impl Future<Output = io::Result<usize>>;
 
-        impl<T> ::core::fmt::Debug for ReadHalf<T> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.debug_tuple("ReadHalf").finish_non_exhaustive()
-            }
-        }
-
-        /// The [`WriteHalf`](socket::WriteHalf) implementation over a byte stream.
-        pub struct WriteHalf<T>($($io)::+::WriteHalf<T>);
-
-        impl<T> socket::WriteHalf for WriteHalf<T>
-        where
-            T: AsyncWrite + Unpin,
-        {
-            async fn write(
-                &mut self,
-                buf: &[u8],
-                fds: &[impl ::std::os::fd::AsFd],
-                #[cfg(target_os = "linux")] credentials: Option<
-                    &$crate::connection::PassedCredentials,
-                >,
-            ) -> $crate::Result<usize> {
-                if !fds.is_empty() {
-                    return Err(::std::io::Error::new(
-                        ::std::io::ErrorKind::Unsupported,
-                        "a byte stream can't transfer file descriptors",
-                    )
-                    .into());
-                }
-                #[cfg(target_os = "linux")]
-                if credentials.is_some() {
-                    return Err(::std::io::Error::new(
-                        ::std::io::ErrorKind::Unsupported,
-                        "a byte stream can't pass credentials",
-                    )
-                    .into());
-                }
-
-                // `AsyncWriteExt::write` is cancel safe, which the trait requires.
-                let n = self.0.write(buf).await?;
-
-                Ok(n)
-            }
-
-            // The stream may buffer, as TLS streams and WebSocket adapters do.
-            async fn flush(&mut self) -> $crate::Result<()> {
-                self.0.flush().await?;
-
-                Ok(())
-            }
-        }
-
-        impl<T> ::core::fmt::Debug for WriteHalf<T> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.debug_tuple("WriteHalf").finish_non_exhaustive()
-            }
-        }
-    };
+    /// Flush any bytes buffered by previous writes.
+    ///
+    /// The returned future has the same requirements as that of [`socket::WriteHalf::flush`].
+    fn flush(write: &mut Self::WriteHalf) -> impl Future<Output = io::Result<()>>;
 }
