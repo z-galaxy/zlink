@@ -70,7 +70,7 @@ returns, you can immediately send your first method call. The returned type is
 — the `Connection` type is generic over its transport (more on that in the [embedded
 chapter](embedded.html)). Since Varlink needs no more than a reliable byte stream, any
 `AsyncRead + AsyncWrite` stream, such as a TCP or TLS stream or a WebSocket adapter, works as one
-too: `zlink::zruntime::io::Connection::new(stream.into())` makes a connection over it.
+too: `zlink::zruntime::byte_stream::Connection::new(stream.into())` makes a connection over it.
 
 Note that `connect()` gives you the connection *by value* and all its methods take `&mut self`.
 This is a deliberate — and central — design decision in zlink: a connection is exclusively owned by

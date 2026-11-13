@@ -4,7 +4,7 @@ use futures_util::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt a
 use zlink_core::connection::byte_stream::{self, ByteStream};
 
 /// The connection type that uses a byte stream for transport.
-pub type Connection<T> = crate::Connection<Stream<T>>;
+pub type Connection<T> = crate::Connection<Socket<T>>;
 
 /// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
 ///
@@ -15,20 +15,20 @@ pub type Connection<T> = crate::Connection<Stream<T>>;
 ///
 /// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
 /// stream.
-pub type Stream<T> = byte_stream::Socket<T, SmolByteStream>;
+pub type Socket<T> = byte_stream::Socket<T, ZruntimeByteStream>;
 
 /// The [`ReadHalf`](crate::connection::socket::ReadHalf) implementation over a byte stream.
-pub type ReadHalf<T> = byte_stream::ReadHalf<T, SmolByteStream>;
+pub type ReadHalf<T> = byte_stream::ReadHalf<T, ZruntimeByteStream>;
 
 /// The [`WriteHalf`](crate::connection::socket::WriteHalf) implementation over a byte stream.
-pub type WriteHalf<T> = byte_stream::WriteHalf<T, SmolByteStream>;
+pub type WriteHalf<T> = byte_stream::WriteHalf<T, ZruntimeByteStream>;
 
-/// Selects the byte stream operations of smol for the types above.
+/// Selects the byte stream operations of zruntime for the types above.
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct SmolByteStream;
+pub struct ZruntimeByteStream;
 
-impl<T> ByteStream<T> for SmolByteStream
+impl<T> ByteStream<T> for ZruntimeByteStream
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -62,21 +62,20 @@ where
 mod tests {
     use super::*;
     use crate::{Call, Reply, connection::socket::Socket as _};
-    use async_io::Async;
     use serde::{Deserialize, Serialize};
     use std::{
-        os::unix::net::UnixStream,
         pin::Pin,
         task::{Context, Poll, ready},
     };
+    use zruntime::{SharedRuntime, net::unix::UnixStream};
 
     /// A call and its reply go over a stream that carries nothing but bytes.
     #[test]
     fn call_and_reply_over_a_byte_stream() {
-        smol::block_on(async {
-            let (client, server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(client));
-            let mut server = Connection::new(Stream::new(server));
+        crate::block_on(async {
+            let (client, server) = pair();
+            let mut client = Connection::new(Socket::new(client));
+            let mut server = Connection::new(Socket::new(server));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),
@@ -106,8 +105,8 @@ mod tests {
     /// the socket here.
     #[test]
     fn peer_hangup_is_eof() {
-        smol::block_on(async {
-            let (client, server) = Async::<UnixStream>::pair().unwrap();
+        crate::block_on(async {
+            let (client, server) = pair();
             let mut client = Connection::new(client.into());
             drop(server);
 
@@ -119,31 +118,31 @@ mod tests {
     /// The halves of a stream are joined back into it.
     #[test]
     fn halves_join_back_into_the_stream() {
-        let (client, _server) = Async::<UnixStream>::pair().unwrap();
-        let (read, write) = Stream::new(client).split();
+        let (client, _server) = pair();
+        let (read, write) = Socket::new(client).split();
 
-        assert!(Stream::join(read, write).is_ok());
+        assert!(Socket::join(read, write).is_ok());
     }
 
     /// The halves of two different streams aren't joined.
     #[test]
     fn halves_of_two_streams_are_not_joined() {
-        let (read, _) = Stream::new(Async::<UnixStream>::pair().unwrap().0).split();
-        let (_, write) = Stream::new(Async::<UnixStream>::pair().unwrap().0).split();
+        let (read, _) = Socket::new(pair().0).split();
+        let (_, write) = Socket::new(pair().0).split();
 
-        assert!(Stream::join(read, write).is_err());
+        assert!(Socket::join(read, write).is_err());
     }
 
     /// A call reaches the peer over a stream that sends only when it's flushed.
     #[test]
     fn call_reaches_the_peer_of_a_buffering_stream() {
-        smol::block_on(async {
-            let (client, server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(Buffering {
+        crate::block_on(async {
+            let (client, server) = pair();
+            let mut client = Connection::new(Socket::new(Buffering {
                 stream: client,
                 held: Vec::new(),
             }));
-            let mut server = Connection::new(Stream::new(server));
+            let mut server = Connection::new(Socket::new(server));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),
@@ -158,9 +157,9 @@ mod tests {
     /// File descriptors are refused, as a byte stream can't carry them.
     #[test]
     fn file_descriptors_are_refused() {
-        smol::block_on(async {
-            let (client, _server) = Async::<UnixStream>::pair().unwrap();
-            let mut client = Connection::new(Stream::new(client));
+        crate::block_on(async {
+            let (client, _server) = pair();
+            let mut client = Connection::new(Socket::new(client));
 
             let call = Call::new(Method::Echo {
                 text: "hello".into(),
@@ -176,7 +175,7 @@ mod tests {
 
     /// A stream that sends what is written to it only when it's flushed, as a TLS stream does.
     struct Buffering {
-        stream: Async<UnixStream>,
+        stream: UnixStream<zruntime::Shared>,
         held: Vec<u8>,
     }
 
@@ -214,6 +213,10 @@ mod tests {
         fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
             Pin::new(&mut self.stream).poll_close(cx)
         }
+    }
+
+    fn pair() -> (UnixStream<zruntime::Shared>, UnixStream<zruntime::Shared>) {
+        UnixStream::pair(&SharedRuntime::current().unwrap()).unwrap()
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]

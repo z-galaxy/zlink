@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use tokio::runtime::{Builder, Runtime};
 
 pub(crate) use zlink_core::*;
-pub mod io;
+pub mod byte_stream;
 #[cfg(feature = "server")]
 pub mod notified;
 pub mod unix;

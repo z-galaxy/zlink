@@ -1,4 +1,6 @@
 //! The byte stream transport, shared by the runtime crates.
+//!
+//! Applications use the aliases of these types in the `byte_stream` module of their runtime.
 
 use core::{fmt, future::Future, marker::PhantomData};
 use std::{io, os::fd::AsFd};

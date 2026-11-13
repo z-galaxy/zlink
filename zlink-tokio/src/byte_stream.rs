@@ -4,7 +4,7 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use zlink_core::connection::byte_stream::{self, ByteStream};
 
 /// The connection type that uses a byte stream for transport.
-pub type Connection<T> = crate::Connection<Stream<T>>;
+pub type Connection<T> = crate::Connection<Socket<T>>;
 
 /// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
 ///
@@ -15,7 +15,7 @@ pub type Connection<T> = crate::Connection<Stream<T>>;
 ///
 /// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
 /// stream.
-pub type Stream<T> = byte_stream::Socket<T, TokioByteStream>;
+pub type Socket<T> = byte_stream::Socket<T, TokioByteStream>;
 
 /// The [`ReadHalf`](crate::connection::socket::ReadHalf) implementation over a byte stream.
 pub type ReadHalf<T> = byte_stream::ReadHalf<T, TokioByteStream>;
@@ -73,8 +73,8 @@ mod tests {
     #[tokio::test]
     async fn call_and_reply_over_a_duplex_stream() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(client));
-        let mut server = Connection::new(Stream::new(server));
+        let mut client = Connection::new(Socket::new(client));
+        let mut server = Connection::new(Socket::new(server));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),
@@ -115,29 +115,29 @@ mod tests {
     #[tokio::test]
     async fn halves_join_back_into_the_stream() {
         let (client, _server) = tokio::io::duplex(1024);
-        let (read, write) = Stream::new(client).split();
+        let (read, write) = Socket::new(client).split();
 
-        assert!(Stream::join(read, write).is_ok());
+        assert!(Socket::join(read, write).is_ok());
     }
 
     /// The halves of two different streams aren't joined.
     #[tokio::test]
     async fn halves_of_two_streams_are_not_joined() {
-        let (read, _) = Stream::new(tokio::io::duplex(1024).0).split();
-        let (_, write) = Stream::new(tokio::io::duplex(1024).0).split();
+        let (read, _) = Socket::new(tokio::io::duplex(1024).0).split();
+        let (_, write) = Socket::new(tokio::io::duplex(1024).0).split();
 
-        assert!(Stream::join(read, write).is_err());
+        assert!(Socket::join(read, write).is_err());
     }
 
     /// A call reaches the peer over a stream that sends only when it's flushed.
     #[tokio::test]
     async fn call_reaches_the_peer_of_a_buffering_stream() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(Buffering {
+        let mut client = Connection::new(Socket::new(Buffering {
             stream: client,
             held: Vec::new(),
         }));
-        let mut server = Connection::new(Stream::new(server));
+        let mut server = Connection::new(Socket::new(server));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),
@@ -152,7 +152,7 @@ mod tests {
     #[tokio::test]
     async fn file_descriptors_are_refused() {
         let (client, _server) = tokio::io::duplex(1024);
-        let mut client = Connection::new(Stream::new(client));
+        let mut client = Connection::new(Socket::new(client));
 
         let call = Call::new(Method::Echo {
             text: "hello".into(),
