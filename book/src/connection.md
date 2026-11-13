@@ -28,12 +28,12 @@ zlink = { version = "0.9", default-features = false, features = [
 ```
 
 The features are additive — you can enable several at once. The bulk of the API is runtime-agnostic
-and lives at the crate root; only the runtime-specific parts (`block_on` and the `unix` and
-`notified` modules) are per-runtime, under `zlink::zruntime`, `zlink::tokio` and `zlink::smol`
-respectively. The examples in this book use zruntime, but they work identically with the other
-runtimes — just replace `zlink::zruntime` with `zlink::tokio` or `zlink::smol`. If you enable none
-of these features, the crate fails to compile with an explicit error, since the transport
-implementations live in the runtime-integration crates.
+and lives at the crate root; only the runtime-specific parts (`block_on` and the `unix`,
+`byte_stream` and `notified` modules) are per-runtime, under `zlink::zruntime`, `zlink::tokio` and
+`zlink::smol` respectively. The examples in this book use zruntime, but they work identically with
+the other runtimes — just replace `zlink::zruntime` with `zlink::tokio` or `zlink::smol`. If you
+enable none of these features, the crate fails to compile with an explicit error, since the
+transport implementations live in the runtime-integration crates.
 
 A program with no async runtime of its own drives zlink with the `block_on` of a runtime module,
 which runs a future to completion on the calling thread: put the async code in one call to it, as
