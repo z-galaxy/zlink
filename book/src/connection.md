@@ -68,9 +68,34 @@ That's it. No handshake, no authentication round-trips, no name registration: af
 returns, you can immediately send your first method call. The returned type is
 `zlink::zruntime::unix::Connection`, an alias for `zlink::Connection<zlink::zruntime::unix::Stream>`
 — the `Connection` type is generic over its transport (more on that in the [embedded
-chapter](embedded.html)). Since Varlink needs no more than a reliable byte stream, any
-`AsyncRead + AsyncWrite` stream, such as a TCP or TLS stream or a WebSocket adapter, works as one
-too: `zlink::zruntime::byte_stream::Connection::new(stream.into())` makes a connection over it.
+chapter](embedded.html)).
+
+Varlink needs no more than a reliable, ordered byte stream, so a connection is not tied to Unix
+domain sockets. The `byte_stream` module of each runtime has a `Socket` that adapts any stream that
+implements the `AsyncRead` and `AsyncWrite` traits of that runtime, such as a TLS stream or a
+WebSocket adapter. For example, [`varlink-http-client`] connects to a service behind a
+[varlink-http-bridge] and returns such a stream, for Tokio:
+
+```rust,ignore,noplayground
+use varlink_http_client::Client;
+use zlink::tokio::byte_stream::Connection;
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let url = "https://some-host:1031/ws/services/io.systemd.Hostname";
+    let stream = Client::from_env()?.connect(url).await?;
+    let mut conn = Connection::new(stream.into());
+
+    // ... use the connection ...
+    Ok(())
+}
+```
+
+Here, `stream.into()` creates the byte stream socket. You can also construct it explicitly with
+`Socket::new(stream)`. Such a connection can't pass file descriptors or credentials, which only Unix
+domain sockets carry.
+
+[`varlink-http-client`]: https://github.com/systemd/varlink-http-bridge/tree/main/crates/varlink-http-client
+[varlink-http-bridge]: https://github.com/systemd/varlink-http-bridge
 
 Note that `connect()` gives you the connection *by value* and all its methods take `&mut self`.
 This is a deliberate — and central — design decision in zlink: a connection is exclusively owned by

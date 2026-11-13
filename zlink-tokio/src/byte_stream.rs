@@ -8,8 +8,8 @@ pub type Connection<T> = crate::Connection<Socket<T>>;
 
 /// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
 ///
-/// Varlink needs no more than a reliable, ordered byte stream, so a connection can run over a TCP
-/// or TLS stream, or a WebSocket exposed through [`AsyncRead`] and [`AsyncWrite`]. Only Unix
+/// Varlink needs no more than a reliable, ordered byte stream, so a connection can run over a TLS
+/// stream, a WebSocket or any other stream that is [`AsyncRead`] and [`AsyncWrite`]. Only Unix
 /// Domain Sockets carry file descriptors and peer credentials; for those, use
 /// [`unix::Stream`](crate::unix::Stream).
 ///

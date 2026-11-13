@@ -27,8 +27,8 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 - **Async-first design**: Built on async/await for efficient concurrent operations.
 - **Type safety**: Leverage Rust's type system with derive macros and code generation.
 - **Unix domain sockets**: Communicate over Unix domain socket transports.
-- **Any byte stream**: Run a connection over a TCP or TLS stream or a WebSocket through the
-  `byte_stream` module of each runtime.
+- **Any byte stream**: Run a connection over a TLS stream, a WebSocket or any other byte stream
+  through the `byte_stream` module of each runtime.
 - **File descriptor passing**: Pass file descriptors along with messages over Unix domain
   sockets, [compatible with systemd's `sd-varlink`][fd-passing].
 - **Runtime choice**: Use the zruntime (the default), Tokio or smol async runtime, each with a
