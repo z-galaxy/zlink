@@ -96,3 +96,24 @@ macro_rules! trace {
         $crate::log::defmt::trace!($($arg)*)
     }
 }
+
+/// Adapts a `Debug` value for use with the logging macros.
+///
+/// Returns the reference unchanged for `tracing`, or wraps it in `defmt::Debug2Format` for
+/// `defmt`, which only formats what implements its `Format` trait.
+#[cfg(feature = "tracing")]
+pub(crate) fn debug2format<T>(value: &T) -> &T
+where
+    T: core::fmt::Debug + ?Sized,
+{
+    value
+}
+
+/// The `defmt` counterpart of the above.
+#[cfg(not(feature = "tracing"))]
+pub(crate) fn debug2format<T>(value: &T) -> defmt::Debug2Format<'_, T>
+where
+    T: core::fmt::Debug + ?Sized,
+{
+    defmt::Debug2Format(value)
+}
