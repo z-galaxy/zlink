@@ -1,15 +1,68 @@
 //! Provides transport over any byte stream.
 
-zlink_core::impl_byte_stream! {
-    io: tokio::io,
-    split: tokio::io::split,
-    join: |read, write| read.is_pair_of(&write).then(|| read.unsplit(write)),
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use zlink_core::connection::byte_stream::{self, ByteStream};
+
+/// The connection type that uses a byte stream for transport.
+pub type Connection<T> = crate::Connection<Stream<T>>;
+
+/// The [`Socket`](crate::connection::socket::Socket) implementation over any byte stream.
+///
+/// Varlink needs no more than a reliable, ordered byte stream, so a connection can run over a TCP
+/// or TLS stream, or a WebSocket exposed through [`AsyncRead`] and [`AsyncWrite`]. Only Unix
+/// Domain Sockets carry file descriptors and peer credentials; for those, use
+/// [`unix::Stream`](crate::unix::Stream).
+///
+/// A stream converts into it, so `Connection::new(stream.into())` makes a connection over the
+/// stream.
+pub type Stream<T> = byte_stream::Socket<T, TokioByteStream>;
+
+/// The [`ReadHalf`](crate::connection::socket::ReadHalf) implementation over a byte stream.
+pub type ReadHalf<T> = byte_stream::ReadHalf<T, TokioByteStream>;
+
+/// The [`WriteHalf`](crate::connection::socket::WriteHalf) implementation over a byte stream.
+pub type WriteHalf<T> = byte_stream::WriteHalf<T, TokioByteStream>;
+
+/// Selects the byte stream operations of Tokio for the types above.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct TokioByteStream;
+
+impl<T> ByteStream<T> for TokioByteStream
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    type ReadHalf = tokio::io::ReadHalf<T>;
+    type WriteHalf = tokio::io::WriteHalf<T>;
+
+    fn split(stream: T) -> (Self::ReadHalf, Self::WriteHalf) {
+        tokio::io::split(stream)
+    }
+
+    fn join(read: Self::ReadHalf, write: Self::WriteHalf) -> Option<T> {
+        // `unsplit` panics on the halves of two streams.
+        read.is_pair_of(&write).then(|| read.unsplit(write))
+    }
+
+    // `AsyncReadExt::read` is cancel safe, which the trait requires.
+    async fn read(read: &mut Self::ReadHalf, buf: &mut [u8]) -> std::io::Result<usize> {
+        read.read(buf).await
+    }
+
+    // `AsyncWriteExt::write` is cancel safe, which the trait requires.
+    async fn write(write: &mut Self::WriteHalf, buf: &[u8]) -> std::io::Result<usize> {
+        write.write(buf).await
+    }
+
+    async fn flush(write: &mut Self::WriteHalf) -> std::io::Result<()> {
+        write.flush().await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Call, Reply};
+    use crate::{Call, Reply, connection::socket::Socket as _};
     use serde::{Deserialize, Serialize};
     use std::{
         pin::Pin,
