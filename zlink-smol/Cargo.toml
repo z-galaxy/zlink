@@ -24,6 +24,7 @@ zlink-core = { path = "../zlink-core", version = "=0.9.0", default-features = fa
 futures-util = { version = "0.3.31", default-features = false, features = [
     "async-await",
     "alloc",
+    "io",
 ] }
 futures-lite = "2.5"
 async-io = "2.3"
