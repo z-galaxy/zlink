@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 - 2026-11-13
+
+### ✨ Added
+- Add into_inner to the halves of the byte stream socket.
+- Add the ByteStream trait and a Socket over it.
+- Add `WriteHalf::flush` for sockets that buffer.
+- Add the interface attribute and Service derive macros. #349
+- Add Rewind::into_parts().
+- Allow shutdown to interrupt blocked reply writes.
+- Hand a connection over to another process.
+- Add IntoStd, to give a socket up as a Unix socket.
+- Stop a server gracefully, giving back what it served.
+
+### 💥 Breaking
+- Return bytes written from WriteHalf::write.
+- Add Socket::join, the opposite of split.
+- Bound the listener of Server, which breaks code naming a Server of a type that isn't a listener.
+
+### 📦 Dependencies
+- Depend on zoter 0.1, for the `handover` feature.
+
+### 🗑️ Deprecated
+- Deprecate the service attribute macro.
+
+### 📝 Documentation
+- Document the byte_stream module. #357
+- Document connections over any byte stream.
+- Write services as interfaces that a struct holds.
+- Drive the examples of the README with zlink::zruntime::block_on.
+- Document all three runtime features.
+- Document the zruntime runtime support.
+
+### 🐛 Fixed
+- Enable the alloc feature of futures-util.
+- Improve error report in mismatched reply.
+
+### ⚡️ Performance
+- Double the write buffer when a message doesn't fit.
+
+### ✅ Testing
+- Run the benchmarked server in a task of its own.
+
 ## 0.8.0 - 2026-10-29
 
 ### ✨ Added

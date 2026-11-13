@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 - 2026-11-13
+
+### ✨ Added
+- Re-export the `byte_stream` module of each runtime.
+- Re-export the block_on of each runtime under its module.
+- Add the handover feature.
+- Add the `zruntime` runtime.
+
+### 💥 Breaking
+- Make zruntime the default runtime.
+- Return bytes written from WriteHalf::write.
+- Add Socket::join, the opposite of split.
+- Bound the listener of Server, which breaks code naming a Server of a type that isn't a listener.
+
+### 📝 Documentation
+- Document the byte_stream module. #357
+- Document connections over any byte stream.
+- Write services as interfaces that a struct holds.
+- Drive the examples of the book with zlink::zruntime::block_on.
+- Drive the examples of the README with zlink::zruntime::block_on.
+- Document all three runtime features.
+- Tell how a service stops gracefully and restarts with clients.
+- Document the zruntime runtime support.
+
+### ✅ Testing
+- Write the services of the tests as interfaces.
+- Test finishing an interrupted reply after a hand-over.
+
 ## 0.8.0 - 2026-10-29
 
 ### ✨ Added

@@ -14,15 +14,15 @@ tokio and smol, enabled through cargo features:
 
 ```toml
 # zruntime (the default):
-zlink = "0.8"
+zlink = "0.9"
 
 # ...or tokio:
-zlink = { version = "0.8", default-features = false, features = [
+zlink = { version = "0.9", default-features = false, features = [
     "tokio", "service", "proxy", "tracing",
 ] }
 
 # ...or smol:
-zlink = { version = "0.8", default-features = false, features = [
+zlink = { version = "0.9", default-features = false, features = [
     "smol", "service", "proxy", "tracing",
 ] }
 ```
