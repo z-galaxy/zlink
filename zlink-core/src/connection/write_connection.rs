@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use serde::Serialize;
 
 use super::{BUFFER_SIZE, Call, Reply, socket::WriteHalf};
+use crate::log::debug2format;
 
 #[cfg(feature = "std")]
 use std::os::fd::OwnedFd;
@@ -96,7 +97,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     where
         Method: Serialize + Debug,
     {
-        trace!("connection {}: sending call: {:?}", self.id, call);
+        trace!(
+            "connection {}: sending call: {:?}",
+            self.id,
+            debug2format(call)
+        );
         #[cfg(feature = "std")]
         {
             self.write(call, fds).await
@@ -121,7 +126,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     where
         Params: Serialize + Debug,
     {
-        trace!("connection {}: sending reply: {:?}", self.id, reply);
+        trace!(
+            "connection {}: sending reply: {:?}",
+            self.id,
+            debug2format(reply)
+        );
         #[cfg(feature = "std")]
         {
             self.write(reply, fds).await
@@ -148,7 +157,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     where
         ReplyError: Serialize + Debug,
     {
-        trace!("connection {}: sending error: {:?}", self.id, error);
+        trace!(
+            "connection {}: sending error: {:?}",
+            self.id,
+            debug2format(error)
+        );
         #[cfg(feature = "std")]
         {
             self.write(error, fds).await
@@ -174,7 +187,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     where
         Method: Serialize + Debug,
     {
-        trace!("connection {}: enqueuing call: {:?}", self.id, call);
+        trace!(
+            "connection {}: enqueuing call: {:?}",
+            self.id,
+            debug2format(call)
+        );
         #[cfg(feature = "std")]
         {
             self.enqueue(call, fds)

@@ -726,7 +726,11 @@ where
     where
         T: Serialize + ?Sized + Debug,
     {
-        trace!("connection {}: enqueuing: {:?}", self.id(), value);
+        trace!(
+            "connection {}: enqueuing: {:?}",
+            self.id(),
+            crate::log::debug2format(value)
+        );
         #[cfg(all(feature = "std", target_os = "macos"))]
         self.drain_held_fds();
         #[cfg(feature = "std")]

@@ -92,6 +92,7 @@ pub(crate) fn extract_doc_comments(attrs: &[Attribute]) -> Vec<String> {
 pub(crate) fn remove_lifetimes_from_type(ty: &Type) -> Type {
     match ty {
         Type::Reference(type_ref) => Type::Reference(syn::TypeReference {
+            attrs: type_ref.attrs.clone(),
             and_token: type_ref.and_token,
             lifetime: None,
             mutability: type_ref.mutability,
@@ -130,7 +131,7 @@ pub(crate) fn remove_lifetimes_from_type(ty: &Type) -> Type {
                     }
                     PathArguments::Parenthesized(args) => {
                         for input in &mut args.inputs {
-                            *input = remove_lifetimes_from_type(input);
+                            input.ty = remove_lifetimes_from_type(&input.ty);
                         }
                         if let syn::ReturnType::Type(_, ref mut output) = args.output {
                             **output = remove_lifetimes_from_type(output);
@@ -174,7 +175,7 @@ pub(crate) fn remove_lifetimes_from_type(ty: &Type) -> Type {
             Type::Paren(new_type_paren)
         }
         // For types that don't contain other types or lifetimes, return as-is
-        Type::BareFn(_)
+        Type::FnPtr(_)
         | Type::ImplTrait(_)
         | Type::Infer(_)
         | Type::Macro(_)
@@ -224,6 +225,7 @@ pub(crate) fn convert_type_lifetimes(ty: &Type, target_lifetime: &str) -> Type {
         Type::Reference(type_ref) => {
             let elem = convert_type_lifetimes(&type_ref.elem, target_lifetime);
             Type::Reference(syn::TypeReference {
+                attrs: type_ref.attrs.clone(),
                 and_token: type_ref.and_token,
                 lifetime: Some(target_lt),
                 mutability: type_ref.mutability,
@@ -257,6 +259,7 @@ pub(crate) fn convert_type_lifetimes(ty: &Type, target_lifetime: &str) -> Type {
         Type::Slice(type_slice) => {
             let elem = convert_type_lifetimes(&type_slice.elem, target_lifetime);
             Type::Slice(syn::TypeSlice {
+                attrs: type_slice.attrs.clone(),
                 bracket_token: type_slice.bracket_token,
                 elem: Box::new(elem),
             })
@@ -264,6 +267,7 @@ pub(crate) fn convert_type_lifetimes(ty: &Type, target_lifetime: &str) -> Type {
         Type::Array(type_array) => {
             let elem = convert_type_lifetimes(&type_array.elem, target_lifetime);
             Type::Array(syn::TypeArray {
+                attrs: type_array.attrs.clone(),
                 bracket_token: type_array.bracket_token,
                 elem: Box::new(elem),
                 semi_token: type_array.semi_token,
@@ -277,6 +281,7 @@ pub(crate) fn convert_type_lifetimes(ty: &Type, target_lifetime: &str) -> Type {
                 .map(|elem| convert_type_lifetimes(elem, target_lifetime))
                 .collect();
             Type::Tuple(syn::TypeTuple {
+                attrs: type_tuple.attrs.clone(),
                 paren_token: type_tuple.paren_token,
                 elems,
             })
