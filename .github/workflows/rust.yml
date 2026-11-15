@@ -163,10 +163,40 @@ jobs:
       - name: Check documentation build
         run: cargo --locked doc --all-features
 
-  semver-checks:
+  # The public API differs from one platform to the next: `zlink_core`'s `WriteHalf::write` and
+  # `WriteHalf::write_all` take the credentials to pass on Linux alone. So the API is compared with
+  # that of the latest release on each platform that the MSRV job builds for.
+  semver-checks-target:
+    name: semver-checks (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          [
+            x86_64-unknown-linux-gnu,
+            x86_64-apple-darwin,
+            x86_64-unknown-freebsd,
+            x86_64-unknown-netbsd,
+          ]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Check semver
         uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          rust-target: ${{ matrix.target }}
+          # The action keys its cache of the released API by job, and not by target.
+          prefix-key: ${{ matrix.target }}
+
+  # The one check for the branch protection of `main` to require, so that the platforms above can
+  # change without the protection having to. It runs whatever came of their jobs: a job that needs
+  # a failed one is skipped otherwise, which the protection takes for a pass.
+  semver-checks:
+    if: always()
+    needs: semver-checks-target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that the API passed on every platform
+        run: |
+          [ "${{ needs.semver-checks-target.result }}" = success ]
