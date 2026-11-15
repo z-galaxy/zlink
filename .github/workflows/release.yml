@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
       - &checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false

@@ -22,7 +22,7 @@ jobs:
       RUSTFLAGS: -D warnings
       MSRV: 1.88.0
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.MSRV }}
@@ -40,7 +40,7 @@ jobs:
       RUST_BACKTRACE: full
       RUST_LOG: trace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           # We use some nightly fmt options.
@@ -67,7 +67,7 @@ jobs:
       RUST_BACKTRACE: full
       RUST_LOG: trace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -86,7 +86,7 @@ jobs:
       RUST_BACKTRACE: full
       RUST_LOG: trace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -114,7 +114,7 @@ jobs:
       RUST_BACKTRACE: full
       RUST_LOG: trace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -135,7 +135,7 @@ jobs:
       RUST_BACKTRACE: full
       RUST_LOG: trace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
@@ -155,7 +155,7 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -167,6 +167,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Check semver
         uses: obi1kenobi/cargo-semver-checks-action@v2
