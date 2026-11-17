@@ -84,8 +84,8 @@ function check_formatting() {
 }
 
 function check_clippy() {
-    hook_info "🔍 Running 'cargo clippy -- -D warnings'"
-    cargo clippy -- -D warnings \
+    hook_info "🔍 Running 'cargo clippy --all-targets -- -D warnings'"
+    cargo clippy --all-targets -- -D warnings \
         && hook_success "Clippy detected no issues" \
         || hook_failure "Cargo clippy detected errors."
 }
