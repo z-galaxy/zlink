@@ -49,9 +49,10 @@ With the `handover` feature, `Connection::hand_over` gives a connection up as a
 credentials that came with it, and what was to be written to it and wasn't yet, along with their
 file descriptors. [zoter] stores the hand-overs of a service, and its state, in the file descriptor
 store that systemd keeps for the service across its restarts, and gives them back in the next
-instance, where `Connection::take_over` goes on with each. Taking the file descriptors that systemd
-passes changes the environment, which no other thread may read or write meanwhile, so the service
-takes them before its runtime starts any:
+instance, where `Connection::take_over` goes on with each. zoter errors convert to
+`zlink::Error::Handover`, so `?` works in functions returning `zlink::Result`. Taking the file
+descriptors that systemd passes changes the environment, which no other thread may read or write
+meanwhile, so the service takes them before its runtime starts any:
 
 ```rust,noplayground
 use std::time::Duration;

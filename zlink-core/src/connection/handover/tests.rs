@@ -453,6 +453,35 @@ fn kind(restored: crate::Result<Handover>) -> io::ErrorKind {
     }
 }
 
+/// `?` converts the error of a zoter result into `Error::Handover`, which keeps it as its source
+/// and shows its message.
+#[test]
+fn zoter_error_converts() {
+    use core::error::Error as _;
+
+    fn fails() -> crate::Result<()> {
+        Err(zoter::Error::NoManager)?;
+
+        Ok(())
+    }
+
+    let error = fails().unwrap_err();
+    assert!(
+        matches!(error, Error::Handover(zoter::Error::NoManager)),
+        "{error:?}"
+    );
+    let source = error.source().unwrap().downcast_ref::<zoter::Error>();
+    assert!(
+        matches!(source, Some(zoter::Error::NoManager)),
+        "{source:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(&zoter::Error::NoManager.to_string())
+    );
+}
+
 /// The two ends of a pipe, the write end as a file descriptor.
 fn pipe() -> (PipeReader, OwnedFd) {
     let (read, write) = std::io::pipe().unwrap();

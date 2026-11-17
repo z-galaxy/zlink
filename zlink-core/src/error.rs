@@ -19,6 +19,11 @@ pub enum Error {
     /// An I/O error.
     #[cfg(feature = "std")]
     Io(std::io::Error),
+    /// An error from zoter while creating a store, taking over, or handing over.
+    ///
+    /// Available only on Linux with the `handover` feature.
+    #[cfg(all(feature = "handover", target_os = "linux"))]
+    Handover(zoter::Error),
     /// Unexpected end of file/stream.
     UnexpectedEof,
     /// An error occurred while parsing IDL.
@@ -47,6 +52,8 @@ impl core::error::Error for Error {
             Error::Json(e) => Some(e),
             #[cfg(feature = "std")]
             Error::Io(e) => Some(e),
+            #[cfg(all(feature = "handover", target_os = "linux"))]
+            Error::Handover(e) => Some(e),
             Error::InvalidUtf8(e) => Some(e),
             Error::InvalidName(e) => Some(e),
             #[cfg(feature = "idl-parse")]
@@ -82,6 +89,13 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[cfg(all(feature = "handover", target_os = "linux"))]
+impl From<zoter::Error> for Error {
+    fn from(e: zoter::Error) -> Self {
+        Error::Handover(e)
+    }
+}
+
 #[cfg(feature = "idl-parse")]
 impl From<zlink_idl::parse::Error> for Error {
     fn from(e: zlink_idl::parse::Error) -> Self {
@@ -102,6 +116,8 @@ impl core::fmt::Display for Error {
             Error::Json(e) => write!(f, "Error serializing or deserializing to/from JSON: {e}"),
             #[cfg(feature = "std")]
             Error::Io(e) => write!(f, "I/O error: {e}"),
+            #[cfg(all(feature = "handover", target_os = "linux"))]
+            Error::Handover(e) => write!(f, "Hand-over error: {e}"),
             Error::UnexpectedEof => write!(f, "Unexpected end of file/stream"),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(e) => write!(f, "IDL parse error: {e}"),
@@ -131,6 +147,8 @@ impl defmt::Format for Error {
             }
             #[cfg(feature = "std")]
             Error::Io(_) => defmt::write!(fmt, "I/O error"),
+            #[cfg(all(feature = "handover", target_os = "linux"))]
+            Error::Handover(_) => defmt::write!(fmt, "Hand-over error"),
             Error::UnexpectedEof => defmt::write!(fmt, "Unexpected end of file/stream"),
             #[cfg(feature = "idl-parse")]
             Error::IdlParse(_) => defmt::write!(fmt, "IDL parse error"),
