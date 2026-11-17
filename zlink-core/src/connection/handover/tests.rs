@@ -273,7 +273,7 @@ fn record_saved_into_memory_of_its_length() {
     let len = handover.saved_len().unwrap();
     for len in [len - 1, len + 1] {
         let error = handover.save(&mut vec![0; len]).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(io::Error::from(error).kind(), io::ErrorKind::InvalidInput);
     }
 }
 

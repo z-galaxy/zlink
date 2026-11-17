@@ -130,10 +130,11 @@ where
 /// [`Connection::take_over`]).
 ///
 /// It goes to the other process as a record of bytes and file descriptors, through zoter's
-/// [`Save`](zoter::Save) and [`Restore`](zoter::Restore), as an item of a [`zoter::Handover`]. A
-/// server gives its connections back between method calls as it stops, for that (see
-/// `Server::run_until`). The record is a JSON object of zlink's own, which later versions of zlink
-/// read too, and which zlink refuses where its format is of a later version.
+/// [`Save`](zoter::Save) and [`Restore`](zoter::Restore), as an item of a hand-over that
+/// [`zoter::Store::hand_over`] stores. A server gives its connections back between method calls as
+/// it stops, for that (see `Server::run_until`). The record is a JSON object of zlink's own, which
+/// later versions of zlink read too, and which zlink refuses where its format is of a later
+/// version.
 #[derive(Debug)]
 pub struct Handover {
     /// The socket of the connection.
@@ -194,18 +195,19 @@ impl zoter::Save for Handover {
 
     /// Write the record of the hand-over into `dest`, which is [`Save::saved_len`] bytes long.
     ///
-    /// It fails with [`io::ErrorKind::InvalidInput`] for a `dest` of another length.
+    /// It fails with [`zoter::Error::Io`] of [`io::ErrorKind::InvalidInput`] for a `dest` of
+    /// another length.
     ///
     /// [`Save::saved_len`]: zoter::Save::saved_len
-    fn save(&self, dest: &mut [u8]) -> io::Result<()> {
+    fn save(&self, dest: &mut [u8]) -> zoter::Result<()> {
         let mut rest = &mut *dest;
         // Writing the record fails only where `rest` runs out.
         let written = serde_json::to_writer(&mut rest, &self.record());
         if written.is_err() || !rest.is_empty() {
-            return Err(io::Error::new(
+            return Err(zoter::Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "the memory is not as long as the record",
-            ));
+            )));
         }
 
         Ok(())

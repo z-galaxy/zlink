@@ -86,7 +86,13 @@ async fn run(
     mut passed: Passed,
     sigterm: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = Store::from_env("greeter")?;
+    let mut store = match Store::from_env("greeter", &passed) {
+        Ok(store) => Some(store),
+        // systemd takes no notifications from the service, as when it doesn't run it, so there
+        // is no store to restart through.
+        Err(zoter::Error::NoManager) => None,
+        Err(e) => return Err(e.into()),
+    };
     let restored = match &mut store {
         Some(store) => store.take_over(&mut passed)?,
         None => None,
@@ -101,14 +107,11 @@ async fn run(
             .collect::<zlink::Result<Vec<_>>>()?;
         server = server.with_connections(connections);
     }
-    if let Some(store) = &store {
-        store.notifier().notify("READY=1")?;
-    }
 
     let Stopped { mut connections, .. } = server.run_until(sigterm).await?;
-    // Without a store that takes a hand-over, the service shuts down as it does without systemd,
-    // giving its clients a second at most to read the rest of their replies.
-    let Some(handover) = store.and_then(|store| store.handover().ok()) else {
+    // Without a store, the service shuts down as it does without systemd, giving its clients a
+    // second at most to read the rest of their replies.
+    let Some(store) = store else {
         let flushes = async {
             for conn in &mut connections {
                 let _ = conn.flush().await;
@@ -125,15 +128,19 @@ async fn run(
         .map(Connection::hand_over)
         .collect::<zlink::Result<Vec<Handover>>>()?;
     // Each connection goes under an id of its own, which the state could refer to, if it had to.
-    handover.store(&[][..], (0..).zip(&handovers))?;
+    store.hand_over(&[][..], (0..).zip(&handovers))?;
 
     Ok(())
 }
 ```
 
-The unit of the service sets `FileDescriptorStoreMax=` for systemd to keep a store, and a socket
-unit has systemd keep the socket that the service listens on, and the clients that connect while no
-instance runs. zoter's documentation tells more.
+Taking over also tells systemd that the service has started, whether or not anything was handed
+over, so the service doesn't. The unit of the service sets `FileDescriptorStoreMax=` for systemd to
+keep a store, and a socket unit has systemd keep the socket that the service listens on, and the
+clients that connect while no instance runs. The unit of the service has `Requires=` on the socket
+unit, as systemd would otherwise start the service without the socket where the socket unit isn't
+active, and `Store::from_env` fails with `zoter::Error::NoSocket` for a service that has no socket.
+zoter's documentation tells more.
 
 The connections whose replies still stream (methods called with `more`), and those that were
 upgraded to another protocol, are closed as the server stops: nothing generic can carry on with

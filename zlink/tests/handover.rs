@@ -26,7 +26,10 @@ use zlink::{
     connection::Handover,
     introspect::{self, CustomType},
 };
-use zoter::{Restore, Save, Store, testing::Manager};
+use zoter::{
+    Restore, Save, Store,
+    testing::{self, Manager},
+};
 
 #[cfg(all(feature = "smol", not(feature = "tokio")))]
 use zlink::smol::unix::Stream;
@@ -78,7 +81,7 @@ async fn connections_go_on_in_the_next_instance() {
         .collect();
     let items = (0..).zip(&handovers);
     let state = service.0.count.get().to_le_bytes();
-    let stored = first.handover().unwrap().store(&state[..], items).unwrap();
+    let stored = first.hand_over(&state[..], items).unwrap();
     assert_eq!(stored.items(), 1);
     drop(handovers);
 
@@ -248,12 +251,7 @@ fn large_text() -> String {
 
 /// A store of the manager, under the key that the instances hand over under.
 fn store(manager: &Manager) -> Store {
-    Store::new(
-        manager.notifier().unwrap(),
-        "counter",
-        Some(manager.store_max()),
-    )
-    .unwrap()
+    testing::store(manager.notify_socket(), "counter", manager.store_max()).unwrap()
 }
 
 #[derive(Debug, Serialize, Deserialize)]

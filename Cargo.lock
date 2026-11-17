@@ -2357,9 +2357,8 @@ dependencies = [
 
 [[package]]
 name = "zoter"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d34853427c19816ddbaf0c4b2c4409156a9e27bd9f22d77cfad0803734fd12f"
+version = "0.2.0"
+source = "git+https://github.com/z-galaxy/zoter?rev=4a89183d62ed13ae3278e38c0565de6b98122707#4a89183d62ed13ae3278e38c0565de6b98122707"
 dependencies = [
  "libc",
  "rustix",
