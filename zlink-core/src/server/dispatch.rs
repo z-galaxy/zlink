@@ -420,8 +420,8 @@ mod tests {
         );
         const SAME: bool = same_name(varlink_service::DESCRIPTION, varlink_service::DESCRIPTION);
         const DIFFERENT: bool = same_name(varlink_service::DESCRIPTION, OTHER);
-        assert!(SAME);
-        assert!(!DIFFERENT);
+        const { assert!(SAME) };
+        const { assert!(!DIFFERENT) };
     }
 
     fn call(json: &str) -> Call<Parsed<'_>> {
