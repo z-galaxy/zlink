@@ -105,8 +105,13 @@ name = "resolved"
 required-features = ["proxy", "zruntime"]
 
 # The tests of the hand-over restart services through zoter's fake service manager.
+#
+# FIXME: Drop `git` and `rev` once zoter 0.2.0 is on crates.io: `cargo publish` ignores them, but
+# it needs that release to be out.
 [target.'cfg(target_os = "linux")'.dev-dependencies.zoter]
-version = "0.1.0"
+version = "0.2.0"
+git = "https://github.com/z-galaxy/zoter"
+rev = "4a89183d62ed13ae3278e38c0565de6b98122707"
 features = ["testing"]
 
 # And take a connection over on a local zruntime runtime. The examples of the book's chapter on

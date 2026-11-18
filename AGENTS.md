@@ -25,7 +25,7 @@ cargo test -p zlink-core --no-default-features --features idl-parse,proxy,defmt
 cargo +nightly fmt --all
 
 # Run clippy with warnings as errors
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 
 # Check all features compile
 cargo check --all-features

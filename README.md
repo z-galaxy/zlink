@@ -443,7 +443,8 @@ enum ProcessError {
   used.
 - `handover`: Enable handing connections over to other processes, such as the next instance of a
   service that restarts under systemd, through [zoter](https://github.com/z-galaxy/zoter). It
-  builds nothing on platforms other than Linux.
+  builds nothing on platforms other than Linux. zoter errors convert to `Error::Handover`, so `?`
+  works in functions returning `zlink::Result`.
 
 The runtime features are additive: several can be enabled at the same time, with the
 runtime-specific API (currently `block_on` and the `unix`, `byte_stream` and `notified` modules) of

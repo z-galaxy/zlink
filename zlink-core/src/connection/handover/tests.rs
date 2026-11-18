@@ -273,7 +273,7 @@ fn record_saved_into_memory_of_its_length() {
     let len = handover.saved_len().unwrap();
     for len in [len - 1, len + 1] {
         let error = handover.save(&mut vec![0; len]).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(io::Error::from(error).kind(), io::ErrorKind::InvalidInput);
     }
 }
 
@@ -451,6 +451,35 @@ fn kind(restored: crate::Result<Handover>) -> io::ErrorKind {
         Err(Error::Io(e)) => e.kind(),
         other => panic!("{other:?}"),
     }
+}
+
+/// `?` converts the error of a zoter result into `Error::Handover`, which keeps it as its source
+/// and shows its message.
+#[test]
+fn zoter_error_converts() {
+    use core::error::Error as _;
+
+    fn fails() -> crate::Result<()> {
+        Err(zoter::Error::NoManager)?;
+
+        Ok(())
+    }
+
+    let error = fails().unwrap_err();
+    assert!(
+        matches!(error, Error::Handover(zoter::Error::NoManager)),
+        "{error:?}"
+    );
+    let source = error.source().unwrap().downcast_ref::<zoter::Error>();
+    assert!(
+        matches!(source, Some(zoter::Error::NoManager)),
+        "{source:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(&zoter::Error::NoManager.to_string())
+    );
 }
 
 /// The two ends of a pipe, the write end as a file descriptor.

@@ -80,7 +80,7 @@ cargo +nightly fmt --all
 and clippy doesn't see anything wrong with the code:
 
 ```sh
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
 
 Please note that there are times when clippy is wrong and you know what you are doing. In such

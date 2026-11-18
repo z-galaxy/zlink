@@ -76,7 +76,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Catch common mistakes and unwrap calls
         run: |
-          cargo --locked clippy --target ${{ matrix.target }} -- -D warnings
+          cargo --locked clippy --all-targets --target ${{ matrix.target }} -- -D warnings
 
   linux_test:
     runs-on: ubuntu-latest
