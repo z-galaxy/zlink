@@ -1568,7 +1568,6 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
- "tokio",
  "zlink",
  "zlink-codegen",
 ]
