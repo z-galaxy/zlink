@@ -1,6 +1,6 @@
 [package]
 name = "zlink-zruntime"
-version = "0.9.0"
+version = "0.9.1"
 description = "zlink library for the zruntime runtime"
 edition.workspace = true
 rust-version.workspace = true
@@ -28,7 +28,7 @@ defmt = ["zlink-core/defmt"]
 futures-core = { version = "0.3.34", default-features = false, optional = true }
 futures-util = { version = "0.3.31", default-features = false, features = ["io"] }
 pin-project-lite = { version = "0.2.16", optional = true }
-zlink-core = { path = "../zlink-core", version = "=0.9.0", default-features = false, features = ["std"] }
+zlink-core = { path = "../zlink-core", version = "=0.9.1", default-features = false, features = ["std"] }
 zruntime = { version = "0.2.3", default-features = false, features = [
     "runtime",
     "helper",
